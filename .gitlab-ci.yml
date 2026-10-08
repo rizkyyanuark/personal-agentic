@@ -95,7 +95,7 @@ ssh_bridge:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == $CI_PROJECT_ID && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "codex/dev-prod-integration"'
       when: manual
-      allow_failure: true
+      allow_failure: false
 
 image_publish:
   extends: .image_rules
@@ -115,7 +115,7 @@ image_publish:
       umask 077
       test "$(uname -m)" = aarch64
       test "$(id -u)" = 1000
-      xz -d src/ci-artifacts/agentic-enterprise.xz
+      xz -dc src/ci-artifacts/agentic-enterprise.xz > src/ci-artifacts/agentic-enterprise
       chmod 755 src/ci-artifacts/agentic-enterprise
       export DOCKER_CONFIG="$(mktemp -d)"
       trap 'rm -rf "$DOCKER_CONFIG"' EXIT

@@ -270,7 +270,7 @@ Runtime libraries and the AGY executable are installed through the existing
 Dockerfile. Provider credentials and application state stay outside the image.
 
 `image_publish` is automatic only on protected `main`. The integration MR has
-an optional manual trial restricted to this same project's source branch;
+an explicit manual trial required for this same project's integration branch;
 other feature branches do not publish images.
 The result is tagged with the full commit SHA and records its registry digest.
 `image_smoke` uses that digest as its Docker-executor image and starts the actual
@@ -278,7 +278,8 @@ controller with disposable state. It checks backend/ONNX dynamic libraries,
 health, rejected authentication,
 owner login, workspace/cockpit responses, logout revocation, frontend bytes,
 the source AGY SVG hash and the bundled CLI. Production deployment is not part
-of these jobs. Optional MR publishing is not a release approval.
+of these jobs. MR publishing is not a release approval. Failed publishing stops
+the smoke job; the pipeline waits for the integration trial to be played.
 
 The host security configuration was explicitly approved on 2026-10-08.
 The template is `infra/gitlab-runner/image-runner.template.toml`, using
