@@ -181,14 +181,21 @@ with the authentication-token workflow before activation. The generated token
 stays on the server outside Git and logs. Global runner concurrency is one.
 The registration used
 [runner.template.toml](../infra/gitlab-runner/runner.template.toml), which
-limits the one job to one CPU, 1 GiB RAM and 3 GiB combined RAM/swap, and mounts
+limits the one job to one CPU, 1 GiB RAM and 4 GiB combined RAM/swap, and mounts
 only `/cache` as an explicitly configured volume. GitLab also supplies its
 Docker-managed `/builds` checkout volume. Cargo compiles one job at a time;
-backend CI allows two hours.
+backend CI allows two hours. The host already has 6 GiB swap. The trial raised
+the job's combined allowance from 3 to 4 GiB as Lance compilation approached
+the original limit; the physical RAM and CPU limits did not change.
 Backend CI overrides the Windows development `PROTOC` path with
 `/usr/bin/protoc`. Cargo dependencies and build output persist in this project's
 Docker-managed `/cache` volume, with the target directory scoped to Rust 1.94
 and ARM64. Neither cache path is committed to the repository.
+The backend job installs LLD and selects it through a container-local `cc`
+driver wrapper. Rust compile flags stay the same so existing dependency
+artifacts can be reused. The job links a small executable and prints its ELF
+linker metadata before running the full workspace suite. Verbose Cargo output
+shows which dependency artifacts are reused.
 Jobs use their own Docker network and remain unprivileged. The runner manager
 uses the current host's Docker socket; that socket is not mounted into
 job containers.
@@ -199,8 +206,10 @@ Its manifest includes `linux/arm64`. The template is for the three existing
 verification jobs; image publishing and production deployment require later
 configuration. After activation, require the real MR pipeline to complete
 successfully and record the runner ID, job results, architecture, and measured
-resource use before marking CI ready. Stop or pause this project's CI if the
-host shows sustained memory/I/O pressure or AGY becomes unresponsive. A
+resource use before marking CI ready. Check AGY responsiveness during builds:
+cancel the active project job and pause this project's runner if probes repeatedly
+exceed the existing four-second discovery timeout, a job is OOM-killed, or other
+workloads cannot be served. Pausing a runner alone does not stop an active job. A
 separate builder remains an option if measurements show this host is inadequate;
 no additional EC2 instance or upgrade is authorized for this trial.
 
@@ -211,8 +220,16 @@ override corrects that environment error. During the trial the AGY version probe
 continued to return successfully in under 0.2 seconds. CI readiness still
 requires the complete corrected pipeline to pass.
 
+Pipeline #13 passed frontend and SSH bridge checks, and completed backend source
+compilation, but GNU `ld` was killed with signal 9 while linking the test binary
+after approximately 48 minutes. Backend CI now uses LLD for that link step.
+This is still a bounded trial on the same EC2; a complete successful pipeline
+is required before CI is marked ready.
+
 Sources: [runner registration templates](https://docs.gitlab.com/runner/register/#register-with-a-configuration-template),
 [Docker executor](https://docs.gitlab.com/runner/executors/docker/).
+Linker references: [LLVM LLD](https://lld.llvm.org/) and
+[GCC linker selection](https://gcc.gnu.org/onlinedocs/gcc/Link-Options.html).
 
 ### Local Git connection
 
