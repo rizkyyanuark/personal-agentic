@@ -146,5 +146,44 @@ jobs remain pending. No production deploy job is included at this stage.
 Production service, DNS, deployment identity and image promotion remain later
 activation steps. Repository initialization does not deploy the application.
 
+### Local Git connection
+
+The repository remotes are `origin` (GitLab), `github` (the private downstream
+copy), and `upstream` (the original public GitHub project). The integration
+branch tracks `origin/codex/dev-prod-integration`. Develop and push to GitLab:
+
+```powershell
+git switch -c feature/my-change
+git push -u origin feature/my-change
+```
+
+Open a merge request in GitLab. Changes reach GitHub through the configured
+push mirror after synchronization; compare commit SHAs when checking a release.
+Do not use direct GitHub pushes as the normal development path.
+
+On the current Windows laptop, the GitLab SSH alias routes through the existing
+GitLab-server SSH connection to its loopback Git port. No additional inbound
+port was opened. A repository-scoped deploy key is used for Git access. Its
+private key remains encrypted; its unlock credential is protected with
+user-specific Windows DPAPI and ACLs. A local SSH helper reads that credential
+only for this GitLab alias and removes its temporary askpass file after use.
+These files live under the user's `.ssh` directory, outside the repository.
+Another laptop requires its own credential setup; the DPAPI file is not a
+portable repository secret.
+
+### Source verification
+
+The reconciled source passed web lint/format/build, 203 cockpit unit tests,
+12 workdir selection tests, and 24 Antigravity discovery tests. The Docker
+verification target built using matching cached Rust verification layers.
+A newly built platform image was also run with isolated fresh application
+state: health, authenticated state, root UI and AGY asset returned HTTP 200;
+unauthenticated state returned HTTP 401. The served AGY SVG hash matched the
+source file. The isolated smoke container was stopped after verification.
+
+`ssh-timeout.py` and `remote_watchdog.py` require actual configured runtime
+environments and remain manual checks. They are not generic CI jobs. Local
+verification does not substitute for successful GitLab runner execution.
+
 References: [GitLab deployment safety](https://docs.gitlab.com/ci/environments/deployment_safety/)
 and [GitLab container registry](https://docs.gitlab.com/user/packages/container_registry/).
