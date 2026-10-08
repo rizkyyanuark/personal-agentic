@@ -134,9 +134,18 @@ The private GitHub destination is
 The original `tirta-ir/personal-agentic-enterprise` remains the upstream source.
 
 GitLab is the canonical destination for development pushes and merge requests.
-GitHub is intended as a downstream push mirror, with divergent refs preserved.
-Do not edit the GitHub mirror independently. Repository access and mirroring
-must be configured and verified before claiming automatic synchronization.
+GitHub is an active downstream push mirror, with divergent refs preserved.
+Automatic synchronization was verified after pushing only to GitLab: both
+repositories reported commit `d8f0a84fc86e6d17f594d303296b1b89a727fa3b`.
+Do not edit the GitHub mirror independently.
+
+GitLab's protected `main` blocks direct pushes and force pushes. Only
+Maintainers can merge, and merging requires a successful pipeline. GitLab
+validated the initial CI configuration with no errors or warnings.
+
+[Draft merge request !1](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/merge_requests/1)
+proposes the reconciled development branch for `main`. It remains open for CI
+and review; no merge or production deployment has been performed.
 
 The initial `.gitlab-ci.yml` checks frontend/cockpit, Rust, and the SSH bridge.
 It requires a runner tagged `personal-agentic-ci`, without production Docker
@@ -153,8 +162,8 @@ copy), and `upstream` (the original public GitHub project). The integration
 branch tracks `origin/codex/dev-prod-integration`. Develop and push to GitLab:
 
 ```powershell
-git switch -c feature/my-change
-git push -u origin feature/my-change
+git switch -c codex/my-change
+git push -u origin codex/my-change
 ```
 
 Open a merge request in GitLab. Changes reach GitHub through the configured
