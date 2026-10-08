@@ -271,7 +271,9 @@ Removing unneeded symbols and compressing the binary reduced the transfer to
 existing Dockerfile, avoiding a second compilation of the Rust dependency tree.
 Normal Docker builds still compile source using the existing default stages.
 Runtime libraries and the AGY executable are installed through the existing
-Dockerfile. Provider credentials and application state stay outside the image.
+Dockerfile. The installer copy of AGY is removed in the same build step after
+installing `/usr/local/bin/agy`, keeping a single executable in that layer.
+Provider credentials and application state stay outside the image.
 
 `image_publish` is automatic only on protected `main`. The integration MR has
 an explicit manual trial required for this same project's integration branch;

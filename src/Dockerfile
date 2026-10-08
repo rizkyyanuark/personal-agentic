@@ -48,7 +48,7 @@ FROM debian:bookworm-slim AS platform
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl perl libssl3 libgomp1 git openssh-client && rm -rf /var/lib/apt/lists/* && useradd --create-home --uid 10001 agent && mkdir /data /workdir && chown agent:agent /data /workdir
 COPY scripts/install-onnx.sh /tmp/install-onnx.sh
 RUN bash /tmp/install-onnx.sh /usr/local/lib && ldconfig && rm /tmp/install-onnx.sh
-RUN curl -fsSL --compressed https://antigravity.google/cli/install.sh -o /tmp/install-agy.sh && bash /tmp/install-agy.sh && cp /root/.local/bin/agy /usr/local/bin/agy && chmod 755 /usr/local/bin/agy && rm -f /tmp/install-agy.sh
+RUN curl -fsSL --compressed https://antigravity.google/cli/install.sh -o /tmp/install-agy.sh && bash /tmp/install-agy.sh && cp /root/.local/bin/agy /usr/local/bin/agy && chmod 755 /usr/local/bin/agy && rm -f /root/.local/bin/agy /tmp/install-agy.sh
 ENV ORT_DYLIB_PATH=/usr/local/lib/libonnxruntime.so
 COPY --from=backend /usr/local/bin/agentic-enterprise /usr/local/bin/
 COPY --from=frontend /build/frontend/dist /app/frontend
