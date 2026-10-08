@@ -46,9 +46,9 @@ storage. Its origin is `3.222.143.253`. Both EC2 instances are ARM64
    files and dependency lockfiles; exclude local state, credentials and output.
    Verify AGY discovery and the current UI through the real application.
 2. Create a private personal-agentic project on this GitLab. Use GitLab as the
-   release source of truth; keep GitHub as an upstream remote if needed. Protect
+   release source of truth; keep the private GitHub copy as a downstream mirror. Protect
    `main`, require merge requests, and restrict who can push release tags.
-3. Develop on `feature/*` branches. Merge-request pipelines run Rust format and
+3. Develop on `codex/*` branches. Merge-request pipelines run Rust format and
    workspace tests, frontend lint and build, and relevant integration checks.
    These pipelines receive no production SSH key or production credentials.
 4. After a reviewed merge to `main`, build the platform image for ARM64 and push
@@ -121,8 +121,8 @@ as an independent production dependency or copy its credentials into CI.
 
 ## Activation order
 
-Source reconciliation → private GitLab project → isolated build runner →
-registry authentication/routing → CI checks and ARM64 image proof → fresh
+Source reconciliation → private GitLab project → bounded project runner →
+real MR verification → registry authentication/routing and ARM64 image proof → fresh
 production bootstrap → DNS/TLS → manual production deployment → real app proof.
 
 ## Repository initialization
@@ -148,9 +148,9 @@ proposes the reconciled development branch for `main`. It remains open for CI
 and review; no merge or production deployment has been performed.
 
 The initial `.gitlab-ci.yml` checks frontend/cockpit, Rust, and the SSH bridge.
-It requires a runner tagged `personal-agentic-ci`, without production Docker
-socket access or production credentials. Until such a runner is registered,
-jobs remain pending. No production deploy job is included at this stage.
+Runner #3 is registered and active with tag `personal-agentic-ci`. Job containers
+receive neither the host Docker socket nor production credentials. No production
+deploy job is included at this stage.
 
 Production service, DNS, deployment identity and image promotion remain later
 activation steps. Repository initialization does not deploy the application.
@@ -167,18 +167,28 @@ free physical memory during the check.
 The selected trial uses application EC2 `34.196.37.78` without changing its
 instance size. At the second inspection it had 1,179 MiB available memory,
 4,929 MiB unused swap, 24 GiB free disk, and approximately 98% idle CPU.
-Create a separate manager/configuration for this project; retain the existing
-runner and its other projects. Use no production credentials or application
-data mounts. Normal DNS, HTTP and HTTPS egress is needed for Git and packages.
+The separate manager `personal-agentic-ci-runner` uses private configuration in
+`/srv/personal-agentic-ci/config`. Its token file has root-only permissions.
+The existing runner and its other projects are retained. This project has no
+CI secret variables and the EC2 has no IAM instance profile. Jobs have no
+production credentials or application data mounts. Normal DNS, HTTP and HTTPS
+egress is needed for Git and packages.
 
-Create a project runner locked to personal-agentic with tag
+Runner #3 is locked to personal-agentic with tag
 `personal-agentic-ci`, `run_untagged=false`, and `access_level=not_protected`
-so the current integration MR can run. Use the runner authentication-token
-workflow; keep the generated token on the builder outside Git and logs.
-Set global runner concurrency to one. Initially create it paused, then register with
+so the current integration MR can run. It was created paused and registered
+with the authentication-token workflow before activation. The generated token
+stays on the server outside Git and logs. Global runner concurrency is one.
+The registration used
 [runner.template.toml](../infra/gitlab-runner/runner.template.toml), which
-limits the one job to one CPU, 768 MiB RAM and 3 GiB combined RAM/swap, and mounts
-only its cache. Cargo compiles one job at a time; backend CI allows two hours.
+limits the one job to one CPU, 1 GiB RAM and 3 GiB combined RAM/swap, and mounts
+only `/cache` as an explicitly configured volume. GitLab also supplies its
+Docker-managed `/builds` checkout volume. Cargo compiles one job at a time;
+backend CI allows two hours.
+Backend CI overrides the Windows development `PROTOC` path with
+`/usr/bin/protoc`. Cargo dependencies and build output persist in this project's
+Docker-managed `/cache` volume, with the target directory scoped to Rust 1.94
+and ARM64. Neither cache path is committed to the repository.
 Jobs use their own Docker network and remain unprivileged. The runner manager
 uses the current host's Docker socket; that socket is not mounted into
 job containers.
@@ -193,6 +203,13 @@ resource use before marking CI ready. Stop or pause this project's CI if the
 host shows sustained memory/I/O pressure or AGY becomes unresponsive. A
 separate builder remains an option if measurements show this host is inadequate;
 no additional EC2 instance or upgrade is authorized for this trial.
+
+The first real MR pipeline, #12, passed frontend and SSH bridge verification. Backend
+compilation failed because the Windows `PROTOC` default selected a nonexistent
+executable in Linux, despite `protobuf-compiler` being installed. The Linux CI
+override corrects that environment error. During the trial the AGY version probe
+continued to return successfully in under 0.2 seconds. CI readiness still
+requires the complete corrected pipeline to pass.
 
 Sources: [runner registration templates](https://docs.gitlab.com/runner/register/#register-with-a-configuration-template),
 [Docker executor](https://docs.gitlab.com/runner/executors/docker/).
