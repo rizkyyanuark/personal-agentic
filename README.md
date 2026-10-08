@@ -50,6 +50,12 @@ ARM64 workspace EC2. Verification jobs have CPU, memory, and swap limits;
 the full merge-request pipeline has passed. Production deployment is a
 separate setup step.
 
+The pipeline also checks registry authentication and exports the verified ARM64
+binary/frontend for image packaging. Image build/publish and digest smoke jobs
+are prepared; activating their rootless builder requires approval of the
+dedicated host security profiles described in the workflow. The current
+verification runner retains its existing security settings.
+
 ## License
 
 Original project code is licensed under the Apache License 2.0. Third-party components retain their respective licenses; see [LICENSE](LICENSE) and [upstream notices](src/UPSTREAM.md).

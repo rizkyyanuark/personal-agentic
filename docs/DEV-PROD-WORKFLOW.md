@@ -244,6 +244,72 @@ Sources: [runner registration templates](https://docs.gitlab.com/runner/register
 Linker references: [LLVM LLD](https://lld.llvm.org/) and
 [GCC linker selection](https://gcc.gnu.org/onlinedocs/gcc/Link-Options.html).
 
+### Registry and ARM64 image preparation
+
+The existing GitLab host provides `https://registry.tugasakhir.space`.
+Its HTTPS `/v2/` endpoint returned the expected HTTP 401 Bearer challenge on
+2026-10-08; GitLab's HTTPS sign-in endpoint returned HTTP 200. No registry service
+was installed on the workspace host. The workspace host remains the builder
+and intended production host; GitLab stores source and published images.
+
+`registry_auth` exercises the registry through the real GitLab job credential.
+It checks unauthenticated access, the trusted GitLab authentication endpoint,
+project-scoped `pull,push` permission, and an authenticated registry request.
+Credentials never enter its output or artifacts. This check alone does not
+prove that an image was uploaded.
+
+Verification jobs export their checked frontend and a stripped native ARM64
+controller binary. The image job selects `frontend-ci` and `backend-ci` in the
+existing Dockerfile, avoiding a second compilation of the Rust dependency tree.
+Normal Docker builds still compile source using the existing default stages.
+Runtime libraries and the AGY executable are installed through the existing
+Dockerfile. Provider credentials and application state stay outside the image.
+
+`image_publish` is automatic only on protected `main`. The integration MR has
+an optional manual trial; other feature branches do not publish images.
+The result is tagged with the full commit SHA and records its registry digest.
+`image_smoke` uses that digest as its Docker-executor image and starts the actual
+controller with disposable state. It verifies health, rejected authentication,
+owner login, workspace/cockpit responses, logout revocation, frontend bytes,
+the source AGY SVG hash and the bundled CLI. Production deployment is not part
+of these jobs. Optional MR publishing is not a release approval.
+
+Image runner activation is pending approval of its host security configuration.
+The proposed template is `infra/gitlab-runner/image-runner.template.toml`, using
+the pinned BuildKit 0.34.0 rootless image, UID 1000, no host Docker socket,
+no production state mounts, and the existing 1 CPU/1 GiB/4 GiB combined limits.
+Register it in the existing manager with global `concurrent = 1`, so verification
+and packaging cannot run simultaneously. The verification runner's seccomp and
+AppArmor settings remain unchanged; its image allowlist additionally admits only
+this project's platform digests for the smoke job.
+
+Default Docker confinement rejected the rootless namespace probe. The proposed
+dedicated profiles preserve the default seccomp rules except for `clone`,
+`unshare`, `mount`, `umount2`, `setns`, and `pivot_root`; AppArmor permits those
+builder operations while retaining sensitive `/proc` and `/sys` write denials.
+Neither profile is unconfined. The seccomp baseline was downloaded from
+`moby/profiles/main/seccomp/default.json` on 2026-10-08; record/review the baseline
+against the host's Docker 29.7.2 before activation. The profile files and runner
+template are reviewable proposals, not proof of working builds. Automatic
+approval review rejected loading the persistent AppArmor profile without
+explicit approval of these settings and their impact on the shared host.
+No new profile was loaded and no image runner was registered during preparation.
+
+After approval, load the host AppArmor profile and put the seccomp JSON under
+the manager's existing root-private configuration mount at
+`/etc/gitlab-runner/security/buildkit-seccomp.json`. Runner 19.2.1 reads that JSON
+inside the manager (`seccomp=/absolute/path`, with `=`); AppArmor resolves on
+the Docker host. Prove namespace startup and a small real build first, then
+register the project-only runner with tag `personal-agentic-image`. Prove the
+manual MR publish and digest smoke before considering a merge to `main`.
+Keep registry auth files in temporary job storage and remove them on exit.
+Before protecting the image runner for release-only execution, remove the MR
+trial rule after its proof. Never give unreviewed MR jobs a host Docker socket.
+
+References: [GitLab BuildKit](https://docs.gitlab.com/ci/docker/using_buildkit/),
+[dotenv variables](https://docs.gitlab.com/ci/variables/dotenv_variables/),
+[BuildKit rootless](https://github.com/moby/buildkit/blob/master/docs/rootless.md).
+
 ### Local Git connection
 
 The repository remotes are `origin` (GitLab), `github` (the private downstream

@@ -7,6 +7,8 @@ workflow:
 
 stages:
   - verify
+  - image
+  - smoke
 
 default:
   tags:
@@ -26,6 +28,12 @@ frontend:
     - npm ci --no-audit --no-fund
     - npm run check
     - node --experimental-strip-types --test frontend/tests/cockpit-workspace.test.mjs
+    - mkdir -p ci-artifacts
+    - cp -a frontend/dist ci-artifacts/frontend
+  artifacts:
+    expire_in: 7 days
+    paths:
+      - src/ci-artifacts/frontend/
 
 backend:
   stage: verify
@@ -56,6 +64,21 @@ backend:
     - cd src
     - cargo fmt --all --check
     - cargo test --workspace --locked --verbose
+    - cargo build --locked --bin agentic-enterprise --verbose
+    - mkdir -p ci-artifacts
+    - strip --strip-debug --output=ci-artifacts/agentic-enterprise "$CARGO_TARGET_DIR/debug/agentic-enterprise"
+    - chmod 755 ci-artifacts/agentic-enterprise
+    - du -h ci-artifacts/agentic-enterprise
+  artifacts:
+    expire_in: 7 days
+    paths:
+      - src/ci-artifacts/agentic-enterprise
+
+registry_auth:
+  stage: verify
+  image: node:22-bookworm-slim
+  script:
+    - node infra/ci/registry-check.mjs
 
 ssh_bridge:
   stage: verify
@@ -65,3 +88,79 @@ ssh_bridge:
     - apt-get install -y --no-install-recommends git
   script:
     - python src/backend/tests/antigravity_skills.py
+
+.image_rules:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "codex/dev-prod-integration"'
+      when: manual
+      allow_failure: true
+
+image_publish:
+  extends: .image_rules
+  stage: image
+  tags:
+    - personal-agentic-image
+  image:
+    name: moby/buildkit@sha256:65eca3c01cd1180c8f64565c4e3c5983af5145818b0e6fa863385d099eb73855
+    entrypoint: [""]
+  timeout: 45m
+  resource_group: arm64-image
+  variables:
+    BUILDKITD_FLAGS: --oci-worker-no-process-sandbox --oci-worker-snapshotter=native --config /tmp/personal-agentic-buildkit.toml
+  script:
+    - |
+      set -eu
+      umask 077
+      test "$(uname -m)" = aarch64
+      test "$(id -u)" = 1000
+      export DOCKER_CONFIG="$(mktemp -d)"
+      trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+      registry_auth=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
+      printf '{"auths":{"%s":{"auth":"%s"}}}\n' "$CI_REGISTRY" "$registry_auth" > "$DOCKER_CONFIG/config.json"
+      unset registry_auth
+      printf '[worker.oci]\nmax-parallelism = 1\n' > /tmp/personal-agentic-buildkit.toml
+      buildctl-daemonless.sh build \
+        --frontend dockerfile.v0 \
+        --local context=src --local dockerfile=src \
+        --opt target=platform --opt platform=linux/arm64 \
+        --opt build-arg:FRONTEND_SOURCE=frontend-ci \
+        --opt build-arg:BACKEND_SOURCE=backend-ci \
+        --opt label:org.opencontainers.image.revision="$CI_COMMIT_SHA" \
+        --opt label:org.opencontainers.image.source="$CI_PROJECT_URL" \
+        --import-cache type=registry,ref="$CI_REGISTRY_IMAGE/cache:$CI_COMMIT_REF_SLUG" \
+        --export-cache type=registry,ref="$CI_REGISTRY_IMAGE/cache:$CI_COMMIT_REF_SLUG",mode=min \
+        --output type=image,name="$CI_REGISTRY_IMAGE/platform:$CI_COMMIT_SHA",push=true \
+        --metadata-file image-metadata.json
+      image_digest=$(sed -n 's/.*"containerimage.digest": "\(sha256:[0-9a-f]\{64\}\)".*/\1/p' image-metadata.json)
+      test "${#image_digest}" = 71
+      svg_digest=$(sha256sum src/frontend/public/harnesses/antigravity.svg | cut -d ' ' -f 1)
+      printf 'TESTED_IMAGE=%s/platform@%s\nSMOKE_EXPECTED_AGY_SHA256=%s\n' "$CI_REGISTRY_IMAGE" "$image_digest" "$svg_digest" > image.env
+      printf 'Published ARM64 image: %s/platform@%s\n' "$CI_REGISTRY_IMAGE" "$image_digest"
+  artifacts:
+    expire_in: 7 days
+    paths:
+      - image-metadata.json
+      - image.env
+    reports:
+      dotenv: image.env
+
+image_smoke:
+  stage: smoke
+  image:
+    name: $TESTED_IMAGE
+    entrypoint: [""]
+  needs:
+    - job: image_publish
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "codex/dev-prod-integration"'
+  timeout: 10m
+  script:
+    - bash infra/ci/smoke-image.sh > image-smoke.json
+    - cat image-smoke.json
+  artifacts:
+    expire_in: 7 days
+    paths:
+      - image-smoke.json

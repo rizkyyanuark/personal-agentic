@@ -1,5 +1,8 @@
 # syntax=docker/dockerfile:1
-FROM node:22-bookworm-slim AS frontend
+ARG FRONTEND_SOURCE=frontend-build
+ARG BACKEND_SOURCE=backend-build
+
+FROM node:22-bookworm-slim AS frontend-build
 WORKDIR /build
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 COPY package*.json ./
@@ -10,10 +13,15 @@ COPY frontend/ frontend/
 COPY cockpit/ cockpit/
 RUN npm run build
 
+FROM scratch AS frontend-ci
+COPY ci-artifacts/frontend/ /build/frontend/dist/
+
+FROM ${FRONTEND_SOURCE} AS frontend
+
 FROM node:22-bookworm-slim AS harness
 RUN npm install -g @openai/codex@0.155.1
 
-FROM rust:1.94-bookworm AS backend
+FROM rust:1.94-bookworm AS backend-build
 RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev clang cmake libssl-dev pkg-config && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
@@ -22,6 +30,11 @@ COPY vendor/ vendor/
 COPY migrations/ migrations/
 ENV PROTOC=/usr/bin/protoc RUST_MIN_STACK=67108864
 RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/build/target cargo build --locked --jobs 2 && cp target/debug/agentic-enterprise /usr/local/bin/agentic-enterprise
+
+FROM scratch AS backend-ci
+COPY ci-artifacts/agentic-enterprise /usr/local/bin/agentic-enterprise
+
+FROM ${BACKEND_SOURCE} AS backend
 
 FROM backend AS verification
 RUN rustup component add rustfmt
