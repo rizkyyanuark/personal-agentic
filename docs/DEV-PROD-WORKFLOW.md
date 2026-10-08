@@ -254,7 +254,9 @@ and intended production host; GitLab stores source and published images.
 
 `registry_auth` exercises the registry through the real GitLab job credential.
 It checks unauthenticated access, the trusted GitLab authentication endpoint,
-project-scoped `pull,push` permission, and an authenticated registry request.
+project-scoped `pull,push` permission, an authenticated registry request, and a
+real empty blob upload initiation/cancellation (HTTP 202/204). Upload cleanup
+must stay on the same HTTPS registry and repository path.
 Credentials never enter its output or artifacts. This check alone does not
 prove that an image was uploaded.
 
@@ -273,6 +275,10 @@ Dockerfile. Provider credentials and application state stay outside the image.
 an explicit manual trial required for this same project's integration branch;
 other feature branches do not publish images.
 The result is tagged with the full commit SHA and records its registry digest.
+The BuildKit publisher removes only the default HTTPS `:443` suffix from its
+registry address and credential lookup. The smoke image keeps GitLab's original
+registry address so Runner can match its automatically supplied job credential;
+the verification allowlist admits this project's digests with either spelling.
 `image_smoke` uses that digest as its Docker-executor image and starts the actual
 controller with disposable state. It checks backend/ONNX dynamic libraries,
 health, rejected authentication,

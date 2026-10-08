@@ -36,10 +36,11 @@ function bearerChallenge(header) {
   return values;
 }
 
-async function request(url, headers, label) {
+async function request(url, headers, label, method = 'GET') {
   try {
     return await fetch(url, {
       headers,
+      method,
       redirect: 'error',
       signal: AbortSignal.timeout(20_000),
     });
@@ -141,6 +142,29 @@ async function main() {
   if (!response || Array.isArray(response) || typeof response !== 'object') {
     throw new RegistryCheckError('Authenticated registry returned an invalid v2 response');
   }
+  const uploadEndpoint = new URL(`/v2/${repository}/blobs/uploads/`, registry);
+  const upload = await request(uploadEndpoint, { authorization: `Bearer ${token}` }, 'Registry upload initiation', 'POST');
+  if (upload.status !== 202) {
+    throw new RegistryCheckError(`Registry upload initiation returned HTTP ${upload.status}; expected 202`);
+  }
+  const location = upload.headers.get('location');
+  await upload.body?.cancel();
+  if (!location) throw new RegistryCheckError('Registry upload did not return a cleanup location');
+  let cleanupUrl;
+  try {
+    cleanupUrl = new URL(location, registry);
+  } catch {
+    throw new RegistryCheckError('Registry upload returned an invalid cleanup URL');
+  }
+  if (cleanupUrl.origin !== registry.origin || cleanupUrl.username || cleanupUrl.password || cleanupUrl.hash
+    || !cleanupUrl.pathname.startsWith(uploadEndpoint.pathname)) {
+    throw new RegistryCheckError('Registry upload location must stay on the trusted HTTPS registry and repository upload path');
+  }
+  const cleanup = await request(cleanupUrl, { authorization: `Bearer ${token}` }, 'Registry upload cleanup', 'DELETE');
+  if (cleanup.status !== 204) {
+    throw new RegistryCheckError(`Registry upload cleanup returned HTTP ${cleanup.status}; expected 204`);
+  }
+  await cleanup.body?.cancel();
   console.log(JSON.stringify({
     registry: registry.origin,
     repository,
@@ -148,6 +172,8 @@ async function main() {
     gitlab_auth_status: 200,
     scoped_actions: ['pull', 'push'],
     authenticated_status: 200,
+    upload_started: 202,
+    upload_cancelled: 204,
   }));
 }
 

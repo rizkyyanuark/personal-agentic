@@ -6,6 +6,7 @@ workflow:
     - if: '$CI_COMMIT_BRANCH'
 
 stages:
+  - preflight
   - verify
   - image
   - smoke
@@ -76,7 +77,7 @@ backend:
       - src/ci-artifacts/agentic-enterprise.xz
 
 registry_auth:
-  stage: verify
+  stage: preflight
   image: node:22-bookworm-slim
   script:
     - node infra/ci/registry-check.mjs
@@ -119,8 +120,14 @@ image_publish:
       chmod 755 src/ci-artifacts/agentic-enterprise
       export DOCKER_CONFIG="$(mktemp -d)"
       trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+      case "$CI_REGISTRY_IMAGE" in
+        "$CI_REGISTRY"/*) : ;;
+        *) echo 'CI registry image does not belong to the registry' >&2; exit 1 ;;
+      esac
+      registry_host="${CI_REGISTRY%:443}"
+      registry_image="$registry_host/${CI_REGISTRY_IMAGE#"$CI_REGISTRY/"}"
       registry_auth=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
-      printf '{"auths":{"%s":{"auth":"%s"}}}\n' "$CI_REGISTRY" "$registry_auth" > "$DOCKER_CONFIG/config.json"
+      printf '{"auths":{"%s":{"auth":"%s"}}}\n' "$registry_host" "$registry_auth" > "$DOCKER_CONFIG/config.json"
       unset registry_auth
       cat > /tmp/personal-agentic-runc <<'SH'
       #!/bin/sh
@@ -162,9 +169,9 @@ image_publish:
         --opt build-arg:BACKEND_SOURCE=backend-ci \
         --opt label:org.opencontainers.image.revision="$CI_COMMIT_SHA" \
         --opt label:org.opencontainers.image.source="$CI_PROJECT_URL" \
-        --import-cache type=registry,ref="$CI_REGISTRY_IMAGE/cache:$CI_COMMIT_REF_SLUG" \
-        --export-cache type=registry,ref="$CI_REGISTRY_IMAGE/cache:$CI_COMMIT_REF_SLUG",mode=min \
-        --output type=image,name="$CI_REGISTRY_IMAGE/platform:$CI_COMMIT_SHA",push=true \
+        --import-cache type=registry,ref="$registry_image/cache:$CI_COMMIT_REF_SLUG" \
+        --export-cache type=registry,ref="$registry_image/cache:$CI_COMMIT_REF_SLUG",mode=min \
+        --output type=image,name="$registry_image/platform:$CI_COMMIT_SHA",push=true \
         --metadata-file image-metadata.json
       image_digest=$(sed -n 's/.*"containerimage.digest": "\(sha256:[0-9a-f]\{64\}\)".*/\1/p' image-metadata.json)
       test "${#image_digest}" = 71

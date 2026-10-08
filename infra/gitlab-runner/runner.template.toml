@@ -20,4 +20,4 @@
     shm_size = 268435456
     pull_policy = "always"
     allowed_pull_policies = ["always"]
-    allowed_images = ["node:22-bookworm-slim", "rust:1.94-bookworm", "python:3.11-slim", "registry.tugasakhir.space/rizkyyanuark/personal-agentic/platform@sha256:*"]
+    allowed_images = ["node:22-bookworm-slim", "rust:1.94-bookworm", "python:3.11-slim", "registry.tugasakhir.space/rizkyyanuark/personal-agentic/platform@sha256:*", "registry.tugasakhir.space:443/rizkyyanuark/personal-agentic/platform@sha256:*"]
