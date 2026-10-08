@@ -185,6 +185,89 @@ mod tests {
     use super::*;
 
     #[test]
+    fn explicit_project_lead_coordinates_while_specialists_stay_direct() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = store::Store::open(directory.path().join("org"))?;
+        let workdir = crate::security::validate_workspace(directory.path().to_str().unwrap())?;
+        let mut lead: Agent = db.get("agents", "ceo")?;
+        lead.workdir = Some(workdir.clone());
+        db.put("agents", &lead.id, &lead)?;
+        let mut specialist = lead.clone();
+        specialist.id = "specialist".into();
+        specialist.name = "Specialist".into();
+        specialist.reports_to = Some(lead.id.clone());
+        db.put("agents", &specialist.id, &specialist)?;
+        let mut project: Group = db.get("groups", "general")?;
+        project.id = "pilot-project".into();
+        project.member_ids = None;
+        project.chat_lead_id = Some(lead.id.clone());
+        project.project = Some(Project {
+            workdir,
+            members: vec![
+                ProjectMember {
+                    agent_id: lead.id.clone(),
+                    manager_id: None,
+                },
+                ProjectMember {
+                    agent_id: specialist.id.clone(),
+                    manager_id: Some(lead.id.clone()),
+                },
+            ],
+        });
+        db.read(|conn| validate(conn, &mut project))?;
+        db.put("groups", &project.id, &project)?;
+        for (message_id, group_id, body, expected) in [
+            ("plain", "pilot-project", "Please review", None),
+            (
+                "manager",
+                "pilot-project",
+                "@CEO coordinate",
+                Some(RunKind::Coordinator),
+            ),
+            (
+                "worker",
+                "pilot-project",
+                "@Specialist review",
+                Some(RunKind::Direct),
+            ),
+            (
+                "ordinary-room",
+                "general",
+                "@CEO review",
+                Some(RunKind::Direct),
+            ),
+        ] {
+            db.write(|conn| {
+                crate::api::submit_message(
+                    conn,
+                    crate::api::SendInput {
+                        id: message_id.into(),
+                        group_id: group_id.into(),
+                        side_chat_id: None,
+                        body: body.into(),
+                        recipients: vec![],
+                        reply_to: None,
+                        artifacts: vec![],
+                    },
+                    None,
+                )
+            })?;
+            let runs: Vec<Run> = db
+                .list::<Run>("runs")?
+                .into_iter()
+                .filter(|run| run.message_id == message_id)
+                .collect();
+            if let Some(kind) = expected {
+                assert_eq!(runs.len(), 1);
+                assert_eq!(runs[0].kind, kind);
+            } else {
+                assert!(runs.is_empty());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn replies_address_the_quoted_agent_once_and_preserve_scope() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let db = store::Store::open(directory.path().join("org"))?;

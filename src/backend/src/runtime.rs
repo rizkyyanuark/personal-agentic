@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use rusqlite::params;
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeMap,
     io::{BufRead, BufReader, Read, Write},
     path::PathBuf,
     process::{Command, Stdio},
@@ -213,6 +214,12 @@ pub fn login_status(app: &App, agent_id: &str) -> Result<Value> {
             json!({"ready":true,"message":format!("OpenCode ready · {} available models",settings.models.len()),"harness":"opencode"}),
         );
     }
+    if agent.harness == Harness::Antigravity {
+        let settings = crate::antigravity::settings(app, agent.workdir.as_ref())?;
+        return Ok(
+            json!({"ready":true,"message":format!("Antigravity CLI/catalog available · {} models; native credentials are checked when a run starts",settings.models.len()),"harness":"antigravity"}),
+        );
+    }
     if let Some(workspace) = agent.workdir.filter(|w| w.ssh_host.is_some()) {
         let result = crate::remote::probe(&workspace);
         return Ok(
@@ -347,6 +354,7 @@ fn execute_turn(
     let runtime_id = workspace.runtime_id.clone();
     let offloaded = remote_host.is_some() || runtime_id.is_some();
     let opencode = run.profile.harness == Harness::Opencode;
+    let antigravity = run.profile.harness == Harness::Antigravity;
     if remote_host.is_some() {
         let connection = crate::remote::probe_for(workspace, run.profile.harness);
         anyhow::ensure!(
@@ -378,9 +386,11 @@ fn execute_turn(
     };
     if opencode {
         home.set_file_name("opencode");
+    } else if antigravity {
+        home.set_file_name("antigravity");
     }
     std::fs::create_dir_all(&home)?;
-    let auth = if !offloaded && !opencode {
+    let auth = if !offloaded && !opencode && !antigravity {
         Some(seed_auth(&home)?)
     } else {
         None
@@ -390,9 +400,12 @@ fn execute_turn(
     } else {
         Default::default()
     };
-    let tools_lease = crate::agent_tools::Lease::new(app, run)?;
+    let tools_lease = (!antigravity)
+        .then(|| crate::agent_tools::Lease::new(app, run))
+        .transpose()?;
+    let tool_token = tools_lease.as_ref().map(|lease| lease.token());
     let mut secrets: Vec<String> = env.values().filter(|s| !s.is_empty()).cloned().collect();
-    secrets.push(tools_lease.token().into());
+    secrets.extend(tool_token.map(str::to_owned));
     let message: Message = app.store.get("messages", &run.message_id)?;
     let organization_instructions = security::read_optional(&app.store.org.join("AGENTS.md"))?;
     let mut organization = coordination::organization_context(app, &run.agent_id)?;
@@ -437,6 +450,10 @@ fn execute_turn(
     );
     store::atomic_write(&home.join("AGENTS.md"), instruction.as_bytes())?;
     let mut prompt = String::new();
+    if antigravity {
+        prompt.push_str(&instruction);
+        prompt.push_str("\n\n");
+    }
     if let Some(reply) = &message.reply_to
         && participates
     {
@@ -447,11 +464,20 @@ fn execute_turn(
         ));
     }
     prompt.push_str(&coordination::context(app, run)?);
-    prompt.push_str("\nPlatform tools are available through the enterprise MCP server. Use workspace_list and action_list to discover accessible work. Only explicit tasks cross chat boundaries; never copy unrelated histories or secrets. Cross-chat work returns asynchronously with a receipt and summary. Only humans can start a side chat with /btw; never create one through tools or slash-command text. Use chat_usage or chat_reset when requested; do not type slash commands as a substitute for calling tools. If project is present in your context, its members define your project manager/team and its workdir overrides defaults for every assignment in this chat. Global reporting remains in the organization snapshot. An action with no planned_start is backlog, never scheduled. Do not invoke it until asked.\n");
+    if !antigravity {
+        prompt.push_str("\nPlatform tools are available through the enterprise MCP server. Use workspace_list and action_list to discover accessible work. Only explicit tasks cross chat boundaries; never copy unrelated histories or secrets. Cross-chat work returns asynchronously with a receipt and summary. Only humans can start a side chat with /btw; never create one through tools or slash-command text. Use chat_usage or chat_reset when requested; do not type slash commands as a substitute for calling tools. If project is present in your context, its members define your project manager/team and its workdir overrides defaults for every assignment in this chat. Global reporting remains in the organization snapshot. An action with no planned_start is backlog, never scheduled. Do not invoke it until asked.\n");
+    } else {
+        prompt.push_str("\nPlatform MCP tools are not attached to this Antigravity run. Do not call enterprise tools, unrelated MCP servers, or launch other agent CLI processes. Project instructions and the explicit task define your scope.\n");
+        if run.kind == RunKind::Coordinator {
+            prompt.push_str("\nWhen the task requests delegation, use only the verified organization context to return the required routing JSON. The platform will enqueue the named Organization agent after this process exits and will return its result for your summary. Do not inspect files or directories, run commands, call native subagents, or simulate sending an assignment through tools. The captured availability and workdir are sufficient for this routing decision. Assignment is not completed work.\n");
+        } else if run.kind == RunKind::Summary {
+            prompt.push_str("\nUse only the supplied completed worker results for this summary. Do not read files, run commands, call tools or repeat the audit.\n");
+        }
+    }
     prompt.push_str("\nCurrent task:\n");
     if run.kind == RunKind::Summary {
         prompt.push_str("This is a summary-only turn: report the existing worker results and answers. Do not repeat the original task or ask the owner again. The assigned worker owns clarification.\n");
-    } else {
+    } else if !antigravity {
         prompt.push_str("If you need clarification, a decision or missing information from the owner, call enterprise.ask_user and wait for the answer. Use that tool instead of ending with an unanswered question, request_user_input (unavailable in exec), or reading terminal stdin. Suggested choices are optional; the owner can always write their own answer. Do not assume an answer or request credentials. A tool error or cancelled question is not approval. Continue the same task after the returned answer.\n");
     }
     prompt.push_str(run.task.as_deref().unwrap_or(&message.body));
@@ -469,7 +495,9 @@ fn execute_turn(
     } else {
         match &remote_host {
             Some(host) => crate::remote::command(host)?,
-            None => Command::new(if opencode {
+            None => Command::new(if antigravity {
+                crate::antigravity::executable()?
+            } else if opencode {
                 crate::opencode::executable()?
             } else {
                 app.codex.clone()
@@ -525,14 +553,17 @@ fn execute_turn(
     ]);
     if !offloaded {
         args.push("--ignore-user-config".into());
-        if !opencode && let Some(catalog) = crate::codex_settings::catalog_argument()? {
+        if !opencode
+            && !antigravity
+            && let Some(catalog) = crate::codex_settings::catalog_argument()?
+        {
             args.extend(["-c".into(), catalog]);
         }
     }
     // Windows otherwise downgrades workspace-write to read-only when no sandbox
     // implementation is selected in the isolated (ignored-config) runtime.
     #[cfg(windows)]
-    if !offloaded {
+    if !offloaded && !opencode && !antigravity {
         args.extend([
             "-c".into(),
             "windows.sandbox=\"elevated\"".into(),
@@ -564,7 +595,7 @@ fn execute_turn(
             prompt.push_str(include_str!("coordination-schema.json"));
         }
     }
-    if run.kind == RunKind::Coordinator && !offloaded && !opencode {
+    if run.kind == RunKind::Coordinator && !offloaded && !opencode && !antigravity {
         let schema = home.join("coordination-schema.json");
         store::atomic_write(&schema, include_bytes!("coordination-schema.json"))?;
         args.extend([
@@ -577,6 +608,10 @@ fn execute_turn(
         let artifact: Artifact = app.store.get("artifacts", artifact_id)?;
         let path = security::artifact_path(&app.store.org, &artifact.id)?;
         if artifact.media_type.starts_with("image/") {
+            anyhow::ensure!(
+                !antigravity,
+                "Image attachments are not supported by this Antigravity CLI adapter"
+            );
             if offloaded {
                 use base64::Engine;
                 remote_images.push(json!({"id":artifact.id,"data":base64::engine::general_purpose::STANDARD.encode(std::fs::read(path)?)}));
@@ -599,14 +634,32 @@ fn execute_turn(
             );
         }
     }
+    if antigravity {
+        args = crate::antigravity::build_arguments(
+            &run.profile.permission,
+            &selected_model,
+            &selected_reasoning,
+            run.native_session_id.as_deref(),
+            &prompt,
+        );
+        if run.kind == RunKind::Coordinator {
+            args.splice(
+                0..0,
+                [
+                    "--json-schema".into(),
+                    include_str!("coordination-schema.json").into(),
+                ],
+            );
+        }
+    }
     let mut remote_request = offloaded.then(|| json!({
         "op":"execute", "path":workspace.path, "workspace":workspace,
         "namespace":crate::remote::namespace(app),"session_id":run.session_id,"run_id":run.id,
         "instructions":instruction,"arguments":args,"prompt":prompt,"images":remote_images,
         "timeout_seconds":run.profile.timeout_seconds,"native_session_id":run.native_session_id,
-        "tool_token":tools_lease.token(),
+        "tool_token":tool_token,
         "harness":run.profile.harness,"opencode_config":opencode.then(||crate::opencode::config(&home,&run.profile.permission,&selected_model,&app.address.to_string())),
-        "schema":(run.kind==RunKind::Coordinator && !opencode).then(||include_str!("coordination-schema.json"))
+        "schema":(run.kind==RunKind::Coordinator && !opencode && !antigravity).then(||include_str!("coordination-schema.json"))
     }));
     if runtime_id.is_some() {
         if let Some(request) = remote_request.as_mut() {
@@ -614,14 +667,16 @@ fn execute_turn(
                 format!("{}/mcp", app.public_url).into();
         }
     }
-    if let Some(native) = &run.native_session_id {
-        args.extend([
-            if opencode { "--session" } else { "resume" }.into(),
-            native.clone(),
-        ]);
-    }
-    if !opencode {
-        args.push("-".into());
+    if !antigravity {
+        if let Some(native) = &run.native_session_id {
+            args.extend([
+                if opencode { "--session" } else { "resume" }.into(),
+                native.clone(),
+            ]);
+        }
+        if !opencode {
+            args.push("-".into());
+        }
     }
     if !offloaded {
         command.args(&args).current_dir(&workspace.path).env_clear();
@@ -629,11 +684,15 @@ fn execute_turn(
         command
             .envs(&env)
             .env("PWD", &workspace.path)
-            .env("AE_TOOL_TOKEN", tools_lease.token())
-            .env("CODEX_HOME", &home)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(token) = tool_token {
+            command.env("AE_TOOL_TOKEN", token);
+        }
+        if !antigravity {
+            command.env("CODEX_HOME", &home);
+        }
         if opencode {
             crate::opencode::environment(&mut command, Some(&home));
             command.env(
@@ -687,7 +746,9 @@ fn execute_turn(
             }
             remote_stdin = Some(stdin);
         } else {
-            stdin.write_all(prompt.as_bytes())?;
+            if !antigravity {
+                stdin.write_all(prompt.as_bytes())?;
+            }
         }
     }
     let mut answers_delivered = answers.is_empty();
@@ -695,7 +756,10 @@ fn execute_turn(
     let mut was_waiting = false;
     let mut last_heartbeat = Instant::now();
     let mut remote_stop_at = None;
-    let mut protocol = Protocol::default();
+    let mut protocol = Protocol {
+        workdir: workspace.canonical_path.clone(),
+        ..Default::default()
+    };
     let mut stopped = None;
     app.store.event("run.changed", json!({"run_id":run.id}))?;
     loop {
@@ -721,7 +785,7 @@ fn execute_turn(
             run.arguments = serde_json::from_value(metadata["arguments"].clone())?;
             app.store.put("runs", &run.id, run)?;
         }
-        if cancelled.load(Ordering::SeqCst) {
+        if stopped.is_none() && cancelled.load(Ordering::SeqCst) {
             stopped = Some("cancelled");
         }
         let waiting = app
@@ -732,14 +796,16 @@ fn execute_turn(
             *active_time += tick.duration_since(last_tick);
         }
         last_tick = tick;
-        if *active_time > Duration::from_secs(run.profile.timeout_seconds) {
+        if stopped.is_none() && *active_time > Duration::from_secs(run.profile.timeout_seconds) {
             stopped = Some("timed_out");
         }
         if let Some(stdin) = remote_stdin.as_mut() {
             if stopped.is_some() && remote_stop_at.is_none() {
                 let _ = stdin.write_all(b"cancel\n");
                 remote_stop_at = Some(Instant::now());
-            } else if waiting != was_waiting || last_heartbeat.elapsed() > Duration::from_secs(2) {
+            } else if stopped.is_none()
+                && (waiting != was_waiting || last_heartbeat.elapsed() > Duration::from_secs(2))
+            {
                 if stdin
                     .write_all(if waiting {
                         b"waiting_for_input\n"
@@ -783,7 +849,7 @@ fn execute_turn(
             if stopped == Some("interrupted") && protocol.remote_finished.is_some() {
                 stopped = None;
             }
-            // OpenCode's CLI terminates with an exit status, not Codex's turn.completed frame.
+            // OpenCode and Antigravity CLIs terminate with an exit status, not Codex's turn.completed frame.
             if opencode
                 && status.success()
                 && protocol.session.is_some()
@@ -827,9 +893,18 @@ fn execute_turn(
                 run.exit_code = finished["exit_code"]
                     .as_i64()
                     .and_then(|v| i32::try_from(v).ok());
-                if let Some(state) = finished["status"].as_str() {
+                // A remote cancellation acknowledges our stop; keep its original cause.
+                if stopped.is_none()
+                    && let Some(state) = finished["status"].as_str()
+                {
                     run.status = state.into();
                 }
+            }
+            if run.status == "timed_out" {
+                run.error = Some(format!(
+                    "Agent exceeded its {} second execution timeout. Inspect partial results before continuing.",
+                    run.profile.timeout_seconds
+                ));
             }
             break;
         }
@@ -966,6 +1041,8 @@ pub(crate) fn read_pipe(
 
 #[derive(Default)]
 struct Protocol {
+    workdir: String,
+    activities: BTreeMap<u32, crate::activity::RunActivity>,
     remote_started: Option<Value>,
     remote_finished: Option<Value>,
     bytes: usize,
@@ -975,6 +1052,8 @@ struct Protocol {
     completed: bool,
     error: Option<String>,
     usage: Option<Value>,
+    antigravity_steps: BTreeMap<(String, u64), Option<AntigravityStepUsage>>,
+    antigravity_usage_unscoped: bool,
     malformed: bool,
 }
 impl Protocol {
@@ -994,6 +1073,15 @@ impl Protocol {
             match serde_json::from_str::<Value>(line) {
                 Ok(value) => {
                     self.observe(&value);
+                    if let Some(activity) =
+                        crate::activity::antigravity_step(run_id, &value, &self.workdir)
+                    {
+                        if self.activities.get(&activity.step_index) != Some(&activity) {
+                            app.store
+                                .event("run.activity", serde_json::to_value(&activity)?)?;
+                            self.activities.insert(activity.step_index, activity);
+                        }
+                    }
                     if value["type"] == "item.completed"
                         && value["item"]["type"] == "mcp_tool_call"
                         && value["item"]["server"] == "enterprise"
@@ -1029,8 +1117,62 @@ impl Protocol {
     }
 
     fn observe(&mut self, v: &Value) {
-        if let Some(session) = v["sessionID"].as_str() {
+        if let Some(session) = v["sessionID"]
+            .as_str()
+            .or_else(|| v["conversation_id"].as_str())
+        {
             self.session = Some(session.into());
+        }
+        if let Some(event) = v["event"].as_str() {
+            match event {
+                "init" => {
+                    if let Some(session) = v["conversation_id"].as_str() {
+                        self.session = Some(session.into());
+                    }
+                }
+                "step_update" => {
+                    let update = &v["step_update"];
+                    if let Some(session) = update["conversation_id"].as_str() {
+                        self.session = Some(session.into());
+                    }
+                    if let Some(delta) = update["text_delta"].as_str() {
+                        self.text.push_str(delta);
+                    }
+                    self.observe_antigravity_usage(update);
+                }
+                "result" => {
+                    let result = &v["result"];
+                    if let Some(session) = result["conversation_id"].as_str() {
+                        self.session = Some(session.into());
+                    }
+                    if result["status"] == "SUCCESS" {
+                        self.completed = true;
+                        if let Some(structured) = result
+                            .get("structured_output")
+                            .filter(|value| value.is_object())
+                        {
+                            self.text = structured.to_string();
+                        } else if let Some(resp) = result["response"].as_str() {
+                            self.text = resp.into();
+                        }
+                    } else {
+                        self.completed = false;
+                        self.error = Some(
+                            result["error"]
+                                .as_str()
+                                .filter(|message| !message.trim().is_empty())
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| {
+                                    format!(
+                                        "Antigravity did not complete successfully (status: {})",
+                                        result["status"].as_str().unwrap_or("missing")
+                                    )
+                                }),
+                        );
+                    }
+                }
+                _ => {}
+            }
         }
         match v["type"].as_str() {
             Some("text") => {
@@ -1073,6 +1215,133 @@ impl Protocol {
             }
             _ => {}
         }
+    }
+
+    fn observe_antigravity_usage(&mut self, update: &Value) {
+        let usage = update.get("usage").filter(|value| !value.is_null());
+        let measured_step = matches!(
+            update["step_type"].as_str(),
+            Some("agent_response" | "checkpoint")
+        );
+        if !measured_step && usage.is_none() {
+            return;
+        }
+        let identity = update["conversation_id"]
+            .as_str()
+            .filter(|conversation| !conversation.is_empty())
+            .zip(update["step_index"].as_u64());
+        let Some((conversation, index)) = identity else {
+            self.antigravity_usage_unscoped = true;
+            self.usage = None;
+            return;
+        };
+        let key = (conversation.to_owned(), index);
+        match update["state"].as_str() {
+            Some("ACTIVE") => {
+                self.antigravity_steps.entry(key).or_insert(None);
+            }
+            Some("DONE") => {
+                if let Some(usage) = usage {
+                    self.antigravity_steps
+                        .insert(key, AntigravityStepUsage::parse(usage));
+                } else {
+                    self.antigravity_steps.entry(key).or_insert(None);
+                }
+            }
+            _ => self.antigravity_usage_unscoped = true,
+        }
+        // Native result.usage includes previous conversation turns. Only completed
+        // steps from this process belong to this run; repeated frames replace a step.
+        self.usage = if self.antigravity_usage_unscoped {
+            None
+        } else {
+            AntigravityStepUsage::aggregate(self.antigravity_steps.values())
+        };
+    }
+}
+
+struct AntigravityStepUsage {
+    input: u64,
+    output: u64,
+    total: u64,
+    thinking: Option<u64>,
+    cache_read: Option<u64>,
+}
+
+impl AntigravityStepUsage {
+    const MAX_TOKENS: u64 = 9_007_199_254_740_991;
+
+    fn parse(value: &Value) -> Option<Self> {
+        fn count(value: &Value) -> Option<u64> {
+            value
+                .as_u64()
+                .filter(|count| *count <= AntigravityStepUsage::MAX_TOKENS)
+        }
+        fn optional(value: &Value, name: &str) -> Option<Option<u64>> {
+            match value.get(name) {
+                None | Some(Value::Null) => Some(None),
+                Some(value) => Some(Some(count(value)?)),
+            }
+        }
+        let input = count(&value["input_tokens"])?;
+        let output = count(&value["output_tokens"])?;
+        let total = input.checked_add(output)?;
+        if total > Self::MAX_TOKENS {
+            return None;
+        }
+        if let Some(reported) = value.get("total_tokens").filter(|value| !value.is_null()) {
+            if count(reported)? != total {
+                return None;
+            }
+        }
+        Some(Self {
+            input,
+            output,
+            total,
+            thinking: optional(value, "thinking_tokens")?,
+            cache_read: optional(value, "cache_read_tokens")?,
+        })
+    }
+
+    fn aggregate<'a>(steps: impl Iterator<Item = &'a Option<Self>>) -> Option<Value> {
+        fn add(left: u64, right: u64) -> Option<u64> {
+            left.checked_add(right)
+                .filter(|sum| *sum <= AntigravityStepUsage::MAX_TOKENS)
+        }
+        let mut input = 0;
+        let mut output = 0;
+        let mut total = 0;
+        let mut thinking = Some(0);
+        let mut cache_read = Some(0);
+        let mut measured = false;
+        for step in steps {
+            let step = step.as_ref()?;
+            measured = true;
+            input = add(input, step.input)?;
+            output = add(output, step.output)?;
+            total = add(total, step.total)?;
+            thinking = thinking
+                .zip(step.thinking)
+                .and_then(|(left, right)| add(left, right));
+            cache_read = cache_read
+                .zip(step.cache_read)
+                .and_then(|(left, right)| add(left, right));
+        }
+        if !measured {
+            return None;
+        }
+        let mut usage = json!({
+            "input_tokens": input,
+            "output_tokens": output,
+            "total_tokens": total
+        });
+        if let Some(count) = thinking {
+            usage["thinking_tokens"] = count.into();
+        }
+        if let Some(count) = cache_read {
+            usage["cache_read_tokens"] = count.into();
+        }
+        Some(usage)
     }
 }
 
@@ -1125,5 +1394,305 @@ mod tests {
         assert_eq!(p.text, "hello");
         p.observe(&json!({"type":"turn.failed","error":{"message":"failed"}}));
         assert_eq!(p.error.as_deref(), Some("failed"));
+    }
+    #[test]
+    fn antigravity_events_preserve_conversation_reply_and_usage() {
+        let mut p = Protocol::default();
+        p.observe(&json!({
+            "event": "init",
+            "conversation_id": "agy-conv-123"
+        }));
+        assert_eq!(p.session.as_deref(), Some("agy-conv-123"));
+        p.observe(&json!({
+            "event": "step_update",
+            "step_update": {
+                "conversation_id": "agy-conv-123",
+                "step_index": 2,
+                "state": "ACTIVE",
+                "step_type": "agent_response",
+                "text_delta": "Hello from "
+            }
+        }));
+        p.observe(&json!({
+            "event": "step_update",
+            "step_update": {
+                "conversation_id": "agy-conv-123",
+                "step_index": 2,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "text_delta": "Antigravity!",
+                "usage": {"input_tokens": 100, "output_tokens": 50}
+            }
+        }));
+        assert_eq!(p.text, "Hello from Antigravity!");
+        assert!(!p.completed);
+        p.observe(&json!({
+            "event": "result",
+            "result": {
+                "conversation_id": "agy-conv-123",
+                "status": "SUCCESS",
+                "response": "Hello from Antigravity!",
+                "usage": {"input_tokens": 1000, "output_tokens": 500}
+            }
+        }));
+        assert!(p.completed);
+        assert_eq!(p.usage.as_ref().unwrap()["output_tokens"], 50);
+    }
+
+    #[test]
+    fn antigravity_usage_counts_completed_steps_once() {
+        let mut p = Protocol::default();
+        let mut step = json!({
+            "event": "step_update",
+            "step_update": {
+                "conversation_id": "conversation",
+                "step_index": 3,
+                "state": "ACTIVE",
+                "step_type": "agent_response",
+                "usage": {"input_tokens": 100, "output_tokens": 2}
+            }
+        });
+        p.observe(&step);
+        assert!(p.usage.is_none());
+        step["step_update"]["state"] = "DONE".into();
+        step["step_update"]["usage"] = json!({
+            "input_tokens": 10302,
+            "output_tokens": 582,
+            "thinking_tokens": 551,
+            "cache_read_tokens": 8113,
+            "total_tokens": 10884
+        });
+        p.observe(&step);
+        p.observe(&step);
+        assert_eq!(p.usage.as_ref().unwrap()["total_tokens"], 10884);
+        step["step_update"]["state"] = "ACTIVE".into();
+        p.observe(&step);
+        assert_eq!(p.usage.as_ref().unwrap()["total_tokens"], 10884);
+        p.observe(&json!({
+            "event": "step_update",
+            "step_update": {
+                "conversation_id": "conversation", "step_index": 4,
+                "state": "DONE", "step_type": "checkpoint",
+                "usage": {"input_tokens": 116, "output_tokens": 7,
+                          "thinking_tokens": 0, "cache_read_tokens": 0,
+                          "total_tokens": 123}
+            }
+        }));
+        for kind in ["user_input", "tool"] {
+            p.observe(&json!({
+                "event": "step_update",
+                "step_update": {
+                    "conversation_id": "conversation", "step_index": 5,
+                    "state": "DONE", "step_type": kind
+                }
+            }));
+        }
+        assert_eq!(
+            p.usage,
+            Some(json!({
+                "input_tokens": 10418, "output_tokens": 589,
+                "thinking_tokens": 551, "cache_read_tokens": 8113,
+                "total_tokens": 11007
+            }))
+        );
+    }
+
+    #[test]
+    fn antigravity_resumed_run_does_not_count_previous_conversation_usage() {
+        let mut first = Protocol::default();
+        first.observe(&json!({
+            "event": "step_update",
+            "step_update": {
+                "conversation_id": "resumed", "step_index": 2,
+                "state": "DONE", "step_type": "agent_response",
+                "usage": {"input_tokens": 30384, "output_tokens": 4,
+                          "thinking_tokens": 0, "cache_read_tokens": 0,
+                          "total_tokens": 30388}
+            }
+        }));
+        first.observe(&json!({
+            "event": "result",
+            "result": {
+                "conversation_id": "resumed", "status": "SUCCESS", "response": "apple",
+                "num_turns": 1, "usage": {"input_tokens": 30384, "output_tokens": 4,
+                                           "total_tokens": 30388}
+            }
+        }));
+        let mut resumed = Protocol::default();
+        resumed.observe(&json!({
+            "event": "init", "conversation_id": "resumed"
+        }));
+        resumed.observe(&json!({
+            "event": "step_update",
+            "step_update": {
+                "conversation_id": "resumed", "step_index": 4,
+                "state": "DONE", "step_type": "agent_response",
+                "usage": {"input_tokens": 278, "output_tokens": 4,
+                          "thinking_tokens": 0, "cache_read_tokens": 30214,
+                          "total_tokens": 282}
+            }
+        }));
+        resumed.observe(&json!({
+            "event": "result",
+            "result": {
+                "conversation_id": "resumed", "status": "SUCCESS", "response": "apple",
+                "num_turns": 2, "usage": {"input_tokens": 30662, "output_tokens": 8,
+                                           "cache_read_tokens": 30214, "total_tokens": 30670}
+            }
+        }));
+        assert!(resumed.completed);
+        assert_eq!(resumed.session.as_deref(), Some("resumed"));
+        let first_total = first.usage.as_ref().unwrap()["total_tokens"]
+            .as_u64()
+            .unwrap();
+        let resumed_total = resumed.usage.as_ref().unwrap()["total_tokens"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(first_total, 30388);
+        assert_eq!(resumed_total, 282);
+        assert_eq!(first_total + resumed_total, 30670);
+    }
+
+    #[test]
+    fn antigravity_incomplete_or_invalid_usage_remains_unknown() {
+        let valid = json!({
+            "conversation_id": "conversation", "step_index": 3,
+            "state": "DONE", "step_type": "agent_response",
+            "usage": {"input_tokens": 10, "output_tokens": 2}
+        });
+        let mut cases = Vec::new();
+        for bad_usage in [
+            Value::Null,
+            json!({"input_tokens": 3}),
+            json!({"input_tokens": -1, "output_tokens": 2}),
+            json!({"input_tokens": "3", "output_tokens": 2}),
+            json!({"input_tokens": 3, "output_tokens": 2, "total_tokens": 99}),
+            json!({"input_tokens": AntigravityStepUsage::MAX_TOKENS, "output_tokens": 1}),
+        ] {
+            let mut update = valid.clone();
+            update["step_index"] = 4.into();
+            update["usage"] = bad_usage;
+            cases.push(update);
+        }
+        for (field, invalid) in [
+            ("conversation_id", json!("")),
+            ("step_index", json!(-1)),
+            ("step_index", Value::Null),
+            ("state", json!("UNKNOWN")),
+        ] {
+            let mut update = valid.clone();
+            update[field] = invalid;
+            cases.push(update);
+        }
+        for invalid in cases {
+            let mut p = Protocol::default();
+            p.observe(&json!({"event": "step_update", "step_update": valid}));
+            assert_eq!(p.usage.as_ref().unwrap()["total_tokens"], 12);
+            p.observe(&json!({"event": "step_update", "step_update": invalid}));
+            assert!(p.usage.is_none());
+            p.observe(&json!({
+                "event": "result",
+                "result": {"status": "SUCCESS", "response": "done",
+                           "usage": {"input_tokens": 1000, "output_tokens": 100}}
+            }));
+            assert!(p.completed);
+            assert!(p.usage.is_none());
+        }
+        let mut p = Protocol::default();
+        p.observe(&json!({
+            "event": "result",
+            "result": {"status": "SUCCESS", "response": "done",
+                       "usage": {"input_tokens": 1000, "output_tokens": 100}}
+        }));
+        assert!(p.completed);
+        assert!(p.usage.is_none());
+    }
+
+    #[test]
+    fn antigravity_usage_preserves_zero_and_omits_unreported_optional_counts() {
+        let mut p = Protocol::default();
+        for (index, usage) in [
+            (
+                0,
+                json!({"input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+                       "thinking_tokens": 0, "cache_read_tokens": 0}),
+            ),
+            (1, json!({"input_tokens": 0, "output_tokens": 0})),
+        ] {
+            p.observe(&json!({
+                "event": "step_update",
+                "step_update": {"conversation_id": "zero", "step_index": index,
+                                "state": "DONE", "step_type": "agent_response",
+                                "usage": usage}
+            }));
+        }
+        assert_eq!(
+            p.usage,
+            Some(json!({
+                "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
+            }))
+        );
+    }
+
+    #[test]
+    fn antigravity_structured_result_replaces_streamed_text() {
+        let mut p = Protocol::default();
+        p.observe(&json!({
+            "event": "step_update", "step_update": {"text_delta": "Planning the answer"}
+        }));
+        let structured = json!({"summary": "Audit complete", "assignments": []});
+        p.observe(&json!({
+            "event": "result",
+            "result": {"status": "SUCCESS", "response": "unstructured fallback",
+                       "structured_output": structured}
+        }));
+        assert!(p.completed);
+        assert!(p.error.is_none());
+        assert_eq!(serde_json::from_str::<Value>(&p.text).unwrap(), structured);
+    }
+
+    #[test]
+    fn antigravity_requires_a_success_receipt_and_preserves_native_errors() {
+        let mut success = Protocol::default();
+        success.observe(&json!({
+            "event": "step_update", "step_update": {"text_delta": "partial response"}
+        }));
+        assert!(!success.completed);
+        success.observe(&json!({
+            "event": "result", "result": {"status": "SUCCESS", "response": "final response"}
+        }));
+        assert!(success.completed);
+        assert!(success.error.is_none());
+        assert_eq!(success.text, "final response");
+        for status in [
+            "ERROR",
+            "CANCELED",
+            "INTERRUPTED",
+            "INVALID",
+            "WAITING",
+            "RUNNING",
+            "UNKNOWN",
+        ] {
+            let mut p = Protocol::default();
+            p.observe(&json!({
+                "event": "init", "conversation_id": "native"
+            }));
+            p.observe(&json!({
+                "event": "step_update", "step_update": {"text_delta": "partial response"}
+            }));
+            p.observe(&json!({"event": "result", "result": {"status": status}}));
+            assert!(!p.completed);
+            assert!(p.error.as_deref().unwrap().contains(status));
+        }
+        let mut p = Protocol::default();
+        p.observe(&json!({
+            "event": "result", "result": {"status": "ERROR", "error": "authentication required"}
+        }));
+        assert!(!p.completed);
+        assert_eq!(p.error.as_deref(), Some("authentication required"));
+        let mut p = Protocol::default();
+        p.observe(&json!({"event": "result", "result": {"response": "partial response"}}));
+        assert!(!p.completed);
+        assert!(p.error.as_deref().unwrap().contains("missing"));
     }
 }

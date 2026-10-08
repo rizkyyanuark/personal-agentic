@@ -6,12 +6,14 @@ unmodified python-dotenv v1.2.2 parser (sources supplied by the Rust backend).
 import io
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import selectors
 import shutil
 import signal
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -42,8 +44,24 @@ def emit(value):
     print(json.dumps(clean(value), ensure_ascii=False), flush=True)
 
 
-def run(command, **kwargs):
-    return subprocess.run(command, capture_output=True, text=True, timeout=12, **kwargs)
+def run(command, *, timeout=12, **kwargs):
+    return subprocess.run(command, capture_output=True, text=True, timeout=timeout, **kwargs)
+
+
+def run_antigravity(command: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+    finally:
+        try:
+            stop_group(process)
+        finally:
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
 
 
 def codex(harness="codex"):
@@ -54,10 +72,37 @@ def codex(harness="codex"):
     paths = [str(Path.home() / ".local/bin"), str(Path.home() / ".opencode/bin"), "/opt/homebrew/bin", "/usr/local/bin"]
     paths += [str(p) for p in sorted((Path.home() / ".nvm/versions/node").glob("*/bin"), reverse=True)]
     os.environ["PATH"] = os.pathsep.join(paths + [os.environ.get("PATH", "/usr/bin:/bin")])
-    found = shutil.which(harness)
+    binary = "agy" if harness == "antigravity" else harness
+    found = shutil.which(binary)
     if not found:
         raise ValueError(f"{harness} CLI is not installed or is not on this workstation's PATH")
     return found
+
+
+def antigravity_settings(executable: str | None = None) -> dict[str, object]:
+    executable = executable or codex("antigravity")
+    result = run_antigravity([executable, "models"], timeout=20)
+    if result.returncode != 0:
+        raise ValueError("Antigravity model catalog is unavailable; check the native agy login on this workstation")
+    models = []
+    seen = set()
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line or line.startswith("Fetching"):
+            continue
+        parts = line.split("\t")
+        slug = parts[0].strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}", slug):
+            raise ValueError("Invalid model identifier in Antigravity catalog")
+        if slug in seen:
+            raise ValueError("Duplicate model identifier in Antigravity catalog")
+        seen.add(slug)
+        models.append({"slug":slug, "display_name":parts[1].strip() if len(parts)>1 else slug,
+                       "visibility":"list", "default_reasoning_level":"", "supported_reasoning_levels":[]})
+    if not models:
+        raise ValueError("No models found in Antigravity model catalog")
+    return {"model":models[0]["slug"], "reasoning":"", "models":models,
+            "fetched_at":datetime.now(timezone.utc).isoformat()}
 
 
 def codex_home():
@@ -165,6 +210,9 @@ def stop_group(process):
 def execute(request, ws, executable):
     terminal = request["op"] == "terminal"
     opencode = request.get("harness") == "opencode" and not terminal
+    antigravity = request.get("harness") == "antigravity" and not terminal
+    if antigravity and request.get("images"):
+        raise ValueError("Antigravity image attachments are not supported by this SSH integration")
     root = Path(ws["canonical_path"])
     env = dict(os.environ)
     env.update(dotenv(request, root))
@@ -180,13 +228,14 @@ def execute(request, ws, executable):
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(home, 0o700)
     source = codex_home() / "auth.json"
-    original = None if terminal or opencode else source.read_bytes()
+    original = None if terminal or opencode or antigravity else source.read_bytes()
     target = home / "auth.json"
     if original is not None:
         target.write_bytes(original)
         os.chmod(target, 0o600)
     (home / "AGENTS.md").write_text(request["instructions"], encoding="utf-8")
-    env["CODEX_HOME"] = str(home)
+    if not antigravity:
+        env["CODEX_HOME"] = str(home)
     opencode_auth = None
     if opencode:
         opencode_auth = opencode_credentials(request, home)
@@ -194,15 +243,18 @@ def execute(request, ws, executable):
         config=request["opencode_config"]
         config["instructions"]=[str(home/"AGENTS.md")]
         env["OPENCODE_CONFIG_CONTENT"]=json.dumps(config)
-    args = ["-lc", request["command"]] if terminal else request["arguments"]
-    if not terminal and not opencode:
+    args = ["-lc", request["command"]] if terminal else list(request["arguments"])
+    if not terminal and not opencode and not antigravity:
         config, catalog = codex_catalog()
         if "model_catalog_json" in config:
             args += ["-c", "model_catalog_json=" + json.dumps(str(catalog))]
     if request.get("schema"):
-        schema = home / "coordination-schema.json"
-        schema.write_text(request["schema"], encoding="utf-8")
-        args += ["--output-schema", str(schema)]
+        if antigravity:
+            args[:0] = ["--json-schema", request["schema"]]
+        else:
+            schema = home / "coordination-schema.json"
+            schema.write_text(request["schema"], encoding="utf-8")
+            args += ["--output-schema", str(schema)]
     import base64
     for attachment in request.get("images", []):
         if not re.fullmatch(r"[A-Za-z0-9-]{1,80}", attachment["id"]):
@@ -210,9 +262,12 @@ def execute(request, ws, executable):
         file = home / (attachment["id"] + ".image")
         file.write_bytes(base64.b64decode(attachment["data"], validate=True))
         args += ["--file" if opencode else "--image", str(file)]
-    if request.get("native_session_id"):
-        args += ["--session" if opencode else "resume", request["native_session_id"]]
-    if not terminal and not opencode:
+    if request.get("native_session_id") and not (antigravity and "--conversation" in args):
+        if antigravity:
+            args[:0] = ["--conversation", request["native_session_id"]]
+        else:
+            args += ["--session" if opencode else "resume", request["native_session_id"]]
+    if not terminal and not opencode and not antigravity:
         args += ["-"]
     process = subprocess.Popen([executable, *args], cwd=root, env=env, stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
@@ -223,7 +278,7 @@ def execute(request, ws, executable):
         import threading
         def prompt():
             try:
-                if not terminal:
+                if not terminal and not antigravity:
                     process.stdin.write(request["prompt"].encode("utf-8"))
                 process.stdin.close()
             except BrokenPipeError:
@@ -377,6 +432,136 @@ def skills(request, root, executable):
         stop_group(process)
 
 
+class AntigravitySkillError(ValueError):
+    """A safe, content-free error for one installed skill."""
+
+
+def antigravity_skill_path(root: Path, reference: Path) -> Path:
+    try:
+        return contained(root, str(reference))
+    except RuntimeError:
+        raise AntigravitySkillError("Skill path contains a symlink loop") from None
+
+
+def read_antigravity_skill(root: Path, reference: Path) -> tuple[Path, str, str]:
+    path = antigravity_skill_path(root, reference)
+    if path.name != "SKILL.md":
+        raise AntigravitySkillError("Only SKILL.md instructions can be discovered")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, flags)
+    before = os.fstat(descriptor)
+    if not stat.S_ISREG(before.st_mode):
+        os.close(descriptor)
+        raise AntigravitySkillError("Skill instructions must be a regular file")
+    with os.fdopen(descriptor, "rb") as stream:
+        current = antigravity_skill_path(root, reference)
+        current_stat = current.stat()
+        if current != path or (before.st_dev, before.st_ino) != (current_stat.st_dev, current_stat.st_ino):
+            raise AntigravitySkillError("Skill changed during discovery; refresh the list")
+        data = stream.read(256 * 1024 + 1)
+        after = os.fstat(stream.fileno())
+        current = antigravity_skill_path(root, reference)
+        current_stat = current.stat()
+        if (current != path or (after.st_dev, after.st_ino) != (current_stat.st_dev, current_stat.st_ino)
+                or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns)):
+            raise AntigravitySkillError("Skill changed during discovery; refresh the list")
+    if len(data) > 256 * 1024:
+        raise AntigravitySkillError("Skill exceeds 256 KiB preview limit")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise AntigravitySkillError("Skill instructions are not UTF-8 text") from None
+    opening = re.match(r"\A---[ \t]*\r?\n", text)
+    if opening is None:
+        raise AntigravitySkillError("Skill requires YAML frontmatter at the start of SKILL.md")
+    closing = re.search(r"(?m)^---[ \t]*(?:\r?\n|$)", text[opening.end():])
+    if closing is None:
+        raise AntigravitySkillError("Skill YAML frontmatter is missing its closing delimiter")
+    frontmatter = text[opening.end():opening.end() + closing.start()]
+    if len(frontmatter.encode("utf-8")) > 16 * 1024:
+        raise AntigravitySkillError("Skill frontmatter exceeds 16 KiB limit")
+    return path, frontmatter, text
+
+
+def antigravity_skills(request: dict[str, object], root: Path) -> int:
+    manifests: list[dict[str, str]] = []
+    errors: list[dict[str, str]] = []
+    seen: set[Path] = set()
+    entry_count = 0
+    candidate_count = 0
+    header_bytes = 0
+    for relative in (".agents/skills", ".agent/skills"):
+        logical_root = root / relative
+        try:
+            skill_root = antigravity_skill_path(root, logical_root)
+            if not skill_root.is_dir():
+                raise AntigravitySkillError("Skill installation path must be a directory")
+            entries = []
+            with os.scandir(skill_root) as iterator:
+                for entry in iterator:
+                    entry_count += 1
+                    if entry_count > 1024:
+                        raise ValueError("Skill discovery exceeds 1024 directory entries")
+                    entries.append(entry.name)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            errors.append({"path": str(logical_root), "message": "Cannot read the skill installation directory"})
+            continue
+        except AntigravitySkillError as error:
+            errors.append({"path": str(logical_root), "message": str(error)})
+            continue
+        except ValueError:
+            if entry_count > 1024:
+                raise
+            errors.append({"path": str(logical_root), "message": "Skill installation directory must remain inside this workdir"})
+            continue
+        for folder_name in sorted(entries, key=lambda name: (name.lower(), name)):
+            logical_directory = logical_root / folder_name
+            candidate = logical_directory / "SKILL.md"
+            try:
+                directory = antigravity_skill_path(root, logical_directory)
+                if not directory.is_dir():
+                    continue
+                try:
+                    candidate.lstat()
+                except FileNotFoundError:
+                    continue
+                candidate_count += 1
+                if candidate_count > 256:
+                    raise ValueError("Skill discovery exceeds 256 skill candidates")
+                path, frontmatter, _ = read_antigravity_skill(root, candidate)
+                if path in seen:
+                    continue
+                header_bytes += len(frontmatter.encode("utf-8"))
+                if header_bytes > 2 * 1024 * 1024:
+                    raise ValueError("Skill discovery frontmatter exceeds 2 MiB aggregate limit")
+                seen.add(path)
+                manifests.append({"path": str(path), "folder_name": folder_name, "frontmatter": frontmatter})
+            except OSError:
+                errors.append({"path": str(candidate), "message": "Cannot read skill instructions"})
+            except AntigravitySkillError as error:
+                errors.append({"path": str(candidate), "message": str(error)})
+            except ValueError:
+                if candidate_count > 256 or header_bytes > 2 * 1024 * 1024:
+                    raise
+                errors.append({"path": str(candidate), "message": "Skill instructions must remain inside this workdir and outside sensitive paths"})
+    text = None
+    selected = request.get("reference")
+    if selected:
+        installed = next((manifest for manifest in manifests if manifest["path"] == selected), None)
+        if installed is None:
+            raise ValueError("Skill is no longer installed in this workdir; refresh the list")
+        try:
+            _, frontmatter, text = read_antigravity_skill(root, Path(installed["path"]))
+        except (OSError, ValueError):
+            raise ValueError("Skill changed during discovery; refresh the list") from None
+        if frontmatter != installed["frontmatter"]:
+            raise ValueError("Skill changed during discovery; refresh the list")
+    emit({"cwd": str(root), "manifests": manifests, "errors": errors, "text": text})
+    return 0
+
+
 def opencode_environment(env,home=None):
     if home is not None:
         for key,folder in (("XDG_DATA_HOME","data"),("XDG_CACHE_HOME","cache"),("XDG_STATE_HOME","state")):
@@ -490,6 +675,9 @@ def opencode_query(request):
 
 def main(request):
     op = request["op"]
+    if op == "antigravity_settings":
+        emit(antigravity_settings())
+        return 0
     if op == "opencode_query":
         emit(opencode_query(request))
         return 0
@@ -538,10 +726,12 @@ def main(request):
                 emit({"text": data.decode("utf-8"), "base": str(root)})
         return 0
     harness = request.get("harness", "codex")
-    if harness not in ("codex","opencode"):
+    if harness not in ("codex","opencode","antigravity"):
         raise ValueError("Unsupported harness")
     executable = codex(harness)
     if op == "skills":
+        if harness == "antigravity":
+            return antigravity_skills(request, root)
         if harness == "opencode":
             values=opencode_query({**request,"route":"/api/skill"})["data"]
             skills=[]
@@ -563,7 +753,15 @@ def main(request):
             return 0
         return skills(request, root, executable)
     if op == "probe":
-        version = run([executable, "--version"])
+        version = run_antigravity([executable, "--version"], timeout=4) if harness == "antigravity" else run([executable, "--version"])
+        if harness == "antigravity":
+            ready = version.returncode == 0
+            env = dotenv(request, root)
+            emit({"ready":ready,
+                  "message":"Antigravity CLI available; model catalog is checked before execution. Native credentials are validated when a run starts." if ready else "Antigravity CLI version check failed",
+                  "version":version.stdout.strip(), "executable":executable, "os":os.uname().sysname,
+                  "environment_keys":list(env), "workspace":ws})
+            return 0
         if harness == "opencode":
             env = dotenv(request, root)
             ready = version.returncode==0 and re.search(r"(?:^|\s)v?2\.\d+\.\d+(?:[-+].*)?$",version.stdout.strip()) is not None

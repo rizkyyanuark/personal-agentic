@@ -1,0 +1,153 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  clearSpeechBubble,
+  clearSpeechBubbles,
+  disposeCharacterLabels,
+  roleIdentity,
+  updateSpeechBubble
+} from '../../src/client/ui/labels.js';
+
+test('blank Organization position leaves a clean name without an invented title or separator', () => {
+  assert.equal(roleIdentity({ name: 'Nova', role: '' }), 'Nova');
+  assert.equal(roleIdentity({ name: 'Orion', role: '', slug: 'hq' }), 'Orion');
+  assert.equal(roleIdentity({ name: 'Nova', role: 'Data Engineer' }), 'Nova · Data Engineer');
+});
+
+function labelsFixture() {
+  return Object.fromEntries(
+    ['nova', 'atlas'].map((key) => [
+      key,
+      {
+        bubble: { textContent: '', dataset: {}, hidden: true, style: { display: 'none' } },
+        bubbleTimer: null,
+        bubbleRecord: null,
+        disposed: false,
+        dispose() {
+          this.disposed = true;
+        }
+      }
+    ])
+  );
+}
+
+function withTimers(callback) {
+  const originalSet = globalThis.setTimeout;
+  const originalClear = globalThis.clearTimeout;
+  const timers = new Map();
+  let nextId = 0;
+  globalThis.setTimeout = (handler, delay) => {
+    const id = nextId++;
+    timers.set(id, { handler, delay });
+    return id;
+  };
+  globalThis.clearTimeout = (id) => timers.delete(id);
+  try {
+    callback(timers);
+  } finally {
+    globalThis.setTimeout = originalSet;
+    globalThis.clearTimeout = originalClear;
+  }
+}
+
+test('event bubbles stay explicitly historical and render payload as text', () => {
+  withTimers((timers) => {
+    const labels = labelsFixture();
+    assert.equal(
+      updateSpeechBubble(labels, 'nova', { kind: 'event', text: '<b>Agent mulai bekerja</b>' }),
+      true
+    );
+    assert.equal(labels.nova.bubble.dataset.kind, 'event');
+    assert.equal(labels.nova.bubble.textContent, 'Riwayat publik: <b>Agent mulai bekerja</b>');
+    assert.equal(labels.nova.bubble.hidden, false);
+    assert.equal(timers.get(0).delay, 6000);
+    timers.get(0).handler();
+    assert.equal(labels.nova.bubble.hidden, true);
+    assert.equal(labels.nova.bubbleRecord, null);
+    assert.equal(timers.size, 0);
+  });
+});
+
+test('bubble kinds use fixed provenance labels, never a caller-supplied label', () => {
+  withTimers(() => {
+    const labels = labelsFixture();
+    for (const [kind, prefix] of [
+      ['dialogue', 'Suasana ilustratif'],
+      ['role-description', 'Deskripsi peran'],
+      ['work', 'Tugas publik']
+    ]) {
+      updateSpeechBubble(labels, 'nova', { kind, text: 'Teks', label: 'Aktivitas nyata' });
+      assert.equal(labels.nova.bubble.textContent, `${prefix}: Teks`);
+      assert(Object.isFrozen(labels.nova.bubbleRecord));
+    }
+  });
+});
+
+test('untyped, invalid, empty or unknown bubbles clear instead of masquerading as work', () => {
+  withTimers((timers) => {
+    const labels = labelsFixture();
+    for (const input of [
+      'raw text',
+      null,
+      { kind: 'unknown', text: 'X' },
+      { kind: 'event', text: ' ' }
+    ]) {
+      updateSpeechBubble(labels, 'nova', { kind: 'event', text: 'Prior event' });
+      assert.equal(updateSpeechBubble(labels, 'nova', input), false);
+      assert.equal(labels.nova.bubble.hidden, true);
+      assert.equal(labels.nova.bubble.textContent, '');
+      assert.equal(labels.nova.bubble.dataset.kind, undefined);
+      assert.equal(timers.size, 0);
+    }
+    assert.equal(updateSpeechBubble(labels, 'missing', { kind: 'event', text: 'X' }), false);
+  });
+});
+
+test('replacement cancels the old timer and its queued callback cannot erase a newer bubble', () => {
+  withTimers((timers) => {
+    const labels = labelsFixture();
+    updateSpeechBubble(labels, 'nova', { kind: 'event', text: 'Old' }, 4800);
+    const oldCallback = timers.get(0).handler;
+    updateSpeechBubble(labels, 'nova', { kind: 'role-description', text: 'New' });
+    assert.equal(timers.has(0), false);
+    oldCallback();
+    assert.equal(labels.nova.bubble.textContent, 'Deskripsi peran: New');
+    assert.equal(labels.nova.bubble.hidden, false);
+    clearSpeechBubble(labels, 'nova');
+    assert.equal(timers.size, 0);
+  });
+});
+
+test('status/gate cancellation and disposal clear every record, timer and visual', () => {
+  withTimers((timers) => {
+    const labels = labelsFixture();
+    for (const key of Object.keys(labels)) {
+      updateSpeechBubble(labels, key, { kind: 'dialogue', text: 'Local ambience' });
+    }
+    clearSpeechBubbles(labels);
+    assert.equal(timers.size, 0);
+    for (const label of Object.values(labels)) {
+      assert.equal(label.bubble.hidden, true);
+      assert.equal(label.bubbleRecord, null);
+    }
+    updateSpeechBubble(labels, 'nova', { kind: 'event', text: 'Another event' });
+    disposeCharacterLabels(labels);
+    disposeCharacterLabels(labels);
+    assert.equal(timers.size, 0);
+    assert(Object.values(labels).every((label) => label.disposed));
+  });
+});
+
+test('bubble text and lifetime are bounded without retaining payload objects', () => {
+  withTimers((timers) => {
+    const labels = labelsFixture();
+    const input = { kind: 'event', text: '\n\u0000' + 'a'.repeat(400), private: 'not retained' };
+    updateSpeechBubble(labels, 'nova', input, Infinity);
+    assert.equal(labels.nova.bubbleRecord.text.length, 160);
+    assert.deepEqual(Object.keys(labels.nova.bubbleRecord), ['kind', 'text']);
+    assert.equal(timers.get(0).delay, 6000);
+    assert.equal(input.text.length, 402);
+    updateSpeechBubble(labels, 'atlas', { kind: 'event', text: 'bounded' }, 0);
+    assert.equal(timers.get(1).delay, 100);
+  });
+});

@@ -412,6 +412,7 @@ pub fn settings_for(
     );
     match harness {
         Harness::Opencode => settings(app, workspace),
+        Harness::Antigravity => crate::antigravity::settings(app, workspace),
         Harness::Codex => match workspace.and_then(|w| w.ssh_host.as_deref()) {
             Some(host) => crate::remote::settings(host),
             None => crate::codex_settings::read(),

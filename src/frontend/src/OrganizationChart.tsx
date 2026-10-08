@@ -120,8 +120,8 @@ function PersonCard({ id, data, selected }: NodeProps<PersonNode>) {
           <img
             className="org-card-harness"
             src={`/harnesses/${agent.harness}.svg`}
-            alt={agent.harness === "opencode" ? "OpenCode" : "Codex"}
-            title={agent.harness === "opencode" ? "OpenCode" : "Codex"}
+            alt={agent.harness === "opencode" ? "OpenCode" : agent.harness === "antigravity" ? "Antigravity" : "Codex"}
+            title={agent.harness === "opencode" ? "OpenCode" : agent.harness === "antigravity" ? "Antigravity" : "Codex"}
             width={22}
             height={22}
             draggable={false}
@@ -270,6 +270,7 @@ export function OrganizationChart({
   selected,
   onSelect,
   onAdd,
+  onLivePreview,
   projectName,
   workstations,
   layoutPath = "/organization/layout",
@@ -284,6 +285,7 @@ export function OrganizationChart({
   selected: string | null;
   onSelect: (id: string) => void;
   onAdd: () => void;
+  onLivePreview?: () => void;
 }) {
   const layout = useMemo(() => chartLayout(agents), [agents]);
   const [nodes, setNodes] = useState<PersonNode[]>([]);
@@ -370,6 +372,7 @@ export function OrganizationChart({
           <p>Your agents, roles, and reporting lines.</p>
         </div>
         <div className="organization-actions">
+          {onLivePreview && <Button variant="outline" data-testid="open-live-preview" onClick={onLivePreview}>Live Preview</Button>}
           <Button variant="outline" onClick={onDeletedAgents}>
             {projectName ? "Manage team" : "Deleted agents"}
           </Button>

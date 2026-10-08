@@ -1,0 +1,20 @@
+# Archived predecessor CI; integrated checks run from the root src workspace.
+image: node:22-bookworm-slim
+
+stages:
+  - verify
+
+quality-gate:
+  stage: verify
+  before_script:
+    - npm ci --ignore-scripts
+  script:
+    - npm run check
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+  variables:
+    npm_config_cache: '$CI_PROJECT_DIR/.npm'

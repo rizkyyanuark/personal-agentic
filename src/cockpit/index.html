@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Cockpit development</title>
+    <link rel="stylesheet" href="/src/client/styles/main.css" />
+  </head>
+  <body style="margin: 0; font: 14px system-ui">
+    <form id="connect" style="padding: 12px; display: flex; gap: 8px; align-items: center">
+      <label>Owner key <input id="owner-key" type="password" autocomplete="off" required /></label
+      ><button type="submit">Hubungkan workspace</button><output id="connection-result"></output>
+    </form>
+    <div id="office-root" style="height: calc(100dvh - 64px); width: 100%"></div>
+    <script type="module" src="/src/client/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,7 @@
+services:
+  platform:
+    volumes:
+      - type: bind
+        source: ${AE_SSH_KEY_FILE:?Set the absolute path of the selected SSH private key}
+        target: /run/ae-ssh/mini-project-key.pem
+        read_only: true

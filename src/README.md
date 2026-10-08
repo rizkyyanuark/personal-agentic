@@ -22,7 +22,7 @@ On the action table, click a data-column heading to toggle ascending/descending 
 - Open **Action board** in the sidebar for the organization-wide **Table / Calendar** views, or **Actions** inside a project/group for a filtered view. Select a PIC and choose **Save to backlog**, a future **planned start**, or **Run now**. Blank planned start never invokes work. Dates display in the browser's local timezone and persist as UTC. Calendar leaves unscheduled work in a separate backlog.
 - Actions dispatch through the existing persisted queue. A transaction claims each scheduled occurrence once. Results link to Runs; failures/cancellation remain visible. Owner or the assigning agent can invoke/edit an action; agent visibility follows current group membership, with delegation-only agents limited to their own assigned items. Archiving/deleting a group or restoring a backup removes pending action schedules; review before scheduling again.
 
-Every native agent run receives a temporary `enterprise` MCP connection to the same Rust service, using an ephemeral per-run credential (never the owner key). Available tools: `workspace_list`, `action_list`, `action_save`, `action_invoke`, `cross_chat_invoke`, `handoff_status`, `chat_usage`, and `chat_reset`. The HTTP endpoint rejects inactive credentials and rechecks membership on each operation. Remote workstations must be able to reach the platform's bound private address. The existing SSH watchdog still owns remote execution.
+Codex and OpenCode runs receive a temporary `enterprise` MCP connection to the same Rust service, using an ephemeral per-run credential (never the owner key). Available tools: `workspace_list`, `action_list`, `action_save`, `action_invoke`, `cross_chat_invoke`, `handoff_status`, `chat_usage`, and `chat_reset`. The HTTP endpoint rejects inactive credentials and rechecks membership on each operation. Antigravity runs use native tools and the platform's queued delegation; enterprise MCP tools are not attached to that harness. Remote workstations must be able to reach the platform's bound private address. The existing SSH watchdog still owns remote execution.
 
 Cross-chat work requires the sender to participate in **both** chats and the recipient to participate in the destination. Only the explicit task crosses; the recipient resumes its own destination session. A stable request ID prevents duplicate invocation. The source receives a linked result and one summary when both runs finish. Membership is checked again before delivery. Requests are one hop, at most three per turn; receipt summaries cannot launch more work, preventing automatic reply loops.
 
@@ -49,6 +49,35 @@ Codex and OpenCode can delegate to each other using the existing organization an
 A failed, timed-out or interrupted run gets one read-only review by an eligible manager or teammate. Private delegate failures already return to their parent manager; reviews do not spawn reviews. No task is automatically retried or moved to another harness. If no eligible reviewer exists, the owner receives a notice. `/usage` distinguishes recorded native token/cost measurements from unavailable quota information.
 
 OpenCode standalone/private server processes belong to the existing local process tree or SSH watchdog; they are not a separately deployed daemon. Native session data stays under `org/.state/runtime` locally, or the organization namespace under `~/.local/share/agentic-enterprise` remotely. These protected directories must be included in stopped-service backups if native-session recovery is required.
+
+## Antigravity over SSH
+
+Antigravity profiles use the selected workstation's `agy` executable, native login
+and advertised model catalog. **Read only** uses native `--mode plan --sandbox`;
+**Workspace write** uses `--mode accept-edits --sandbox`. Sandbox restrictions do
+not replace the task's scope. Existing project workdirs override profile defaults.
+
+In a project chat, explicitly addressing the selected chat lead starts a validated
+coordinator decision; addressing a specialist starts a direct task. Delegation and
+summary use the existing persisted queue. Ordinary room posts do not invoke agents.
+Failed work receives the existing manager review and is not automatically retried.
+
+The cockpit polls every two seconds and shows native categories such as reading,
+searching and replying with safe relative filenames. Raw commands, file contents,
+native payloads and credentials stay outside its public status contract. Complete
+per-step token measurements are counted once; unavailable coverage remains unknown.
+Opening Live Preview never starts work.
+
+This slice does not attach platform MCP tools to Antigravity. Enterprise owner
+questions and cross-chat tools are not available through this adapter. The SSH
+Skills tab inventories installed workdir bundles and previews their instructions;
+see [Agent terminal and skills](#agent-terminal-and-skills) for its scope. Image
+attachments return an explicit unsupported error. Do not copy
+an ephemeral platform token into a workstation's global or project native config.
+
+For Docker key mounting, use [the selected-key override](compose.ssh.example.yaml)
+and the [SSH pilot guide](../docs/antigravity-ssh-cockpit-pilot.md). Private keys and
+provider login state do not belong in images or the repository.
 
 ## Custom Codex catalogs
 
@@ -90,7 +119,7 @@ Organization cards and settings show **Online**, **Offline**, **Needs attention*
 
 The Rust backend retains the existing queue, scoped delegation and per-group/per-side sessions. A small Python bridge invokes native Codex over SSH only when assigned work; it is sent on demand, opens no listening port, and needs no package installation. Native credentials and `.env` values stay on the workstation. Remote Codex homes live under `~/.local/share/agentic-enterprise/<organization-namespace>/sessions/`; chat and run records remain in local `org`. Session/workdir identity includes the SSH alias. Use one stable alias per workstation.
 
-Terminal runs `/bin/sh` commands remotely with Stop, history and environment redaction. Skills uses remote Codex discovery and previews project instructions. Code browsing and linked report/image previews read the saved remote workdir over SSH. `/usage` still checks the platform machine's signed-in account. Agent scripts saved in Code remain organization files on the platform machine.
+Terminal runs `/bin/sh` commands remotely with Stop, history and environment redaction. Skills uses the selected harness's project catalog or, for Antigravity, an installed-workdir inventory, and previews project instructions. Code browsing and linked report/image previews read the saved remote workdir over SSH. `/usage` still checks the platform machine's signed-in account. Agent scripts saved in Code remain organization files on the platform machine.
 
 Stop terminates the owned remote process group. A stalled/lost controller stops owned work after about 15 seconds without a heartbeat. Lost completion confirmation is **interrupted**, never automatically retried; inspect existing side effects before retrying. Detached daemons deliberately created outside the process group are outside this stop contract.
 
@@ -156,9 +185,17 @@ Authenticated GET `/api/agents/{id}/organization-context` uses the same snapshot
 
 ## Agent terminal and skills
 
+Agent execution timeouts remain `timed_out` when the SSH bridge acknowledges stopping the process as `cancelled`. Runs show the configured execution limit and advise inspecting partial results before continuing. An explicit Stop remains `cancelled`; an SSH disconnect without a completion receipt remains `interrupted`.
+
 Open **Organization → an agent → Terminal**. Enter a PowerShell command and click **Run command** (Ctrl+Enter). Each command starts in the saved workdir with the attached workdir's `.env` and scoped `CODEX_HOME`. This is an owner-operated CLI: it runs with your Windows account's access, independently of the agent's Codex sandbox setting. Commands do not retain shell variables or `cd` changes between submissions; combine related steps in one command or script. Output streams into the panel; Stop terminates the owned process tree. Recent command history and results survive reload/restart in organization SQLite. Interrupted commands are marked, never replayed.
 
-**Skills** lists project skills reported by the installed Codex CLI for this workdir, including inherited repository skills. Filter by name/description, click to read `SKILL.md`, and Refresh after installation or changes. Discovery errors are shown. Personal/global/bundled skills are not part of this project list. Previews are limited to discovered `SKILL.md` files inside this codebase; external symlink targets must be inspected through Terminal.
+**Skills** lists project skills for the selected harness. Codex reports its native workdir catalog, including inherited repository skills; OpenCode reports its native repository catalog. Filter by name/description, click to read `SKILL.md`, and Refresh after installation or changes. Discovery errors are shown. Personal/global/bundled skills are not part of this project list. Previews are limited to discovered `SKILL.md` files inside this codebase; external symlink targets must be inspected through Terminal.
+
+For **Antigravity over SSH**, the list inventories direct skill folders under the attached canonical workdir's `.agents/skills` and legacy `.agent/skills`, following [Antigravity's documented project locations](https://antigravity.google/docs/skills). It excludes ancestor directories, global skills and plugin bundles. Refresh rereads installed files without starting an agent or using provider quota. An empty installation returns an empty list. Install a bundle in this workdir through Terminal, then return to Skills and Refresh; **Install with CLI** opens Terminal and does not install a repository automatically.
+
+The inventory validates YAML frontmatter and shows readable file errors beside valid entries. A skill needs a string description; an omitted name defaults to its folder. Names are limited to 64 characters without whitespace, and descriptions to 1024 characters. Across both locations, discovery allows at most 1024 directory entries and 256 candidate bundles. Each `SKILL.md` is limited to 256 KiB, frontmatter to 16 KiB per file and 2 MiB in aggregate; exceeding a discovery limit reports an error. Preview accepts only a current valid catalog path contained in the attached workdir, with sensitive paths and external symlink targets rejected.
+
+This Antigravity inventory confirms installed files and metadata. It does not prove that the native CLI loaded or activated a skill in a conversation. AGY 1.3.1 has an interactive `/skills` panel but no advertised machine-readable project catalog; actual skill use remains part of a separate native agent run.
 
 For example, run the [Vercel Skills CLI](https://github.com/vercel-labs/skills) in Terminal to install a project skill, then open Skills:
 
@@ -283,9 +320,11 @@ First restored startup resets unavailable native session handles and marks knowl
 ```powershell
 cargo fmt --all --check
 cargo test --workspace --locked
-cd frontend
+npm ci
 npm run build
-npm run lint
+npm run lint --workspace frontend
+npm run check --workspace cockpit
+cd frontend
 node tests/native-smoke.mjs basic
 node tests/native-smoke.mjs codex
 node tests/native-smoke.mjs knowledge

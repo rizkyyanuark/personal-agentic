@@ -61,12 +61,14 @@ pub enum Harness {
     #[default]
     Codex,
     Opencode,
+    Antigravity,
 }
 impl Harness {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Codex => "codex",
             Self::Opencode => "opencode",
+            Self::Antigravity => "antigravity",
         }
     }
 }

@@ -327,8 +327,9 @@ export function AgentSkills({
       </div>
       <code className="tools-workdir">{agent.workdir.path}</code>
       <p className="hint">
-        Project skills discovered by the agent’s harness, including inherited skills from this
-        repository.
+        {agent.harness === "antigravity" && agent.workdir.ssh_host
+          ? "Skills installed in this workdir for Antigravity."
+          : "Project skills discovered by the agent’s harness, including inherited skills from this repository."}
       </p>
       <Button variant="outline" size="sm" onClick={onTerminal}>
         <Terminal size={14} /> Install with CLI

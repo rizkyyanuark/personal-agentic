@@ -23,11 +23,12 @@ try {
         Expand-Archive -LiteralPath "tools\$ortFile" -DestinationPath tools -Force
     }
     Copy-Item -Path "tools\onnxruntime-win-x64-$ortVersion\lib\*.dll" -Destination target\debug -Force
-    Push-Location frontend
+    $previousPuppeteerDownload = $env:PUPPETEER_SKIP_DOWNLOAD
     try {
+        $env:PUPPETEER_SKIP_DOWNLOAD = 'true'
         npm.cmd ci
-        if ($LASTEXITCODE) { throw 'Frontend dependency installation failed.' }
+        if ($LASTEXITCODE) { throw 'Web workspace dependency installation failed.' }
         npm.cmd run build
         if ($LASTEXITCODE) { throw 'Frontend build failed.' }
-    } finally { Pop-Location }
+    } finally { $env:PUPPETEER_SKIP_DOWNLOAD = $previousPuppeteerDownload }
 } finally { Pop-Location }

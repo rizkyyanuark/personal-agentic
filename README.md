@@ -22,12 +22,31 @@ From `src`:
 ```powershell
 cargo fmt --all --check
 cargo test --workspace --locked
-Set-Location frontend
-npm run lint
-npm run build
+npm run lint --workspace frontend
+npm run build --workspace frontend
 ```
 
 See [platform documentation](src/README.md), [deployment and worker setup](src/DEPLOYMENT.md), [verification](src/VERIFICATION.md), and [upstream sources](src/UPSTREAM.md). `org/` and `workdir/` contain local state and attached codebases; both are excluded from Git.
+
+**Organization → Live Preview** opens the read-only 3D office in a nearly fullscreen
+floating window above Organization. Agent cards keep their original desk-camera focus.
+Use **Create missing cockpit profiles** once to add Orion, Nova, Atlas, Lyra and
+Axiom. The profiles remain paused until you attach their runtime/workdir and
+configure them. Orion reports to the workspace owner; the four specialists report
+to Orion. Existing agents are preserved. The preview observes real work started
+through chat or Actions and never starts work on its own.
+
+The React UI and Three.js scene are private npm workspaces under `src/frontend`
+and `src/cockpit`. Install web dependencies with `npm ci` from `src`; Docker builds
+one frontend bundle served by Rust on the same origin. See the
+[integration strategy](docs/cockpit-integration-strategy.md).
+
+## Development and releases
+
+See [the dev/prod workflow](docs/DEV-PROD-WORKFLOW.md) for the GitLab release
+path, GitHub downstream copy, independent production state and activation
+requirements. The initial GitLab pipeline runs checks on the isolated
+`personal-agentic-ci` runner; production deployment is a separate setup step.
 
 ## License
 

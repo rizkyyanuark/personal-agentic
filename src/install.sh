@@ -39,7 +39,8 @@ export PROTOC="$(command -v protoc)"
 export PROTOC_INCLUDE="$(dirname "$(dirname "$PROTOC")")/include"
 cargo +1.94.1 build --locked
 bash scripts/install-onnx.sh "$install_root/src/target/debug"
-(cd frontend && npm ci && npm run build)
+PUPPETEER_SKIP_DOWNLOAD=true npm ci
+npm run build
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/agentic-enterprise" <<EOF
 #!/bin/sh

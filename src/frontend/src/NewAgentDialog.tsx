@@ -38,7 +38,7 @@ export function NewAgentDialog({ agents, groups, projectId, controllerAccess, wo
       setBusy(true); setError("");
       void (async () => {
         try {
-          const workdir = project?.workdir ?? (await post<{ workspace: Workspace }>("/workspaces/probe", { path, runtime_id: runtimeId || null, ssh_host: sshHost || null })).workspace;
+          const workdir = project?.workdir ?? (await post<{ workspace: Workspace }>("/workspaces/probe", { path, harness: chosenHarness, runtime_id: runtimeId || null, ssh_host: sshHost || null })).workspace;
           const agent = await post<Agent>("/agents", {
             id: "", name: String(fields.get("name")), project_id: scope || null, runtime_id: workdir.runtime_id,
             position: String(fields.get("position")), role: String(fields.get("role")),
