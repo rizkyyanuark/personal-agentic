@@ -255,8 +255,10 @@ and intended production host; GitLab stores source and published images.
 `registry_auth` exercises the registry through the real GitLab job credential.
 It checks unauthenticated access, the trusted GitLab authentication endpoint,
 project-scoped `pull,push` permission, an authenticated registry request, and a
-real empty blob upload initiation/cancellation (HTTP 202/204). Upload cleanup
-must stay on the same HTTPS registry and repository path.
+real empty blob upload initiation/completion (HTTP 202/201), followed by a
+HEAD request proving HTTP 200 and zero bytes. The upload URL must stay on the
+same HTTPS registry and repository path. The stable empty blob is reused across
+probes; each upload session is completed using only `pull,push` permission.
 Credentials never enter its output or artifacts. This check alone does not
 prove that an image was uploaded.
 

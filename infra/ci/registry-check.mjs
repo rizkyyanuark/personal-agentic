@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 class RegistryCheckError extends Error {}
 
 function requireValue(name) {
@@ -149,22 +151,31 @@ async function main() {
   }
   const location = upload.headers.get('location');
   await upload.body?.cancel();
-  if (!location) throw new RegistryCheckError('Registry upload did not return a cleanup location');
-  let cleanupUrl;
+  if (!location) throw new RegistryCheckError('Registry upload did not return a completion location');
+  let uploadUrl;
   try {
-    cleanupUrl = new URL(location, registry);
+    uploadUrl = new URL(location, registry);
   } catch {
-    throw new RegistryCheckError('Registry upload returned an invalid cleanup URL');
+    throw new RegistryCheckError('Registry upload returned an invalid completion URL');
   }
-  if (cleanupUrl.origin !== registry.origin || cleanupUrl.username || cleanupUrl.password || cleanupUrl.hash
-    || !cleanupUrl.pathname.startsWith(uploadEndpoint.pathname)) {
+  if (uploadUrl.origin !== registry.origin || uploadUrl.username || uploadUrl.password || uploadUrl.hash
+    || !uploadUrl.pathname.startsWith(uploadEndpoint.pathname)) {
     throw new RegistryCheckError('Registry upload location must stay on the trusted HTTPS registry and repository upload path');
   }
-  const cleanup = await request(cleanupUrl, { authorization: `Bearer ${token}` }, 'Registry upload cleanup', 'DELETE');
-  if (cleanup.status !== 204) {
-    throw new RegistryCheckError(`Registry upload cleanup returned HTTP ${cleanup.status}; expected 204`);
+  const blobDigest = `sha256:${createHash('sha256').digest('hex')}`;
+  uploadUrl.searchParams.set('digest', blobDigest);
+  const completed = await request(uploadUrl, { authorization: `Bearer ${token}` }, 'Registry empty blob completion', 'PUT');
+  if (completed.status !== 201) {
+    throw new RegistryCheckError(`Registry empty blob completion returned HTTP ${completed.status}; expected 201`);
   }
-  await cleanup.body?.cancel();
+  await completed.body?.cancel();
+  const blob = await request(new URL(`/v2/${repository}/blobs/${blobDigest}`, registry), {
+    authorization: `Bearer ${token}`,
+  }, 'Registry empty blob verification', 'HEAD');
+  if (blob.status !== 200 || blob.headers.get('content-length') !== '0') {
+    throw new RegistryCheckError(`Registry empty blob verification returned HTTP ${blob.status}; expected 200 and zero bytes`);
+  }
+  await blob.body?.cancel();
   console.log(JSON.stringify({
     registry: registry.origin,
     repository,
@@ -173,7 +184,9 @@ async function main() {
     scoped_actions: ['pull', 'push'],
     authenticated_status: 200,
     upload_started: 202,
-    upload_cancelled: 204,
+    upload_completed: 201,
+    blob_verified: 200,
+    probe_blob_bytes: 0,
   }));
 }
 
