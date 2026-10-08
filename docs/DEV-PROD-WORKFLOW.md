@@ -259,14 +259,19 @@ Credentials never enter its output or artifacts. This check alone does not
 prove that an image was uploaded.
 
 Verification jobs export their checked frontend and a stripped native ARM64
-controller binary. The image job selects `frontend-ci` and `backend-ci` in the
+controller binary compressed with single-threaded XZ. A real build initially
+failed artifact upload with HTTP 413: its debug-stripped binary was 470 MiB.
+Removing unneeded symbols and compressing the binary reduced the transfer to
+43,033,244 bytes. The image job decompresses it before packaging and selects
+`frontend-ci` and `backend-ci` in the
 existing Dockerfile, avoiding a second compilation of the Rust dependency tree.
 Normal Docker builds still compile source using the existing default stages.
 Runtime libraries and the AGY executable are installed through the existing
 Dockerfile. Provider credentials and application state stay outside the image.
 
 `image_publish` is automatic only on protected `main`. The integration MR has
-an optional manual trial; other feature branches do not publish images.
+an optional manual trial restricted to this same project's source branch;
+other feature branches do not publish images.
 The result is tagged with the full commit SHA and records its registry digest.
 `image_smoke` uses that digest as its Docker-executor image and starts the actual
 controller with disposable state. It verifies health, rejected authentication,

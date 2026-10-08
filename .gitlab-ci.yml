@@ -41,7 +41,7 @@ backend:
   image: rust:1.94-bookworm
   before_script:
     - apt-get update
-    - apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev clang lld cmake libssl-dev pkg-config
+    - apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev clang lld cmake libssl-dev pkg-config xz-utils
     - protoc --version
     - |
       cat > /usr/local/bin/cc <<'SH'
@@ -66,13 +66,14 @@ backend:
     - cargo test --workspace --locked --verbose
     - cargo build --locked --bin agentic-enterprise --verbose
     - mkdir -p ci-artifacts
-    - strip --strip-debug -o ci-artifacts/agentic-enterprise "$CARGO_TARGET_DIR/debug/agentic-enterprise"
+    - strip --strip-unneeded -o ci-artifacts/agentic-enterprise "$CARGO_TARGET_DIR/debug/agentic-enterprise"
     - chmod 755 ci-artifacts/agentic-enterprise
-    - du -h ci-artifacts/agentic-enterprise
+    - xz -6 -T1 ci-artifacts/agentic-enterprise
+    - du -h ci-artifacts/agentic-enterprise.xz
   artifacts:
     expire_in: 7 days
     paths:
-      - src/ci-artifacts/agentic-enterprise
+      - src/ci-artifacts/agentic-enterprise.xz
 
 registry_auth:
   stage: verify
@@ -92,7 +93,7 @@ ssh_bridge:
 .image_rules:
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "codex/dev-prod-integration"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == $CI_PROJECT_ID && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "codex/dev-prod-integration"'
       when: manual
       allow_failure: true
 
@@ -114,6 +115,8 @@ image_publish:
       umask 077
       test "$(uname -m)" = aarch64
       test "$(id -u)" = 1000
+      xz -d src/ci-artifacts/agentic-enterprise.xz
+      chmod 755 src/ci-artifacts/agentic-enterprise
       export DOCKER_CONFIG="$(mktemp -d)"
       trap 'rm -rf "$DOCKER_CONFIG"' EXIT
       registry_auth=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
@@ -186,7 +189,7 @@ image_smoke:
       artifacts: true
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "codex/dev-prod-integration"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == $CI_PROJECT_ID && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "codex/dev-prod-integration"'
   timeout: 10m
   script:
     - bash infra/ci/smoke-image.sh > image-smoke.json
