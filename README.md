@@ -52,8 +52,8 @@ separate setup step.
 
 The pipeline also checks registry authentication and exports the verified ARM64
 binary/frontend for image packaging. Image build/publish and digest smoke jobs
-are prepared; activating their rootless builder requires approval of the
-dedicated host security profiles described in the workflow. The current
+are prepared with approved dedicated rootless builder profiles described in
+the workflow. The current
 verification runner retains its existing security settings.
 
 ## License

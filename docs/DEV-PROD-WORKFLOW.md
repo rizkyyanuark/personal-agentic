@@ -274,8 +274,8 @@ owner login, workspace/cockpit responses, logout revocation, frontend bytes,
 the source AGY SVG hash and the bundled CLI. Production deployment is not part
 of these jobs. Optional MR publishing is not a release approval.
 
-Image runner activation is pending approval of its host security configuration.
-The proposed template is `infra/gitlab-runner/image-runner.template.toml`, using
+The host security configuration was explicitly approved on 2026-10-08.
+The template is `infra/gitlab-runner/image-runner.template.toml`, using
 the pinned BuildKit 0.34.0 rootless image, UID 1000, no host Docker socket,
 no production state mounts, and the existing 1 CPU/1 GiB/4 GiB combined limits.
 Register it in the existing manager with global `concurrent = 1`, so verification
@@ -285,17 +285,19 @@ this project's platform digests for the smoke job.
 
 Default Docker confinement rejected the rootless namespace probe. The proposed
 dedicated profiles preserve the default seccomp rules except for `clone`,
-`unshare`, `mount`, `umount2`, `setns`, and `pivot_root`; AppArmor permits those
+`unshare`, `mount`, `umount2`, `setns`, `pivot_root`, and `sethostname`; AppArmor permits those
 builder operations while retaining sensitive `/proc` and `/sys` write denials.
 Neither profile is unconfined. The seccomp baseline was downloaded from
 `moby/profiles/main/seccomp/default.json` on 2026-10-08; record/review the baseline
-against the host's Docker 29.7.2 before activation. The profile files and runner
-template are reviewable proposals, not proof of working builds. Automatic
-approval review rejected loading the persistent AppArmor profile without
-explicit approval of these settings and their impact on the shared host.
-No new profile was loaded and no image runner was registered during preparation.
+against the host's Docker 29.7.2. A bounded native ARM64 build ran `RUN id && touch`
+and exported an OCI image successfully with these enforced profiles. The outer
+builder used UID 1000 and `CapEff: 0000000000000000`; only its own user namespace
+sees UID 0. Runner #4 is locked to this project and was registered paused in the
+existing manager. Automatic approval review required separate explicit approval
+for the persistent profiles and `sethostname`; both approvals were obtained.
+The CI wrapper uses runc's `--no-new-keyring` so `keyctl` stays denied.
 
-After approval, load the host AppArmor profile and put the seccomp JSON under
+Load the host AppArmor profile and put the seccomp JSON under
 the manager's existing root-private configuration mount at
 `/etc/gitlab-runner/security/buildkit-seccomp.json`. Runner 19.2.1 reads that JSON
 inside the manager (`seccomp=/absolute/path`, with `=`); AppArmor resolves on

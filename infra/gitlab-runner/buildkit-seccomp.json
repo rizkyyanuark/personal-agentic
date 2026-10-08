@@ -1001,7 +1001,6 @@
         "quotactl",
         "quotactl_fd",
         "setdomainname",
-        "sethostname",
         "syslog",
         "umount"
       ],
@@ -1177,7 +1176,8 @@
         "mount",
         "umount2",
         "setns",
-        "pivot_root"
+        "pivot_root",
+        "sethostname"
       ],
       "action": "SCMP_ACT_ALLOW"
     }

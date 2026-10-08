@@ -66,7 +66,7 @@ backend:
     - cargo test --workspace --locked --verbose
     - cargo build --locked --bin agentic-enterprise --verbose
     - mkdir -p ci-artifacts
-    - strip --strip-debug --output=ci-artifacts/agentic-enterprise "$CARGO_TARGET_DIR/debug/agentic-enterprise"
+    - strip --strip-debug -o ci-artifacts/agentic-enterprise "$CARGO_TARGET_DIR/debug/agentic-enterprise"
     - chmod 755 ci-artifacts/agentic-enterprise
     - du -h ci-artifacts/agentic-enterprise
   artifacts:
@@ -107,7 +107,7 @@ image_publish:
   timeout: 45m
   resource_group: arm64-image
   variables:
-    BUILDKITD_FLAGS: --oci-worker-no-process-sandbox --oci-worker-snapshotter=native --config /tmp/personal-agentic-buildkit.toml
+    BUILDKITD_FLAGS: --oci-worker-no-process-sandbox --oci-worker-snapshotter=native --oci-worker-binary /tmp/personal-agentic-runc --config /tmp/personal-agentic-buildkit.toml
   script:
     - |
       set -eu
@@ -119,6 +119,37 @@ image_publish:
       registry_auth=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
       printf '{"auths":{"%s":{"auth":"%s"}}}\n' "$CI_REGISTRY" "$registry_auth" > "$DOCKER_CONFIG/config.json"
       unset registry_auth
+      cat > /tmp/personal-agentic-runc <<'SH'
+      #!/bin/sh
+      set -eu
+      remaining=$#
+      awaiting_value=0
+      seen_command=0
+      while [ "$remaining" -gt 0 ]; do
+        argument=$1
+        shift
+        insert=0
+        if [ "$seen_command" -eq 0 ]; then
+          if [ "$awaiting_value" -eq 1 ]; then
+            awaiting_value=0
+          else
+            case "$argument" in
+              --root|--log|--log-format|--rootless) awaiting_value=1 ;;
+              -*) : ;;
+              run|create) seen_command=1; insert=1 ;;
+              *) seen_command=1 ;;
+            esac
+          fi
+        fi
+        set -- "$@" "$argument"
+        if [ "$insert" -eq 1 ]; then
+          set -- "$@" --no-new-keyring
+        fi
+        remaining=$((remaining - 1))
+      done
+      exec /usr/bin/buildkit-runc "$@"
+      SH
+      chmod 755 /tmp/personal-agentic-runc
       printf '[worker.oci]\nmax-parallelism = 1\n' > /tmp/personal-agentic-buildkit.toml
       buildctl-daemonless.sh build \
         --frontend dockerfile.v0 \
