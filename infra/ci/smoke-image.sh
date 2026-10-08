@@ -39,6 +39,17 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+for library_target in "$(command -v agentic-enterprise)" "${ORT_DYLIB_PATH:?Missing ONNX runtime path}"; do
+  if ! ldd "$library_target" >"$smoke_dir/linkage.log" 2>&1; then
+    cat "$smoke_dir/linkage.log" >&2
+    exit 1
+  fi
+  if grep -q 'not found' "$smoke_dir/linkage.log"; then
+    cat "$smoke_dir/linkage.log" >&2
+    exit 1
+  fi
+done
+
 base=http://127.0.0.1:8765
 body="$smoke_dir/response"
 cookies="$smoke_dir/cookies"
@@ -151,7 +162,7 @@ agy_version=$(timeout 15s agy --version)
 }
 SMOKE_ASSET_COUNT="$asset_count" SMOKE_AGY_VERSION="$agy_version" \
   perl -MJSON::PP -e '
-    print encode_json({architecture => "arm64", health => 200,
+    print encode_json({architecture => "arm64", dynamic_libraries_resolved => JSON::PP::true, health => 200,
       unauthenticated_state => 401, invalid_login => 401, owner_login => 200,
       authenticated_state => 200, cockpit => 200, logout_revocation => 401,
       root_html_matches => JSON::PP::true, assets_verified => 0 + $ENV{SMOKE_ASSET_COUNT},
