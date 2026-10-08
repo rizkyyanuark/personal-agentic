@@ -20,7 +20,7 @@ GitLab at `gitlab.tugasakhir.space` manages repositories, pipelines and image
 storage. Its origin is `3.222.143.253`. Both EC2 instances are ARM64
 `t4g.small` instances. Production images must support `linux/arm64`.
 
-## Verified baseline — 2026-10-08
+## Pre-initialization baseline — 2026-10-08
 
 - GitLab runs `gitlab/gitlab-ce:19.2.7-ce.0`. Its local sign-in endpoint returned
   HTTP 200; the registry at `127.0.0.1:5050/v2/` returned HTTP 401, an
@@ -34,10 +34,10 @@ storage. Its origin is `3.222.143.253`. Both EC2 instances are ARM64
   `privileged = false` does not remove the access granted by this socket.
 - `agent.tugasakhir.space` did not resolve from the laptop. The inspected EC2
   Nginx configuration had no server block for it.
-- Git currently points to GitHub, not a GitLab project.
-- The current checkout and the checkout serving local dev have the same base
+- At the start of the audit, Git pointed to GitHub, not a GitLab project.
+- Before reconciliation, this checkout and the checkout serving local dev had the same base
   commit, `42fe706be2b7d05f3e90010bdeed5bd000730bed`, but different uncommitted
-  changes. The dev checkout includes AGY and cockpit changes absent here.
+  changes. The dev checkout included AGY and cockpit changes absent here.
 
 ## Release flow
 
