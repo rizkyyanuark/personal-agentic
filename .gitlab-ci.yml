@@ -10,6 +10,7 @@ stages:
   - verify
   - image
   - smoke
+  - deploy
 
 default:
   tags:
@@ -90,6 +91,14 @@ ssh_bridge:
     - apt-get install -y --no-install-recommends git
   script:
     - python src/backend/tests/antigravity_skills.py
+
+production_config:
+  stage: verify
+  image: python:3.11-slim
+  script:
+    - python -c "import ast, pathlib; ast.parse(pathlib.Path('infra/production/release.py').read_text())"
+    - bash -n infra/production/bootstrap.sh
+    - sh -n infra/production/deploy-command.sh
 
 .image_rules:
   rules:
@@ -205,3 +214,59 @@ image_smoke:
     expire_in: 7 days
     paths:
       - image-smoke.json
+
+deploy_production:
+  stage: deploy
+  image: python:3.11-slim
+  interruptible: false
+  resource_group: production
+  environment:
+    name: production
+    url: https://agent.tugasakhir.space
+  needs:
+    - job: image_publish
+      artifacts: true
+    - job: image_smoke
+      artifacts: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+      when: manual
+      allow_failure: false
+  timeout: 20m
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends openssh-client ca-certificates curl
+  script:
+    - |
+      set -eu
+      test -f "$PROD_SSH_PRIVATE_KEY"
+      test -f "$PROD_SSH_KNOWN_HOSTS"
+      chmod 600 "$PROD_SSH_PRIVATE_KEY" "$PROD_SSH_KNOWN_HOSTS"
+      python - <<'PY' > release-request.json
+      import json, os, re
+      image = os.environ["TESTED_IMAGE"]
+      match = re.fullmatch(r"registry\.tugasakhir\.space(?::443)?/rizkyyanuark/personal-agentic/platform@(sha256:[0-9a-f]{64})", image)
+      if not match:
+          raise SystemExit("The tested image must belong to this production repository")
+      print(json.dumps({"action": "promote", "digest": match[1],
+                        "commit": os.environ["CI_COMMIT_SHA"],
+                        "svg_sha256": os.environ["SMOKE_EXPECTED_AGY_SHA256"]}))
+      PY
+      ssh -o BatchMode=yes -o ConnectTimeout=10 -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROD_SSH_KNOWN_HOSTS" \
+        -i "$PROD_SSH_PRIVATE_KEY" personal-agentic-deploy@172.31.7.134 release \
+        < release-request.json > production-release.json
+      cat production-release.json
+      curl --fail --silent --show-error --max-time 20 https://agent.tugasakhir.space/api/health > production-health.json
+      python - <<'PY'
+      import json
+      with open("production-health.json") as source:
+          if json.load(source).get("status") != "ok":
+              raise SystemExit("Public production health did not confirm readiness")
+      PY
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - production-release.json
+      - production-health.json

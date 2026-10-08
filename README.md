@@ -47,14 +47,15 @@ See [the dev/prod workflow](docs/DEV-PROD-WORKFLOW.md) for the GitLab release
 path, GitHub downstream copy, independent production state and activation
 requirements. The GitLab pipeline uses project runner #3 on the existing
 ARM64 workspace EC2. Verification jobs have CPU, memory, and swap limits;
-the full merge-request pipeline has passed. Production deployment is a
-separate setup step.
+the full merge-request pipeline has passed. Production Compose, bootstrap,
+restricted image promotion and HTTPS proxy configuration live in
+`infra/production`. The workflow records the verified server preparation and
+the remaining review/activation steps.
 
-The pipeline also checks registry authentication and exports the verified ARM64
-binary/frontend for image packaging. Image build/publish and digest smoke jobs
-are prepared with approved dedicated rootless builder profiles described in
-the workflow. The current
-verification runner retains its existing security settings.
+The pipeline checks registry authentication, builds and smoke-tests an ARM64
+image, then offers a manual production deployment on protected `main`.
+Image publishing uses the approved dedicated rootless builder profiles described
+in the workflow. The verification runner retains its existing security settings.
 
 ## License
 

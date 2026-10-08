@@ -1,5 +1,135 @@
 # Dev and production workflow
 
+## Production preparation — 2026-10-09
+
+The server installation is `/opt/personal-agentic` on workspace EC2
+`34.196.37.78`. Local development data is unchanged. The new production
+controller and Matrix run as Compose project `personal-agentic-prod`, with
+loopback ports 18766/18767 and separate named volumes. Each service is limited
+to 0.5 CPU, 512 MiB RAM and 1 GiB combined RAM/swap.
+
+The user completed registry login with the project's `read_registry` deploy
+token in `/opt/personal-agentic/registry-auth`. This root-private directory is
+explicitly passed to Docker; it is independent of the Ubuntu user's Docker
+login. No registry password or owner key belongs in this repository or CI logs.
+
+The bootstrap uses pipeline #23's verified image for commit
+`f70653efa26463271915aa9a2ef5e651ce3e176b`:
+
+```text
+registry.tugasakhir.space/rizkyyanuark/personal-agentic/platform@sha256:08a16291455d01fafb2aaecabb3085bd54da264068ef5d39c4cac812f6b5074a
+```
+
+Matrix registration/login and controller health returned success. Production
+Galileo uses the default organization, workstation `production-agy`, dedicated
+key `/run/ae-ssh/id_ed25519`, native `/home/ubuntu/.local/bin/agy` 1.3.1,
+and `/home/ubuntu/workspace/production/research`. A real direct run with
+`gemini-3.8-flash-high` succeeded and returned `AGY_PRODUCTION_OK`; its ID is
+`9e4d0ac8-2185-4274-975b-5ac9a6a41032`. The runtime shares Ubuntu's existing
+AGY provider identity; the workdir and controller state are separate.
+
+Cloudflare has a DNS-only A record for `agent.tugasakhir.space` pointing to
+the workspace EC2, TTL 300. Let's Encrypt issued the origin certificate,
+initially expiring 2027-01-06. This avoids changing TLS settings for other
+hostnames. `certbot.timer` handles renewal; its deploy hook validates and reloads
+Nginx. No certificate contact email has been configured.
+
+**The public site is in maintenance (HTTPS 503).** The final proxy configuration
+is staged at `/opt/personal-agentic/nginx.conf`. The integration MR is still
+draft; this bootstrap is preparation, not a reviewed `main` release. The final
+activation must follow review and a successful protected-main image pipeline.
+
+The final Nginx configuration was exercised on a temporary loopback listener
+using the real certificate and production app: health/UI/login/state/cockpit
+returned 200, anonymous state/cockpit returned 401, and logout revoked the
+session (401). SSE delivered 39 event frames and keepalives ten seconds apart.
+The temporary listener was removed. A real `certbot renew --dry-run` also passed.
+
+## Operating the production installation
+
+Versioned deployment files live in [`infra/production`](../infra/production).
+`bootstrap.sh` validates the private configuration, pulls the selected digest,
+initializes Matrix once, verifies its bridge credentials and starts the app.
+It preserves existing Matrix data and rejects password/identity mismatches.
+
+`deploy_production` is a blocking manual GitLab job, available only on protected
+`main`, after `image_publish` and `image_smoke`. It promotes that pipeline's
+digest, full commit and source SVG hash through a restricted SSH command.
+`resource_group: production` serializes releases, and GitLab's prevention of
+outdated deployments is enabled. MR jobs cannot obtain the production variables.
+
+The two GitLab variables are **File**, **Protected**, environment scope
+**production**, with expansion disabled:
+
+| Variable | Purpose |
+| --- | --- |
+| `PROD_SSH_PRIVATE_KEY` | Dedicated `personal-agentic-deploy` identity; never the administrative PEM |
+| `PROD_SSH_KNOWN_HOSTS` | EC2 host key obtained through the trusted administrative connection |
+
+Multiline SSH keys use GitLab's visible variable storage setting because they
+cannot meet masked-variable whitespace constraints; the job never prints them.
+The deploy account has no Docker group membership, no general shell command,
+no forwarding and no PTY. Its forced command accepts only `release` and invokes
+`/usr/bin/python3 -I /usr/local/sbin/personal-agentic-release` through one exact
+sudoers rule. Application secrets and the registry credential stay on EC2.
+
+The helper accepts bounded JSON with `status`, `promote`, or `rollback` actions.
+It checks all persisted runs, terminals and indexing work, validates ARM64 and
+the image's commit label, and snapshots stopped production state before image
+replacement. It verifies login/session revocation, authenticated state, cockpit,
+UI and the AGY asset, and records release evidence under
+`/opt/personal-agentic/releases`. No image uses a mutable `latest` tag.
+
+Each backup contains the three Compose volumes, the actual remote runtime tree
+`/home/ubuntu/workspace/production`, private production configuration and the
+selected runtime SSH key. Archive hashes and database schema fingerprints are
+recorded in its manifest. Global AGY/provider authentication is excluded and
+must be re-established separately after a host recovery.
+
+Run read-only release verification from the server as an administrator:
+
+```sh
+printf '%s\n' '{"action":"status"}' | sudo python3 -I /usr/local/sbin/personal-agentic-release
+```
+
+An image rollback requires a recorded verified previous release and explicit
+`acknowledge_database_risk: true`. Schema changes are rejected automatically;
+equal schema alone cannot prove data-semantic compatibility. There is no
+automatic database restore. Review the saved manifest and application migrations
+before rollback. Never run `docker compose down -v`.
+
+The app currently has no atomic maintenance/drain endpoint. The helper checks
+again after stopping services and refuses an upgrade if work appeared during
+shutdown, but that work may have been interrupted. Release in a quiet window
+with schedules paused and no new user runs. Backups are on the same EC2 disk;
+off-host retention is still needed for recovery from instance/disk loss.
+
+Infrastructure files are installed by an administrator after review. The image
+promotion job cannot replace its own root helper, sudoers, Compose or Nginx
+configuration. Changes to those files require a separate reviewed installation.
+
+After the reviewed release is ready, activate the staged proxy and check it:
+
+```sh
+sudo install -m 644 /opt/personal-agentic/nginx.conf /etc/nginx/sites-available/personal-agentic.conf
+sudo nginx -t
+sudo systemctl reload nginx
+curl --fail https://agent.tugasakhir.space/api/health
+```
+
+Retrieve the **new** production owner key privately in your own SSH terminal:
+
+```sh
+sudo docker exec personal-agentic-prod-platform-1 cat /data/org/.state/owner.key
+```
+
+Enter it only on the production login page. Do not paste it into chat, a commit,
+or a pipeline variable. Save the registry token and owner key in private storage.
+
+Sources: [GitLab SSH file variables](https://docs.gitlab.com/ci/jobs/ssh_keys/),
+[deployment safety](https://docs.gitlab.com/ci/environments/deployment_safety/),
+[Certbot webroot and renewal](https://eff-certbot.readthedocs.io/en/stable/using.html#webroot).
+
 ## Target layout
 
 Local personal-agentic remains the development environment. Production starts
@@ -125,7 +255,7 @@ Source reconciliation → private GitLab project → bounded project runner →
 real MR verification → registry authentication/routing and ARM64 image proof → fresh
 production bootstrap → DNS/TLS → manual production deployment → real app proof.
 
-## Repository initialization
+## Repository initialization history — 2026-10-08
 
 The reconciled development source is prepared on `codex/dev-prod-integration`.
 The private GitHub destination is
