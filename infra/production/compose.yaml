@@ -30,7 +30,8 @@ services:
         bind:
           create_host_path: false
     depends_on:
-      - matrix
+      matrix:
+        condition: service_healthy
 
   matrix:
     image: ghcr.io/element-hq/synapse:v1.161.0
@@ -48,6 +49,12 @@ services:
       AE_MATRIX_BOT_PASSWORD: "${AE_MATRIX_BOT_PASSWORD:?Set the production Matrix bridge password}"
     volumes:
       - matrix-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8008/_matrix/client/versions', timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
 
 volumes:
   platform-data:

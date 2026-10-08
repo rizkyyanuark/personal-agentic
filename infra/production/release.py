@@ -427,15 +427,17 @@ def main() -> dict[str, object]:
                 set_image(target)
             compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
             proof = smoke(svg_hash)
-        except (ReleaseError, OSError, URLError, TimeoutError, json.JSONDecodeError):
+        except (ReleaseError, OSError, URLError, TimeoutError, json.JSONDecodeError) as error:
             transaction["status"] = "failed"
+            transaction["error"] = str(error) if isinstance(error, ReleaseError) else type(error).__name__
             try:
                 if image_reference() == current_image:
                     compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
                 save(RELEASES / "pending.json", transaction)
             except (ReleaseError, OSError):
                 raise ReleaseError("Release recovery failed; inspect the pending record and retained backup before restarting services") from None
-            raise ReleaseError("Candidate startup or verification failed; state backup retained. No automatic database restore or image rollback was attempted") from None
+            raise ReleaseError("Candidate startup or verification failed: " + transaction["error"]
+                               + "; state backup retained. No automatic database restore or image rollback was attempted") from None
         transaction.update(status="verified", verified_at=datetime.now(timezone.utc).isoformat(),
                            svg_sha256=proof["svg_sha256"], smoke=proof)
         if former is not None:

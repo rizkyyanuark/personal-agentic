@@ -45,6 +45,18 @@ returned 200, anonymous state/cockpit returned 401, and logout revoked the
 session (401). SSE delivered 39 event frames and keepalives ten seconds apart.
 The temporary listener was removed. A real `certbot renew --dry-run` also passed.
 
+The first restart exposed a dependency race: the controller attempted Matrix
+before its API was listening. Compose now waits for Matrix's healthcheck.
+A subsequent stopped-state backup/restart passed the full authentication,
+cockpit and asset checks. The verified baseline is recorded under
+`/opt/personal-agentic/releases/current.json`; its backup is
+`/opt/personal-agentic/backups/20261008T190119Z-17742661`.
+The first failed attempt was retained for diagnosis without changing the image.
+All four archive hashes were verified. Restoring database files into an isolated
+temporary directory produced `PRAGMA integrity_check = ok` for application,
+platform identity and Matrix databases; the restored app contained one agent
+and the successful AGY run. Live databases were not replaced.
+
 ## Operating the production installation
 
 Versioned deployment files live in [`infra/production`](../infra/production).
@@ -57,6 +69,8 @@ It preserves existing Matrix data and rejects password/identity mismatches.
 digest, full commit and source SVG hash through a restricted SSH command.
 `resource_group: production` serializes releases, and GitLab's prevention of
 outdated deployments is enabled. MR jobs cannot obtain the production variables.
+The one-time MR image trial is complete. Image publishing and image smoke now
+run only on protected `main`; ordinary MRs run the verification jobs.
 
 The two GitLab variables are **File**, **Protected**, environment scope
 **production**, with expansion disabled:
