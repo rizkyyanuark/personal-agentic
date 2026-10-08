@@ -68,12 +68,12 @@ storage. Its origin is `3.222.143.253`. Both EC2 instances are ARM64
    a production workdir. Record commit, digest and verification result in the
    GitLab deployment. Container startup alone is insufficient.
 
-The existing runner must not execute arbitrary merge-request code with the
-production Docker socket attached. Move builds to an isolated ARM64 builder
-before production activation. Neither the nearly full GitLab host nor the
-shared 2 GB application host is a suitable default for sustained Rust image
-builds alongside production. Select builder capacity after measuring a build;
-no server resizing or runner migration has been performed by this audit.
+The existing runner must not execute merge-request code with the production
+Docker socket mounted into jobs. Initial verification can use a separate,
+bounded project runner on the current application EC2. This provides container
+isolation, while CPU, memory, disk and the kernel remain shared. Measure the
+build and runtime responsiveness before approving sustained builds or release
+image publishing on this host. No server resizing is required for this trial.
 
 ## One-time production bootstrap
 
@@ -154,6 +154,48 @@ jobs remain pending. No production deploy job is included at this stage.
 
 Production service, DNS, deployment identity and image promotion remain later
 activation steps. Repository initialization does not deploy the application.
+
+### Bounded CI trial on the existing EC2
+
+The 2026-10-08 inventory found two running ARM64 EC2 instances, both
+`t4g.small`, serving GitLab and the application/runtime workspace. A third
+instance named `yunesa-prod-server` is stopped and belongs to another workload;
+it is not assigned to this runner. The laptop has a Docker Desktop daemon
+allocated about 7.6 GiB and eight CPUs, but Windows reported only about 415 MiB
+free physical memory during the check.
+
+The selected trial uses application EC2 `34.196.37.78` without changing its
+instance size. At the second inspection it had 1,179 MiB available memory,
+4,929 MiB unused swap, 24 GiB free disk, and approximately 98% idle CPU.
+Create a separate manager/configuration for this project; retain the existing
+runner and its other projects. Use no production credentials or application
+data mounts. Normal DNS, HTTP and HTTPS egress is needed for Git and packages.
+
+Create a project runner locked to personal-agentic with tag
+`personal-agentic-ci`, `run_untagged=false`, and `access_level=not_protected`
+so the current integration MR can run. Use the runner authentication-token
+workflow; keep the generated token on the builder outside Git and logs.
+Set global runner concurrency to one. Initially create it paused, then register with
+[runner.template.toml](../infra/gitlab-runner/runner.template.toml), which
+limits the one job to one CPU, 768 MiB RAM and 3 GiB combined RAM/swap, and mounts
+only its cache. Cargo compiles one job at a time; backend CI allows two hours.
+Jobs use their own Docker network and remain unprivileged. The runner manager
+uses the current host's Docker socket; that socket is not mounted into
+job containers.
+
+The checked manager image is
+`gitlab/gitlab-runner:v19.2.1@sha256:ef3fe28f71a5f3aae1a9dcd6e2494e6e42ada004f1e12ca04202d82a2afa9877`.
+Its manifest includes `linux/arm64`. The template is for the three existing
+verification jobs; image publishing and production deployment require later
+configuration. After activation, require the real MR pipeline to complete
+successfully and record the runner ID, job results, architecture, and measured
+resource use before marking CI ready. Stop or pause this project's CI if the
+host shows sustained memory/I/O pressure or AGY becomes unresponsive. A
+separate builder remains an option if measurements show this host is inadequate;
+no additional EC2 instance or upgrade is authorized for this trial.
+
+Sources: [runner registration templates](https://docs.gitlab.com/runner/register/#register-with-a-configuration-template),
+[Docker executor](https://docs.gitlab.com/runner/executors/docker/).
 
 ### Local Git connection
 

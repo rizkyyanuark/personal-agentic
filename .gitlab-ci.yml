@@ -16,7 +16,7 @@ default:
 variables:
   PUPPETEER_SKIP_DOWNLOAD: "true"
   RUST_MIN_STACK: "67108864"
-  CARGO_BUILD_JOBS: "2"
+  CARGO_BUILD_JOBS: "1"
 
 frontend:
   stage: verify
@@ -29,6 +29,7 @@ frontend:
 
 backend:
   stage: verify
+  timeout: 2h
   image: rust:1.94-bookworm
   before_script:
     - apt-get update

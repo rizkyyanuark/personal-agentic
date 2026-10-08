@@ -1,0 +1,23 @@
+[[runners]]
+  executor = "docker"
+  limit = 1
+  request_concurrency = 1
+
+  [runners.feature_flags]
+    FF_NETWORK_PER_BUILD = true
+
+  [runners.docker]
+    image = "node:22-bookworm-slim"
+    privileged = false
+    services_privileged = false
+    services_limit = 0
+    volumes = ["/cache"]
+    memory = "768m"
+    memory_swap = "3g"
+    cpus = "1"
+    cpu_shares = 256
+    oom_score_adjust = 500
+    shm_size = 268435456
+    pull_policy = "always"
+    allowed_pull_policies = ["always"]
+    allowed_images = ["node:22-bookworm-slim", "rust:1.94-bookworm", "python:3.11-slim"]
