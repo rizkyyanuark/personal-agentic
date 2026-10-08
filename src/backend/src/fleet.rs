@@ -146,6 +146,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn worker_enterprise_environment_keeps_antigravity_native_and_other_harnesses_authenticated()
+    -> Result<()> {
+        for token in [Value::Null, json!("unused-platform-token")] {
+            let mut command = Command::new("agy");
+            command.env_clear();
+            let mut secrets = Vec::new();
+            enterprise_environment(
+                &mut command,
+                &json!({"harness":"antigravity","tool_token":token}),
+                &mut secrets,
+            )?;
+            assert!(command.get_envs().next().is_none());
+            assert!(secrets.is_empty());
+        }
+        for harness in ["codex", "opencode"] {
+            let mut command = Command::new(harness);
+            command.env_clear();
+            let mut secrets = Vec::new();
+            let error = enterprise_environment(
+                &mut command,
+                &json!({"harness":harness,"tool_token":null}),
+                &mut secrets,
+            )
+            .unwrap_err();
+            assert_eq!(error.to_string(), "Tool token required");
+            assert!(command.get_envs().next().is_none());
+            assert!(secrets.is_empty());
+            enterprise_environment(
+                &mut command,
+                &json!({"harness":harness,"tool_token":"platform-token"}),
+                &mut secrets,
+            )?;
+            assert!(command.get_envs().any(|(key, value)| {
+                key == "AE_TOOL_TOKEN" && value == Some(std::ffi::OsStr::new("platform-token"))
+            }));
+            assert_eq!(security::redacted("platform-token", &secrets), "[REDACTED]");
+        }
+        Ok(())
+    }
+
+    #[test]
     fn large_output_batches_preserve_frames_and_completion() -> Result<()> {
         let temp = tempfile::tempdir()?;
         let path = temp.path().join("frames.jsonl");
@@ -705,6 +746,9 @@ pub fn worker(
                     }
                 }
             }
+            if let Ok(settings) = crate::antigravity::settings_local() {
+                capabilities["antigravity"] = serde_json::to_value(settings)?;
+            }
             refreshed = Instant::now();
         }
         let iteration = (|| -> Result<()> {
@@ -826,6 +870,22 @@ pub fn worker(
         std::thread::sleep(Duration::from_millis(500));
     }
 }
+fn enterprise_environment(
+    command: &mut Command,
+    request: &Value,
+    secrets: &mut Vec<String>,
+) -> Result<()> {
+    if request["harness"] == "antigravity" {
+        return Ok(());
+    }
+    let token = request["tool_token"]
+        .as_str()
+        .context("Tool token required")?;
+    secrets.push(token.into());
+    command.env("AE_TOOL_TOKEN", token);
+    Ok(())
+}
+
 fn execute_job(
     request: &Value,
     root: &Path,
@@ -882,7 +942,8 @@ fn execute_job(
         request["instructions"].as_str().unwrap_or("").as_bytes(),
     )?;
     let opencode = request["harness"] == "opencode";
-    let auth = if opencode {
+    let antigravity = request["harness"] == "antigravity";
+    let auth = if opencode || antigravity {
         None
     } else {
         Some(crate::runtime::seed_auth(&home)?)
@@ -915,26 +976,38 @@ fn execute_job(
             file.to_string_lossy().into_owned(),
         ]);
     }
-    if !opencode {
+    if !opencode && !antigravity {
         args.push("--ignore-user-config".into());
         if let Some(catalog) = crate::codex_settings::catalog_argument()? {
             args.extend(["-c".into(), catalog]);
         }
     }
     #[cfg(windows)]
-    if !opencode {
+    if !opencode && !antigravity {
         args.extend(["-c".into(), "windows.sandbox=\"elevated\"".into()]);
     }
-    if let Some(native) = request["native_session_id"].as_str() {
+    if let Some(native) = request["native_session_id"]
+        .as_str()
+        .filter(|_| !antigravity)
+    {
         args.extend([
-            if opencode { "--session" } else { "resume" }.into(),
+            if opencode {
+                "--session"
+            } else if antigravity {
+                "--conversation"
+            } else {
+                "resume"
+            }
+            .into(),
             native.into(),
         ]);
     }
-    if !opencode {
+    if !opencode && !antigravity {
         args.push("-".into());
     }
-    let executable = if opencode {
+    let executable = if antigravity {
+        crate::antigravity::executable()?
+    } else if opencode {
         crate::opencode::executable()?
     } else {
         std::env::var_os("AE_CODEX")
@@ -943,10 +1016,6 @@ fn execute_job(
     };
     let env = security::workdir_env(&workspace)?;
     let mut secrets: Vec<String> = env.values().cloned().collect();
-    let token = request["tool_token"]
-        .as_str()
-        .context("Tool token required")?;
-    secrets.push(token.into());
     if let Some(auth) = &open_auth {
         secrets.extend(auth.secrets());
     }
@@ -956,10 +1025,10 @@ fn execute_job(
     command
         .envs(env)
         .env("CODEX_HOME", &home)
-        .env("AE_TOOL_TOKEN", token)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    enterprise_environment(&mut command, request, &mut secrets)?;
     if opencode {
         crate::opencode::environment(&mut command, Some(&home));
         let mut config = request["opencode_config"].clone();
@@ -982,7 +1051,11 @@ fn execute_job(
         .as_str()
         .context("Prompt required")?
         .to_owned();
-    let writer = std::thread::spawn(move || stdin.write_all(prompt.as_bytes()));
+    let writer = std::thread::spawn(move || {
+        if !antigravity {
+            let _ = stdin.write_all(prompt.as_bytes());
+        }
+    });
     let (tx, rx) = std::sync::mpsc::sync_channel(128);
     let reader =
         |pipe: Box<dyn std::io::Read + Send>, error, tx: std::sync::mpsc::SyncSender<Frame>| {

@@ -65,7 +65,7 @@ import { ReplyQuote } from "./ReplyQuote";
 import { isActiveRun } from "./runStatus";
 import { ProjectTeam } from "./ProjectTeam";
 import { RuntimeSelect, HarnessSelect } from "./RuntimeSettings";
-import { availableHarnesses, type RegisteredRuntime } from "./runtimeCatalog";
+import { availableHarnesses, harnessNames, type RegisteredRuntime } from "./runtimeCatalog";
 import { NewAgentDialog } from "./NewAgentDialog";
 import { WorkstationSelect } from "./WorkstationSelect";
 import { UserSettings } from "./UserSettings";
@@ -79,6 +79,7 @@ import type { QuestionRequest } from "./bindings/QuestionRequest";
 import { ScheduledTasks } from "./ScheduledTasks";
 import { api, post, put, requestId, ApiFailure } from "./api";
 import type { Agent } from "./bindings/Agent";
+import type { Harness } from "./bindings/Harness";
 import type { Group } from "./bindings/Group";
 import type { Message } from "./bindings/Message";
 import type { Run } from "./bindings/Run";
@@ -97,6 +98,7 @@ import { FolderPicker } from "./FolderPicker";
 import { AgentTerminal, AgentSkills } from "./AgentTools";
 import {
   useRoute,
+  parseRoute,
   navigate,
   routePath,
   sections,
@@ -109,9 +111,10 @@ const OrganizationChart = lazy(() =>
     default: module.OrganizationChart,
   })),
 );
+const LivePreview = lazy(() => import("./LivePreview"));
 
 type Session = {
-  harness: "codex" | "opencode";
+  harness: Harness;
   id: string;
   native_id: string | null;
   agent_id: string;
@@ -142,7 +145,7 @@ function chatMessagesPath(groupId: string, side: string | null, before?: string)
   if (before) query.set("before", before);
   return `/groups/${groupId}/messages?${query}`;
 }
-export default function App({role = "owner", controllerAccess = true, user = "owner", workspaceName = "My workspace", workspaceSettings}: {role?: string; controllerAccess?: boolean; user?: string; workspaceName?: string; workspaceSettings?: ReactNode}) {
+export default function App({role = "owner", controllerAccess = true, user = "owner", workspaceName = "My workspace", workspaceId = "default", workspaceSettings}: {role?: string; controllerAccess?: boolean; user?: string; workspaceName?: string; workspaceId?: string; workspaceSettings?: ReactNode}) {
   const [data, setData] = useState<StateView | null>(null);
   const [catalog, setCatalog] = useState<CodexSettings | null>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
@@ -166,7 +169,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
   const routeError =
     !route.valid ||
     (data &&
-      ((!["Organization", "Action board", "User settings", "Profile", "Workspace settings"].includes(route.view) &&
+      ((!["Organization", "Live Preview", "Action board", "User settings", "Profile", "Workspace settings"].includes(route.view) &&
         !data.groups.some((g) => g.id === groupId)) ||
         (selectedAgent && !data.agents.some((a) => a.id === selectedAgent)) ||
         (route.runId && !selectedRun)));
@@ -298,6 +301,8 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
   }, [perform, refresh]);
   useEffect(() => {
     if (authenticated && data && !routeError) {
+      // Back may change the URL before this render's normalization effect runs.
+      if (routePath(parseRoute(location.href)) !== routePath(route)) return;
       navigate(
         routePath(
           route,
@@ -532,7 +537,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                 readOnly={role !== "owner"}
                 groups={data.groups}
                 preferences={data.group_preferences}
-                selected={["Organization", "Action board", "User settings", "Profile", "Workspace settings"].includes(tab) ? null : groupId}
+                selected={["Organization", "Live Preview", "Action board", "User settings", "Profile", "Workspace settings"].includes(tab) ? null : groupId}
                 running={data.runs.filter(active).map((r) => r.group_id)}
                 onCreate={() => setGroupEditor({ id: "", name: "", description: "", member_ids: [], human_ids: [], project:null, scope_levels: null, chat_lead_id: null, archived_at: null, deleted_at: null })}
                 onCreateProject={() => setGroupEditor({ id:"", name:"", description:"", project:{workdir:{path:"",canonical_path:"",git_root:null,ssh_host:null},members:[]},scope_levels:null,chat_lead_id:null,archived_at:null,deleted_at:null })}
@@ -551,7 +556,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
               {role === "owner" && <nav className="sidebar-shortcuts" aria-label="Workspace tools">
                 <button className={`organization-button ${tab === "Action board" ? "selected" : ""}`} onClick={() => go({view:"Action board",agentId:null,runId:null})}><ListChecks size={18}/><span>Action board</span><ChevronRight size={15}/></button>
                 <button
-                  className={`organization-button ${tab === "Organization" ? "selected" : ""}`}
+                  className={`organization-button ${tab === "Organization" || tab === "Live Preview" ? "selected" : ""}`}
                   onClick={() => {
                     go({ view: "Organization", agentId: null, runId: null });
                   }}
@@ -661,7 +666,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                 </Button>
               </div>
             )}
-            {tab !== "Organization" && tab !== "Action board" && tab !== "User settings" && tab !== "Profile" && tab !== "Workspace settings" && tab !== "NotFound" && (
+            {tab !== "Organization" && tab !== "Live Preview" && tab !== "Action board" && tab !== "User settings" && tab !== "Profile" && tab !== "Workspace settings" && tab !== "NotFound" && (
               <>
                 <header className="topbar">
                   <div className="group-title">
@@ -1174,7 +1179,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
               connections={Object.fromEntries(group.project.members.map(m=>[m.agent_id,data.project_connections?.[groupId]]))} savedLayout={data.project_layouts?.[groupId]??{}}
               onDeletedAgents={()=>setProjectTeamOpen(true)} selected={selectedAgent} onSelect={id => go({ agentId: id, section: "Profile", runId: null })}
               onAdd={()=>{setNewAgentProject(groupId);setNewAgent(true);}}/></Suspense></div>}
-            {tab === "Organization" && (
+            {(tab === "Organization" || tab === "Live Preview") && (
               <Suspense
                 fallback={
                   <div className="empty-state">Opening organization…</div>
@@ -1191,9 +1196,17 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                     setSelectedAgent(id);
                   }}
                   onAdd={() => { setNewAgentProject(""); setNewAgent(true); }}
+                  onLivePreview={() => go({ view: "Live Preview", agentId: null, runId: null, cockpitGroupId: null })}
                 />
               </Suspense>
             )}
+            {tab === "Live Preview" && <Suspense fallback={<div className="empty-state" role="status">Opening live preview…</div>}>
+              <LivePreview workspaceId={workspaceId} workspaceName={workspaceName} role={role}
+                groupId={route.cockpitGroupId} agents={organizationAgents} groups={data?.groups ?? []} runs={data?.runs ?? []}
+                onFilter={(cockpitGroupId) => go({ cockpitGroupId })}
+                onBack={() => go({ view: "Organization", agentId: null, runId: null })}
+                onOpenAgent={setSelectedAgent} onRefresh={refresh}/>
+            </Suspense>}
           </main>
         </Panel>
         {!mobile && (agent || selectedRun || preview) && (
@@ -1812,7 +1825,7 @@ function AgentInspector({
             >
               <option value="">
                 {models
-                  ? `Use ${edited.harness === "opencode" ? "OpenCode setting" : "Codex setting"} (${models.model})`
+                  ? `Use ${harnessNames[edited.harness]} setting (${models.model})`
                   : "Loading models…"}
               </option>
               {edited.model &&
@@ -1857,7 +1870,7 @@ function AgentInspector({
             </select>
             </>}
             <div className="model-source">
-              <span>{edited.harness === "opencode" ? "From your OpenCode CLI · refresh after adding providers or models" : "From your Codex settings"}</span>
+              <span>{edited.harness === "opencode" ? "From your OpenCode CLI · refresh after adding providers or models" : `From your ${harnessNames[edited.harness]} settings`}</span>
               <button
                 type="button"
                 onClick={() => void loadModels()}
@@ -1913,7 +1926,7 @@ function AgentInspector({
                 })
               }
             >
-              <ShieldCheck size={15} /> Check {agent.harness === "opencode" ? "OpenCode" : "Codex"} connection
+              <ShieldCheck size={15} /> Check {harnessNames[agent.harness]} connection
             </Button>
             {probe && <p className="probe-result">{probe}</p>}
           </div>
@@ -1951,7 +1964,7 @@ function AgentInspector({
                   const result = await post<{
                     workspace: Workspace;
                     git_status: string;
-                  }>("/workspaces/probe", { path, runtime_id: runtimeId || null, ssh_host: remote ? sshHost.trim() : null });
+                  }>("/workspaces/probe", { path, harness: edited.harness, runtime_id: runtimeId || null, ssh_host: remote ? sshHost.trim() : null });
                   setEdited({ ...edited, runtime_id: result.workspace.runtime_id, workdir: result.workspace });
                   setProbe(result.git_status);
                 })
@@ -1989,7 +2002,7 @@ function AgentInspector({
                 void perform(async () => {
                   const result = await post<{ workspace: Workspace }>(
                     "/workspaces/probe",
-                    { path, runtime_id: runtimeId || null, ssh_host: remote ? sshHost.trim() : null },
+                    { path, harness: edited.harness, runtime_id: runtimeId || null, ssh_host: remote ? sshHost.trim() : null },
                   );
                   const changedSshHost = (result.workspace.ssh_host ?? null) !== (agent.workdir?.ssh_host ?? null);
                   await save({ ...edited, runtime_id: result.workspace.runtime_id, workdir: result.workspace, ...(changedSshHost ? {model:"", reasoning:""} : {}) });
@@ -2159,7 +2172,7 @@ function AgentInspector({
                   {s.active ? "Current" : "Reset"}
                 </Badge>
                 {" "}<strong>{groups.find((g) => g.id === s.group_id)?.name ?? s.group_id} · {s.side_chat_id ? `Side chat ${s.side_chat_id.slice(0, 8)}` : "Main chat"}</strong>
-                <p>{s.harness === "opencode" ? "OpenCode · " : "Codex · "}{!s.active ? "Retired" : runs.some((r) => r.session_id === s.id && ["running", "starting"].includes(r.status)) ? "Working" : runs.some((r) => r.session_id === s.id && r.status === "queued") ? "Queued" : "Idle · resumes when triggered"}</p>
+                <p>{harnessNames[s.harness]} · {!s.active ? "Retired" : runs.some((r) => r.session_id === s.id && ["running", "starting"].includes(r.status)) ? "Working" : runs.some((r) => r.session_id === s.id && r.status === "queued") ? "Queued" : "Idle · resumes when triggered"}</p>
                 <code>{s.native_id ?? "Not started yet"}</code>
                 <p>{s.workspace}</p>
                 {s.active && (

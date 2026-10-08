@@ -12,7 +12,7 @@ export const sections = [
 ] as const;
 export type Section = (typeof sections)[number];
 export type View =
-  "Chat" | "Knowledge" | "Runs" | "Scheduled tasks" | "Organization" | "Actions" | "Structure" | "Action board" | "User settings" | "Profile" | "Workspace settings";
+  "Chat" | "Knowledge" | "Runs" | "Scheduled tasks" | "Organization" | "Live Preview" | "Actions" | "Structure" | "Action board" | "User settings" | "Profile" | "Workspace settings";
 export type Route = {
   groupId: string;
   view: View;
@@ -20,6 +20,7 @@ export type Route = {
   section: Section;
   runId: string | null;
   sideChatId: string | null;
+  cockpitGroupId: string | null;
   valid: boolean;
 };
 type Named = { id: string; name: string; project?: unknown };
@@ -45,6 +46,7 @@ export function parseRoute(url: string): Route {
     section: "Profile",
     runId: null,
     sideChatId: null,
+    cockpitGroupId: null,
     valid: true,
   };
   const location = new URL(url, "http://localhost");
@@ -68,6 +70,11 @@ export function parseRoute(url: string): Route {
   if (parts[0] === "organization") {
     route.view = "Organization";
     if (parts.length === 1) return route;
+    if (parts.length === 2 && parts[1] === "live-preview") {
+      const filter = location.searchParams.get("group");
+      if (filter && !/^[a-zA-Z0-9-]{1,64}$/.test(filter)) return { ...route, valid: false };
+      return { ...route, view: "Live Preview", agentId: null, runId: null, sideChatId: null, cockpitGroupId: filter || null };
+    }
     const section = sections.find(
       (s) => s.toLowerCase() === (parts[3] ?? "profile"),
     );
@@ -88,12 +95,13 @@ export function parseRoute(url: string): Route {
 }
 export function routePath(route: Route, group?: Named, agent?: Named): string {
   let path =
-    route.view === "Profile" ? "/settings/profile" : route.view === "Workspace settings" ? "/settings/workspace" : route.view === "User settings" ? "/settings/runtime" : route.view === "Action board" ? "/actions" : route.view === "Organization"
+    route.view === "Profile" ? "/settings/profile" : route.view === "Workspace settings" ? "/settings/workspace" : route.view === "User settings" ? "/settings/runtime" : route.view === "Action board" ? "/actions" : route.view === "Live Preview" ? "/organization/live-preview" : route.view === "Organization"
       ? "/organization"
       : `/${group?.project ? "projects" : "groups"}/${encodeURIComponent(group ? slug(group) : route.groupId)}/${route.view.toLowerCase().replaceAll(" ", "-")}`;
   if (route.view === "Organization" && route.agentId)
     path += `/agents/${encodeURIComponent(agent ? slug(agent) : route.agentId)}/${route.section.toLowerCase()}`;
   const query = new URLSearchParams();
+  if (route.view === "Live Preview" && route.cockpitGroupId) query.set("group", route.cockpitGroupId);
   if (route.view === "Structure" && route.agentId) { query.set("agent", route.agentId); query.set("section", route.section.toLowerCase()); }
   if (route.runId) query.set("run", route.runId);
   if (route.view === "Chat" && route.sideChatId) query.set("side", route.sideChatId);

@@ -1,0 +1,98 @@
+.live-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgb(20 24 32 / 48%);
+  backdrop-filter: blur(3px);
+}
+.live-preview-window {
+  position: fixed;
+  inset: clamp(8px, 2vw, 24px);
+  z-index: 81;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 36%);
+  border-radius: 14px;
+  background: #fbf8f3;
+  color: #2b2a28;
+  box-shadow: 0 32px 90px rgb(0 0 0 / 38%), 0 8px 24px rgb(0 0 0 / 24%);
+}
+.live-preview-header {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(120px, 220px) 1fr repeat(3, 36px);
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #d6cdc0;
+  z-index: 5;
+}
+.live-preview-heading { grid-column: 1; grid-row: 1; min-width: 0; }
+.live-preview-title { font-size: 14px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.live-preview-controls { display: contents; }
+.live-preview-controls > label { grid-column: 2; grid-row: 1; min-width: 0; }
+.live-preview-controls select { width: 100%; min-width: 120px; height: 36px; font-size: 12px; }
+.live-preview-connection-warning { grid-column: 1 / -1; grid-row: 2; font-size: 12px; color: #973b37; overflow-wrap: anywhere; }
+.live-preview-refresh { grid-column: 4; grid-row: 1; }
+.live-preview-team { grid-column: 5; grid-row: 1; position: relative; font-size: 12px; }
+.live-preview-close { grid-column: 6; grid-row: 1; }
+.live-preview-icon-button, .live-preview-close, .live-preview-team summary {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #b8afa2;
+  border-radius: 8px;
+  background: #fbf8f3;
+  color: #2b2a28;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.live-preview-close:hover, .live-preview-icon-button:hover, .live-preview-team summary:hover { background: #eee7dc; }
+.live-preview-close:focus-visible, .live-preview-icon-button:focus-visible, .live-preview-team summary:focus-visible { outline: 2px solid #176e78; outline-offset: 2px; }
+.live-preview-refresh.is-refreshing svg { animation: live-preview-refresh-turn 550ms linear infinite; }
+@keyframes live-preview-refresh-turn { to { transform: rotate(360deg); } }
+.live-preview-access-error { padding: 20px; }
+.live-preview-error { color: #973b37; font-size: 13px; padding: 8px 14px; overflow-wrap: anywhere; }
+.live-preview-team-panel { position: absolute; top: calc(100% + 10px); right: 0; width: min(540px, calc(100vw - 54px)); max-height: min(560px, calc(100dvh - 160px)); overflow: auto; padding: 14px; border: 1px solid #b8afa2; border-radius: 10px; background: #fbf8f3; box-shadow: 0 8px 28px rgb(0 0 0 / 16%); }
+.live-preview-team-hint { color: #57524b; font-size: 11px; line-height: 1.5; }
+.live-preview-setup { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid #d6cdc0; }
+.live-preview-setup > div { flex: 1 1 240px; min-width: 0; }
+.live-preview-setup p { font-size: 12px; line-height: 1.5; color: #57524b; margin-top: 4px; }
+.live-preview-roster { list-style: none; padding: 0; margin: 10px 0; }
+.live-preview-roster li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid #d6cdc0; }
+.live-preview-roster li > div { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.live-preview-roster li span { color: #57524b; }
+.live-preview-mapping p { margin: 10px 0; color: #57524b; }
+.live-preview-role-selects { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.live-preview-role-selects label { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1 1 190px; }
+.live-preview-mapping-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.live-preview-scene { position: relative; flex: 1; min-width: 0; min-height: 0; isolation: isolate; overflow: hidden; }
+@media (max-width: 600px) {
+  .live-preview-header { grid-template-columns: minmax(120px, 1fr) repeat(3, 44px); gap: 4px; padding: 4px 8px; }
+  .live-preview-heading { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+  .live-preview-controls > label { grid-column: 1; }
+  .live-preview-controls select { height: 44px; }
+  .live-preview-refresh { grid-column: 2; }
+  .live-preview-team { grid-column: 3; position: static; }
+  .live-preview-close { grid-column: 4; }
+  .live-preview-icon-button, .live-preview-close, .live-preview-team summary { width: 44px; height: 44px; }
+  .live-preview-team-panel { right: 8px; top: calc(100% + 8px); width: calc(100vw - 36px); }
+}
+@media (pointer: coarse) and (min-width: 601px) {
+  .live-preview-header { grid-template-columns: auto minmax(120px, 220px) 1fr repeat(3, 44px); }
+  .live-preview-controls select { height: 44px; }
+  .live-preview-icon-button, .live-preview-close, .live-preview-team summary { width: 44px; height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-preview-refresh.is-refreshing svg { animation: none; }
+  .live-preview-icon-button, .live-preview-close, .live-preview-team summary { transition: none; }
+}
+@media (forced-colors: active) {
+  .live-preview-window, .live-preview-close, .live-preview-icon-button, .live-preview-team summary, .live-preview-team-panel { border-color: CanvasText; }
+}

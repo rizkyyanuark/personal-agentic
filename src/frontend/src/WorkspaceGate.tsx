@@ -98,6 +98,6 @@ export function WorkspaceGate() {
         {workspaceSettings}
       </DialogContent>
     </Dialog>
-    {workspace&&<div className="platform-content"><App workspaceSettings={workspaceSettings} key={selected} user={user} workspaceName={workspace.name} role={workspace.role} controllerAccess={user==="owner"&&selected==="default"}/></div>}
+    {workspace&&<div className="platform-content"><App workspaceSettings={workspaceSettings} key={selected} user={user} workspaceName={workspace.name} workspaceId={workspace.id} role={workspace.role} controllerAccess={user==="owner"&&selected==="default"}/></div>}
   </div>;
 }

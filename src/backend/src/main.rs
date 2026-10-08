@@ -1,7 +1,10 @@
 mod actions;
+mod activity;
 mod agent_tools;
+mod antigravity;
 mod api;
 mod chat_commands;
+mod cockpit;
 mod codex_rpc;
 mod codex_settings;
 mod codex_usage;
@@ -139,6 +142,7 @@ async fn main() -> Result<()> {
         model::StateView::export_all_to(&directory)?;
         model::Message::export_all_to(&directory)?;
         model::Event::export_all_to(&directory)?;
+        cockpit::CockpitState::export_all_to(&directory)?;
         codex_settings::CodexSettings::export_all_to(&directory)?;
         workspaces::DirectoryView::export_all_to(&directory)?;
         terminal::TerminalRun::export_all_to(&directory)?;

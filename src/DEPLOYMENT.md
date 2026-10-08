@@ -7,6 +7,17 @@ one workspace. No inbound SSH server is needed for a registered worker.
 
 ## Install
 
+For a controller that executes through an SSH workstation, expose only its
+selected private key to the platform container as a read-only bind mount. From
+`src`, set `AE_SSH_KEY_FILE` to that absolute host filename and include
+`compose.ssh.example.yaml` with the normal compose files. Keep the variable in
+local configuration, not Git. Configure the workstation with container key path
+`/run/ae-ssh/mini-project-key.pem`, and verify its host-key fingerprints through
+an already trusted connection before accepting them in Workstations. Provider
+authentication remains on the remote host. See the
+[pilot guide](../docs/antigravity-ssh-cockpit-pilot.md) for scope and readiness.
+
+
 Native installers build the checked-out source using the committed Cargo/npm lockfiles.
 They are source installers, so the first build requires several GB of disk and RAM.
 Linux x64/ARM64, Apple Silicon and Windows x64 include ONNX Runtime for knowledge
@@ -170,8 +181,8 @@ workspace; registered workers currently expose harness execution and workdir val
 ```sh
 cd src
 cargo test --locked --bin agentic-enterprise --no-fail-fast
-cd frontend
-npm run lint
+npm ci
+npm run lint --workspace frontend
 npm run build
 ```
 

@@ -1,0 +1,19 @@
+[Unit]
+# Archived predecessor template; not used by personal-agentic.
+Description=AI Lab Suite 3D Cockpit Sandbox (office-dev)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/infra-hub/ai-lab-cockpit
+ExecStart=/usr/bin/node /home/ubuntu/infra-hub/ai-lab-cockpit/server.js
+Restart=always
+RestartSec=5
+Environment=PORT=8098
+Environment=OFFICE_DIST_DIR=/home/ubuntu/infra-hub/ai-lab-cockpit/dist-dev
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

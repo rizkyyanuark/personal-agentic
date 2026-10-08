@@ -318,7 +318,15 @@ pub async fn test(State(app): State<App>, Path(id): Path<String>) -> ApiResult<V
                     .context("Missing home directory")?,
             )?;
             Ok::<_, anyhow::Error>(
-                json!({"connection":remote::probe(&workspace),"home":workspace.path}),
+                json!({"connection":remote::Connection {
+                    host: id,
+                    status: "online".into(),
+                    checked_at: now(),
+                    message: "SSH connected. Native harness readiness is checked in the agent profile.".into(),
+                    version: String::new(),
+                    os: String::new(),
+                    environment_keys: vec![],
+                },"home":workspace.path}),
             )
         })
         .await

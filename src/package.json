@@ -1,0 +1,12 @@
+{
+  "name": "agentic-enterprise-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["frontend", "cockpit"],
+  "scripts": {
+    "build": "npm run build --workspace frontend",
+    "lint": "npm run lint --workspaces",
+    "check": "npm run lint --workspace frontend && npm run check --workspace cockpit && npm run build"
+  },
+  "engines": { "node": ">=22.12" }
+}

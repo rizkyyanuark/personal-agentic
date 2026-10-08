@@ -33,6 +33,9 @@ pub fn router(app: App, frontend: PathBuf) -> Router {
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/state", get(state))
+        .route("/api/cockpit/state", get(crate::cockpit::state))
+        .route("/api/cockpit/setup", post(crate::cockpit::setup))
+        .route("/api/cockpit/mapping", put(crate::cockpit::save_mapping))
         .route("/api/workstations", post(crate::workstations::save))
         .route(
             "/api/workstations/import",
@@ -268,16 +271,7 @@ async fn state(State(app): State<App>) -> ApiResult<StateView> {
             .into_iter()
             .filter(|a| a.status != "deleted")
             .collect(),
-        project_connections: app
-            .store
-            .list::<Group>("groups")?
-            .into_iter()
-            .filter_map(|g| {
-                g.project
-                    .and_then(|p| crate::remote::connection(&p.workdir))
-                    .map(|c| (g.id, c))
-            })
-            .collect(),
+        project_connections: crate::remote::project_connections(&app)?,
         project_layouts: app.store.read(|conn| {
             let values = conn
                 .prepare("SELECT key,value FROM metadata WHERE key LIKE 'project_layout:%'")?
@@ -433,7 +427,7 @@ async fn save_organization_layout(
     })?;
     Ok(Json(layout))
 }
-fn validate_agent(app: &App, agent: &mut Agent) -> Result<()> {
+pub(crate) fn validate_agent(app: &App, agent: &mut Agent) -> Result<()> {
     security::validate_id(&agent.id)?;
     agent.position = agent.position.trim().to_owned();
     ensure!(
@@ -523,31 +517,32 @@ async fn save_agent(State(app): State<App>, Json(mut agent): Json<Agent>) -> Api
     })
     .await
     .map_err(anyhow::Error::from)??;
-    ensure!(agent.deleted_at.is_none(), "New agents cannot be deleted");
-    agent.revision = 1;
-    app.store.write(|tx| {
-        crate::projects::attach_agent(tx, &mut agent)?;
-        validate_reporting_line(tx, &agent)?;
-        let exists: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agents WHERE id=?)",
-            [&agent.id],
-            |r| r.get(0),
-        )?;
-        ensure!(!exists, "Agent already exists");
-        store::put(tx, "agents", &agent.id, &agent)?;
-        tx.execute(
-            "INSERT INTO revisions VALUES(?,?,?)",
-            params![
-                agent.id,
-                i64::try_from(agent.revision)?,
-                serde_json::to_string(&agent)?
-            ],
-        )?;
-        store::event(tx, "agent.created", &json!({"agent_id":agent.id}))?;
-        Ok(())
-    })?;
+    app.store.write(|tx| create_agent_record(tx, &mut agent))?;
     app.store.materialize(&agent)?;
     Ok(Json(agent))
+}
+pub(crate) fn create_agent_record(conn: &rusqlite::Connection, agent: &mut Agent) -> Result<()> {
+    ensure!(agent.deleted_at.is_none(), "New agents cannot be deleted");
+    agent.revision = 1;
+    crate::projects::attach_agent(conn, agent)?;
+    validate_reporting_line(conn, agent)?;
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM agents WHERE id=?)",
+        [&agent.id],
+        |r| r.get(0),
+    )?;
+    ensure!(!exists, "Agent already exists");
+    store::put(conn, "agents", &agent.id, agent)?;
+    conn.execute(
+        "INSERT INTO revisions VALUES(?,?,?)",
+        params![
+            agent.id,
+            i64::try_from(agent.revision)?,
+            serde_json::to_string(agent)?
+        ],
+    )?;
+    store::event(conn, "agent.created", &json!({"agent_id":agent.id}))?;
+    Ok(())
 }
 async fn update_agent(
     State(app): State<App>,
@@ -730,6 +725,8 @@ async fn probe(State(app): State<App>, Path(id): Path<String>) -> ApiResult<Valu
 struct WorkspaceInput {
     path: String,
     #[serde(default)]
+    harness: Harness,
+    #[serde(default)]
     ssh_host: Option<String>,
     #[serde(default)]
     runtime_id: Option<String>,
@@ -764,7 +761,7 @@ async fn workspace_probe(
     if let Some(host) = input.ssh_host.filter(|s| !s.is_empty()) {
         return Ok(Json(tokio::task::spawn_blocking(move || -> Result<Value> {
             let workspace = crate::remote::validate_workspace(&host, &input.path)?;
-            let connection = crate::remote::probe(&workspace);
+            let connection = crate::remote::probe_for(&workspace, input.harness);
             Ok(json!({"workspace":workspace,"connection":connection,"git_status":format!("{} · {} · {}", host, connection.status, connection.message)}))
         }).await.map_err(anyhow::Error::from)??));
     }
@@ -1394,13 +1391,18 @@ pub(crate) fn submit_message_as(
         command: starts_side.then(|| "btw".into()),
         usage_report: None,
     };
+    let project_lead = if group.project.is_some() && message.side_chat_id.is_none() {
+        crate::group_scope::access(tx, &group)?.chat_lead_id
+    } else {
+        None
+    };
     for recipient in &message.recipients {
         let agent: Agent = store::get(tx, "agents", recipient)?;
         coordination::enqueue(
             tx,
             &message,
             agent,
-            if auto_routed {
+            if project_lead.as_ref() == Some(recipient) {
                 RunKind::Coordinator
             } else {
                 RunKind::Direct
