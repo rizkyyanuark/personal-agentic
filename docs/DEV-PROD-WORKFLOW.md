@@ -217,14 +217,27 @@ The first real MR pipeline, #12, passed frontend and SSH bridge verification. Ba
 compilation failed because the Windows `PROTOC` default selected a nonexistent
 executable in Linux, despite `protobuf-compiler` being installed. The Linux CI
 override corrects that environment error. During the trial the AGY version probe
-continued to return successfully in under 0.2 seconds. CI readiness still
-requires the complete corrected pipeline to pass.
+continued to return successfully in under 0.2 seconds. The subsequent trials
+below verify the corrected Linux environment and resource limits.
 
 Pipeline #13 passed frontend and SSH bridge checks, and completed backend source
 compilation, but GNU `ld` was killed with signal 9 while linking the test binary
 after approximately 48 minutes. Backend CI now uses LLD for that link step.
-This is still a bounded trial on the same EC2; a complete successful pipeline
-is required before CI is marked ready.
+The instance size remained unchanged.
+
+[Pipeline #14](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/pipelines/14)
+passed all three verification jobs on runner #3 for commit
+`f48a72ae551f2eef9a5ecb296205e8200afc2669`. Its traces record 203 cockpit tests,
+12 workdir tests, 117 Rust tests and 24 SSH discovery tests, with no failures or
+skipped/ignored tests. Frontend lint and build also passed.
+
+The backend job reused Lance, FastEmbed and LanceDB artifacts (`Fresh` in Cargo
+output), selected Debian LLD 14.0.6, and finished in approximately nine minutes.
+During the linking samples, RAM peaked at the 1 GiB job limit, observed peak
+swap was 1,656 MiB, and the cgroup OOM counter remained zero. AGY process probes
+in that linking phase took approximately 0.17–3.41 seconds. After the pipeline,
+the host had approximately 16 GiB free disk. Full agent execution alongside a
+build and production image publishing/deployment remain separate checks.
 
 Sources: [runner registration templates](https://docs.gitlab.com/runner/register/#register-with-a-configuration-template),
 [Docker executor](https://docs.gitlab.com/runner/executors/docker/).

@@ -47,7 +47,8 @@ See [the dev/prod workflow](docs/DEV-PROD-WORKFLOW.md) for the GitLab release
 path, GitHub downstream copy, independent production state and activation
 requirements. The GitLab pipeline uses project runner #3 on the existing
 ARM64 workspace EC2. Verification jobs have CPU, memory, and swap limits;
-production deployment is a separate setup step.
+the full merge-request pipeline has passed. Production deployment is a
+separate setup step.
 
 ## License
 
