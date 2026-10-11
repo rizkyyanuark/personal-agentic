@@ -210,17 +210,27 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
   const loadedScope = useRef("");
   const [runEvents, setRunEvents] = useState<Event[]>([]);
   const [filePreview, setFilePreview] = useState<{ file: MarkdownFile; scope: string } | null>(null);
-  const previewTrigger = useRef<HTMLElement | null>(null);
+  const previewTrigger = useRef<{ element: HTMLElement; messageId?: string; href: string | null } | null>(null);
   const preview = tab === "Chat" && filePreview?.scope === `${groupId}:${sideChatId ?? "main"}` ? filePreview.file : null;
   const openPreview = useCallback((file: MarkdownFile | null) => {
     if (!file) {
       const trigger = previewTrigger.current;
       previewTrigger.current = null;
       setFilePreview(null);
-      requestAnimationFrame(() => trigger?.focus());
+      requestAnimationFrame(() => {
+        const target = trigger?.element.isConnected ? trigger.element
+          : trigger?.messageId && trigger.href
+            ? Array.from(document.getElementById(trigger.messageId)?.querySelectorAll<HTMLAnchorElement>("a[href]") ?? [])
+              .find((link) => link.getAttribute("href") === trigger.href)
+            : null;
+        target?.focus();
+      });
       return;
     }
-    if (!previewTrigger.current?.isConnected) previewTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!previewTrigger.current?.element.isConnected) {
+      const element = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      previewTrigger.current = element ? { element, messageId: element.closest("article[id]")?.id, href: element.getAttribute("href") } : null;
+    }
     setFilePreview({ file, scope: `${groupId}:${sideChatId ?? "main"}` });
   }, [groupId, sideChatId]);
   const [newAgent, setNewAgent] = useState(false);
@@ -942,6 +952,9 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                             <Check size={13} /> View execution evidence
                           </button>
                         )}
+                        {!!data?.runs.find((run) => run.id === m.run_id)?.artifact_errors.length && <p className="error run-document-notice">
+                          Some linked documents could not be saved. View execution evidence for details.
+                        </p>}
                         {isHuman &&
                           data?.runs
                             .filter((r) => r.message_id === m.id)
@@ -1154,7 +1167,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                 readOnly={groupClosed}
                 key={`${groupId}:${groupClosed}`}
                 files={
-                  data?.artifacts.filter((a) => a.group_id === groupId) ?? []
+                  data?.artifacts.filter((a) => a.group_id === groupId && a.in_knowledge) ?? []
                 }
                 groupName={group?.name ?? ""}
                 onUpload={() => uploadRef.current?.click()}
@@ -1223,8 +1236,9 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
             maxSize={mobile ? "100%" : 900}
           >
             {preview && <MarkdownPreview key={preview.url} file={preview} onClose={() => openPreview(null)} onPreview={openPreview}
-              onAddToKnowledge={addReportToKnowledge} artifacts={(data?.artifacts ?? []).filter((file) => file.group_id === groupId)}
-              groupName={group?.name ?? "this group"} readOnly={groupClosed} />}
+              onAddToKnowledge={addReportToKnowledge} onRefresh={refresh} artifacts={(data?.artifacts ?? []).filter((file) => file.group_id === groupId)}
+              groupName={group?.name ?? "this group"} readOnly={groupClosed || role !== "owner"}
+              readOnlyReason={groupClosed ? "Restore this group to save documents or add knowledge." : "Workspace owner access is required to save documents or add knowledge."} />}
             {agent && !preview && (
               <AgentInspector
                 controllerAccess={controllerAccess}
@@ -1486,6 +1500,11 @@ function RunInspector({
         </Button>
       )}
       {run.error && <p className="error">{run.error}</p>}
+      {run.artifact_errors.length > 0 && <section className="run-document-errors" aria-label="Document capture issues">
+        <h3>Document capture issues</h3>
+        <p className="hint">Some linked documents could not be saved. Open a document link to recover its current version when available.</p>
+        <ul>{run.artifact_errors.map((failure) => <li key={failure.path}><code>{failure.path}</code><p className="error">{failure.error}</p></li>)}</ul>
+      </section>}
       <details>
         <summary>Launch arguments</summary>
         <pre>{run.arguments.join("\n")}</pre>

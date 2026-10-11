@@ -188,6 +188,8 @@ pub struct Run {
     pub exit_code: Option<i32>,
     pub error: Option<String>,
     pub output: String,
+    #[serde(default)]
+    pub artifact_errors: Vec<RunArtifactError>,
     pub executable: String,
     pub arguments: Vec<String>,
     #[serde(default)]
@@ -228,6 +230,33 @@ pub struct Artifact {
     pub status: String,
     pub error: Option<String>,
     pub created_at: String,
+    #[serde(default)]
+    pub source: Option<RunArtifactSource>,
+    #[serde(default = "knowledge_default")]
+    pub in_knowledge: bool,
+}
+
+fn knowledge_default() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RunArtifactSource {
+    pub run_id: String,
+    pub session_id: String,
+    pub native_session_id: String,
+    pub ssh_host: Option<String>,
+    pub source_path: String,
+    pub capture_kind: String,
+    pub captured_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RunArtifactError {
+    pub path: String,
+    pub error: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]

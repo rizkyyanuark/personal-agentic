@@ -89,18 +89,19 @@ function agentMentions(agents: Agent[]) {
 }
 const noAgents: Agent[] = [];
 
-export function MessageMarkdown({ children, runId, basePath, onPreview, agents = noAgents, onMention }: {
+export function MessageMarkdown({ children, runId, basePath, onPreview, agents = noAgents, onMention, localFilesUnavailable = false }: {
   children: string;
   agents?: Agent[];
   onMention?: (id: string) => void;
   runId: string | null;
   basePath?: string;
   onPreview: (file: MarkdownFile) => void;
+  localFilesUnavailable?: boolean;
 }) {
   const mentions = useMemo(() => agentMentions(agents), [agents]);
   const components = useMemo<Components>(() => ({
       a: ({ href, children, title }) => {
-        if (!href) return <span title="This link is unavailable or has no attached workdir">{children}</span>;
+        if (!href) return <span title={localFilesUnavailable ? "Referenced local files are not included in this saved copy" : "This link is unavailable or has no attached workdir"}>{children}</span>;
         const agent = agents.find(agent => href === `/organization/agents/${encodeURIComponent(agent.id)}/profile`);
         if (agent) return <a className="agent-mention" href={href} title={`View ${agent.name}`} onClick={onMention ? event => { event.preventDefault(); onMention(agent.id); } : undefined}>{children}</a>;
         const file = markdownFile(href);
@@ -108,7 +109,7 @@ export function MessageMarkdown({ children, runId, basePath, onPreview, agents =
           onClick={file ? (event) => { event.preventDefault(); onPreview(file); } : undefined}>{children}</a>;
       },
       img: ({ src, alt }) => <MessageImage key={src} src={src} alt={alt} />,
-    }), [onPreview, agents, onMention]);
+    }), [onPreview, agents, onMention, localFilesUnavailable]);
   return <ReactMarkdown remarkPlugins={[remarkGfm, mentions]} urlTransform={(url) => fileUrl(url, runId, basePath)}
     components={components}>{children}</ReactMarkdown>;
 }

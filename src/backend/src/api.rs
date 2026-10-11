@@ -111,6 +111,8 @@ pub fn router(app: App, frontend: PathBuf) -> Router {
         .route("/api/runs/{id}/cancel", post(cancel))
         .route("/api/runs/{id}/events", get(run_events))
         .route("/api/runs/{id}/files", get(crate::run_files::read))
+        .route("/api/runs/{id}/document", get(inspect_run_document))
+        .route("/api/runs/{id}/artifacts", post(import_run_document))
         .route("/api/questions/{id}", get(crate::questions::get))
         .route("/api/questions/{id}/answer", post(crate::questions::answer))
         .route("/api/sessions", get(sessions))
@@ -119,6 +121,7 @@ pub fn router(app: App, frontend: PathBuf) -> Router {
         .route("/api/artifacts", post(upload))
         .route("/api/artifacts/{id}", get(download).delete(delete_artifact))
         .route("/api/artifacts/{id}/index", post(index_artifact))
+        .route("/api/artifacts/{id}/export", post(export_run_document))
         .route("/api/search", get(search))
         .route("/api/export", post(export))
         .route("/api/backups/{id}", get(download_backup))
@@ -262,6 +265,12 @@ async fn state(State(app): State<App>) -> ApiResult<StateView> {
     let mut runs = app.store.list::<Run>("runs")?;
     runs.reverse();
     runs.truncate(100);
+    let published_runs: std::collections::HashSet<String> = app.store.read(|conn| {
+        Ok(conn
+            .prepare("SELECT DISTINCT r.id FROM messages m JOIN runs r ON r.id=json_extract(m.data,'$.run_id') WHERE json_extract(m.data,'$.sender')=json_extract(r.data,'$.agent_id') AND json_extract(m.data,'$.group_id')=json_extract(r.data,'$.group_id')")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<_>>()?)
+    })?;
     let mut view = StateView {
         workstations: crate::workstations::list(&app.store)?,
         questions: crate::questions::recent(&app)?,
@@ -328,7 +337,13 @@ async fn state(State(app): State<App>) -> ApiResult<StateView> {
             .store
             .list::<Artifact>("artifacts")?
             .into_iter()
-            .filter(|a| a.status != "deleted")
+            .filter(|a| {
+                a.status != "deleted"
+                    && (a.in_knowledge
+                        || a.source
+                            .as_ref()
+                            .is_none_or(|source| published_runs.contains(&source.run_id)))
+            })
             .collect(),
         cursor,
         org_path: app.store.org.to_string_lossy().into_owned(),
@@ -1490,6 +1505,52 @@ async fn events(
     );
     Sse::new(events).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DocumentPath {
+    path: String,
+}
+
+async fn inspect_run_document(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    Query(input): Query<DocumentPath>,
+) -> ApiResult<crate::run_artifacts::DocumentStatus> {
+    let run: Run = app.store.get("runs", &id)?;
+    Ok(Json(
+        tokio::task::spawn_blocking(move || crate::run_artifacts::inspect(&app, &run, &input.path))
+            .await
+            .map_err(anyhow::Error::from)??,
+    ))
+}
+
+async fn import_run_document(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    Json(input): Json<DocumentPath>,
+) -> ApiResult<Artifact> {
+    let run: Run = app.store.get("runs", &id)?;
+    Ok(Json(
+        tokio::task::spawn_blocking(move || crate::run_artifacts::import(&app, &run, &input.path))
+            .await
+            .map_err(anyhow::Error::from)??,
+    ))
+}
+
+async fn export_run_document(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    Json(input): Json<DocumentPath>,
+) -> ApiResult<Value> {
+    let artifact: Artifact = app.store.get("artifacts", &id)?;
+    let path = tokio::task::spawn_blocking(move || {
+        crate::run_artifacts::export(&app, &artifact, &input.path)
+    })
+    .await
+    .map_err(anyhow::Error::from)??;
+    Ok(Json(json!({"path":path})))
+}
+
 async fn upload(State(app): State<App>, mut multipart: Multipart) -> ApiResult<Artifact> {
     let mut group_id = String::new();
     let mut file = None;
@@ -1531,6 +1592,8 @@ async fn upload(State(app): State<App>, mut multipart: Multipart) -> ApiResult<A
         status: "stored".into(),
         error: None,
         created_at: now(),
+        source: None,
+        in_knowledge: true,
     };
     app.store.write(|tx| {
         store::get::<Group>(tx, "groups", &artifact.group_id)?.ensure_active()?;
@@ -1588,6 +1651,7 @@ async fn index_artifact(State(app): State<App>, Path(id): Path<String>) -> ApiRe
             "Semantic indexing supports text and images"
         );
         artifact.status = "indexing".into();
+        artifact.in_knowledge = true;
         artifact.error = None;
         store::put(tx, "artifacts", &id, &artifact)?;
         Ok(artifact)
@@ -1685,7 +1749,10 @@ async fn search(State(app): State<App>, Query(query): Query<SearchQuery>) -> Api
             .into_iter()
             .filter(|h| {
                 valid.iter().any(|a| {
-                    a.id == h["id"] && a.group_id == query.group_id && a.status == "indexed"
+                    a.id == h["id"]
+                        && a.group_id == query.group_id
+                        && a.in_knowledge
+                        && a.status == "indexed"
                 })
             })
             .map(|mut hit| {

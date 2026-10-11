@@ -961,6 +961,29 @@ fn execute_turn(
         return Ok(true);
     }
     run.ended_at = Some(now());
+    let publishable = ["succeeded", "waiting"].contains(&run.status.as_str())
+        && participates
+        && app.store.read(|tx| {
+            let group = store::get(tx, "groups", &run.group_id)?;
+            Ok(crate::group_scope::access(tx, &group)?
+                .participant_ids
+                .contains(&run.agent_id))
+        })?;
+    let captured_artifacts = if publishable {
+        match crate::run_artifacts::capture(app, run) {
+            Ok(artifacts) => artifacts,
+            Err(error) => {
+                run.artifact_errors.push(RunArtifactError {
+                    path: "capture".into(),
+                    error: error.to_string(),
+                });
+                tracing::error!(run_id = %run.id, "Persist run artifact capture evidence: {error}");
+                vec![]
+            }
+        }
+    } else {
+        vec![]
+    };
     app.store.write(|tx| {
         coordination::complete(tx, run, &message, &secrets)?;
         store::put(tx, "runs", &run.id, run)?;
@@ -984,7 +1007,7 @@ fn execute_turn(
                 body: run.output.clone(),
                 recipients: vec![],
                 reply_to: Some(run.message_id.clone()),
-                artifacts: vec![],
+                artifacts: captured_artifacts.clone(),
                 run_id: Some(run.id.clone()),
                 created_at: now(),
                 auto_routed: false,

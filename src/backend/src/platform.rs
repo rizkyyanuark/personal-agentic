@@ -557,13 +557,22 @@ impl Platform {
             user: user.clone(),
             role: role.clone(),
         });
-        if (user != "owner" || tenant != "default")
+        if !controller_access(&app)
             && (path.starts_with("/api/workstations")
                 || path == "/api/workspaces/directories"
                 || path.ends_with("/terminal")
                 || path.contains("/terminal/")
                 || path.ends_with("/files")
-                || path == "/api/codex/settings")
+                || path == "/api/codex/settings"
+                || (method == Method::POST
+                    && (path
+                        .strip_prefix("/api/runs/")
+                        .and_then(|rest| rest.split_once('/'))
+                        .is_some_and(|(id, action)| !id.is_empty() && action == "artifacts")
+                        || path
+                            .strip_prefix("/api/artifacts/")
+                            .and_then(|rest| rest.split_once('/'))
+                            .is_some_and(|(id, action)| !id.is_empty() && action == "export"))))
         {
             return Err(ApiError(
                 StatusCode::FORBIDDEN,
@@ -656,6 +665,10 @@ impl Platform {
             .await
             .expect("infallible router"))
     }
+}
+
+pub(crate) fn controller_access(app: &App) -> bool {
+    app.workspace_id == "default" && app.identity.as_ref().is_none_or(|i| i.user == "owner")
 }
 
 pub fn can_read(app: &App, group: &Group) -> bool {

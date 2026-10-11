@@ -548,6 +548,7 @@ mod tests {
             remote_pid: None,
             exit_code: None,
             error: Some("private-error".into()),
+            artifact_errors: vec![],
             output: "private-output".into(),
             executable: "private-executable".into(),
             arguments: vec!["private-argument".into()],
