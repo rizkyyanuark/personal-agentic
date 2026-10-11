@@ -4,6 +4,9 @@ Process groups follow CCCC's Unix process ownership; dotenv parsing is the
 unmodified python-dotenv v1.2.2 parser (sources supplied by the Rust backend).
 """
 import io
+import base64
+import binascii
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -19,8 +22,10 @@ import sys
 import time
 import tomllib
 import types
+import uuid
 
 MAX_OUTPUT = 8 * 1024 * 1024
+MAX_DOCUMENT = 1024 * 1024
 SECRETS = []
 
 
@@ -180,8 +185,164 @@ def contained(root, reference):
         raise ValueError("Path escapes workspace")
     safe_path(path)
     resolved = (root / path).resolve(strict=True)
+    if not resolved.is_relative_to(root):
+        raise ValueError("File is outside the saved run workdir")
     safe_path(resolved.relative_to(root))
     return resolved
+
+
+def document_reference(reference, *, relative=False):
+    from urllib.parse import urlparse, unquote
+    if not isinstance(reference, str) or not reference:
+        raise ValueError("A document path is required")
+    if reference.startswith("file:"):
+        if relative:
+            raise ValueError("Export destination must be relative to the saved run workdir")
+        url = urlparse(reference)
+        if url.netloc not in ("", "localhost") or url.query or url.fragment:
+            raise ValueError("Only local file paths are supported")
+        reference = unquote(url.path)
+    path = Path(reference)
+    if ".." in path.parts or "\\" in reference or any(ord(c) < 32 or ord(c) == 127 for c in reference):
+        raise ValueError("Document path traversal is not allowed")
+    if relative and (path.is_absolute() or re.match(r"^[A-Za-z]:", reference)):
+        raise ValueError("Export destination must be relative to the saved run workdir")
+    safe_path(path)
+    if path.suffix.lower() not in (".md", ".markdown"):
+        raise ValueError("Only standalone Markdown documents are supported")
+    return path
+
+
+def document_parent(base, parts, *, create=False):
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    base = Path(base)
+    if not base.is_absolute():
+        raise ValueError("Document root must be absolute")
+    descriptor = os.open("/", flags)
+    try:
+        for part in base.parts[1:]:
+            try:
+                child = os.open(part, flags, dir_fd=descriptor)
+            except OSError as error:
+                raise ValueError("Document root must exist without symlinks") from error
+            os.close(descriptor)
+            descriptor = child
+        for part in parts:
+            if create:
+                try:
+                    os.mkdir(part, mode=0o755, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+            try:
+                child = os.open(part, flags, dir_fd=descriptor)
+            except OSError as error:
+                raise ValueError("Document directories must exist without symlinks") from error
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except (OSError, ValueError):
+        os.close(descriptor)
+        raise
+
+
+def run_document(request, root, home=None):
+    if request.get("harness") != "antigravity":
+        raise ValueError("Native document import requires an Antigravity run")
+    if request.get("workspace", {}).get("runtime_id"):
+        raise ValueError("Use the registered runtime for this workdir")
+    session = request.get("native_session_id")
+    if not isinstance(session, str) or not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", session):
+        raise ValueError("The saved run has no valid Antigravity session")
+    path = document_reference(request.get("reference"))
+    candidate = root / path
+    if candidate.is_relative_to(root):
+        base = root
+        relative = candidate.relative_to(root)
+    else:
+        home = (Path.home() if home is None else home).resolve(strict=True)
+        brain = home / ".gemini/antigravity-cli/brain" / session
+        if not candidate.is_relative_to(brain):
+            raise ValueError("Document is outside this run's workdir and Antigravity session")
+        base = home
+        relative = candidate.relative_to(home)
+    safe_path(relative)
+    parent = document_parent(base, relative.parts[:-1])
+    try:
+        metadata = os.stat(relative.name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("Document must be a regular file without symlinks")
+        descriptor = os.open(relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        with os.fdopen(descriptor, "rb") as source:
+            before = os.fstat(source.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError("Document must be a regular file without symlinks")
+            if before.st_size > MAX_DOCUMENT:
+                raise ValueError("Document exceeds the 1 MiB limit")
+            data = source.read(MAX_DOCUMENT + 1)
+            after = os.fstat(source.fileno())
+            if len(data) > MAX_DOCUMENT:
+                raise ValueError("Document exceeds the 1 MiB limit")
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise ValueError("Document changed while it was being imported; retry the import")
+    finally:
+        os.close(parent)
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("Document must contain valid UTF-8 Markdown") from error
+    return {"path": str(base / relative), "name": relative.name,
+            "data": base64.b64encode(data).decode("ascii"),
+            "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+
+
+def export_document(request, root):
+    if request.get("workspace", {}).get("runtime_id"):
+        raise ValueError("Use the registered runtime for this workdir")
+    if request.get("permission") not in ("workspace-write", "danger-full-access"):
+        raise ValueError("The saved run profile does not permit workdir writes")
+    relative = document_reference(request.get("reference"), relative=True)
+    encoded = request.get("data")
+    if not isinstance(encoded, str) or len(encoded) > 4 * ((MAX_DOCUMENT + 2) // 3):
+        raise ValueError("Document exceeds the 1 MiB limit")
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("Invalid document encoding") from error
+    if len(data) > MAX_DOCUMENT:
+        raise ValueError("Document exceeds the 1 MiB limit")
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("Document must contain valid UTF-8 Markdown") from error
+    if request.get("sha256") != hashlib.sha256(data).hexdigest():
+        raise ValueError("Document checksum does not match the stored artifact")
+    parent = document_parent(root, relative.parts[:-1], create=True)
+    temporary = ".artifact-" + uuid.uuid4().hex + ".tmp"
+    created = False
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             mode=0o600, dir_fd=parent)
+        created = True
+        with os.fdopen(descriptor, "wb") as target:
+            target.write(data)
+            target.flush()
+            os.fsync(target.fileno())
+        try:
+            os.link(temporary, relative.name, src_dir_fd=parent, dst_dir_fd=parent,
+                    follow_symlinks=False)
+        except FileExistsError as error:
+            raise ValueError("Export destination already exists; choose a new filename") from error
+        os.unlink(temporary, dir_fd=parent)
+        created = False
+        os.fsync(parent)
+    finally:
+        if created:
+            try:
+                os.unlink(temporary, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+        os.close(parent)
+    return {"path": str(root / relative)}
 
 
 def stop_group(process):
@@ -704,6 +865,12 @@ def main(request):
         emit({"workspace": ws, "git_status": "Workdir verified on workstation"})
         return 0
     root = Path(ws["canonical_path"])
+    if op == "run_document":
+        emit(run_document(request, root))
+        return 0
+    if op == "export_document":
+        emit(export_document(request, root))
+        return 0
     if op == "redact":
         dotenv(request, root)
         emit({"command": redact(request["command"])})

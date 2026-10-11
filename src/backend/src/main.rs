@@ -20,6 +20,9 @@ mod process_tree;
 mod projects;
 mod questions;
 mod remote;
+mod run_artifacts;
+#[cfg(test)]
+mod run_document_tests;
 mod run_files;
 mod runtime;
 mod schedules;
@@ -147,6 +150,7 @@ async fn main() -> Result<()> {
         workspaces::DirectoryView::export_all_to(&directory)?;
         terminal::TerminalRun::export_all_to(&directory)?;
         skills::SkillList::export_all_to(&directory)?;
+        run_artifacts::DocumentStatus::export_all_to(&directory)?;
         return Ok(());
     }
     anyhow::ensure!(

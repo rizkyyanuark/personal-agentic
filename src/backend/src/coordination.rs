@@ -287,6 +287,7 @@ pub fn enqueue(
         remote_pid: None,
         exit_code: None,
         error: None,
+        artifact_errors: vec![],
         output: String::new(),
         executable: String::new(),
         arguments: vec![],

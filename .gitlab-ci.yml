@@ -91,6 +91,7 @@ ssh_bridge:
     - apt-get install -y --no-install-recommends git
   script:
     - python src/backend/tests/antigravity_skills.py
+    - python src/backend/tests/run_documents.py
 
 production_config:
   stage: verify

@@ -10,6 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::path::{Component, Path as FilePath, PathBuf};
 use tokio::io::AsyncReadExt;
 
@@ -101,6 +102,24 @@ pub async fn read(
     Query(query): Query<FileQuery>,
 ) -> Result<Response, ApiError> {
     let run: Run = app.store.get("runs", &id)?;
+    if let Some(artifact) = crate::run_artifacts::stored(&app, &run, &query.path)? {
+        let bytes = tokio::fs::read(security::artifact_path(&app.store.org, &artifact.id)?)
+            .await
+            .map_err(anyhow::Error::from)?;
+        if bytes.len() as u64 != artifact.size
+            || format!("{:x}", Sha256::digest(&bytes)) != artifact.sha256
+        {
+            return Err(anyhow::anyhow!("Stored document failed its integrity check").into());
+        }
+        return Ok((
+            [
+                (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                (header::CONTENT_DISPOSITION, "inline"),
+            ],
+            bytes,
+        )
+            .into_response());
+    }
     let workspace = run
         .profile
         .workdir

@@ -90,6 +90,30 @@ Use a separate candidate container/volume/port for job evidence before replacing
 an existing preview. Keep that preview's data volume and save a stopped-service
 backup before rollout; never remove it with `docker compose down -v`.
 
+## Antigravity run documents
+
+The Rust workspace tests include the authenticated document routes with real
+SQLite and filesystem persistence: historical import, immutable preview after
+source removal, retry repair, group lifecycle, provenance, and write permissions.
+Platform-router coverage also exercises the real membership invitation API and
+persisted-session authentication: an invited workspace owner cannot import or
+export controller documents, while permitted saved previews remain readable.
+The regression seeds a login record; it does not exercise external Matrix sign-in.
+Run `python backend/tests/run_documents.py` from `src` on Linux for the SSH
+transport checks. These use temporary files and actual directory descriptors;
+no provider call or internal module mock is used. The `ssh_bridge` GitLab job
+runs this suite alongside the existing Antigravity skill checks.
+
+For product acceptance, use an isolated candidate organization containing a
+historical Antigravity run and its published reply. Open the original document
+link, choose **Recover document**, check the import-time label and source hash,
+then restart with that candidate's SSH connection unavailable. The saved link
+must still return the same bytes. A separate real Antigravity task that links a
+Markdown file must attach a `completion` artifact before publishing its reply.
+Check explicit export, existing-file rejection, read-only rejection, and that
+neither flow adds Knowledge until the user requests it. Keep private run records,
+owner keys, screenshots, and candidate state in an ignored proof directory.
+
 ## Antigravity SSH project pilot
 
 `node frontend/tests/cockpit-ssh-pilot.mjs` invokes the configured real provider

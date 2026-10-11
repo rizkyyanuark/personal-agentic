@@ -934,6 +934,44 @@ code {
   flex-basis: 100%;
   margin: 0;
 }
+.markdown-preview-storage {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.markdown-preview-storage p {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+.markdown-preview-storage p:last-child {
+  margin-bottom: 0;
+}
+.markdown-export-form {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.markdown-export-form > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.markdown-export-form input {
+  flex: 1;
+  min-width: 140px;
+}
+.run-document-notice {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.run-document-errors code {
+  overflow-wrap: anywhere;
+}
+.run-document-errors li {
+  margin: 12px 0;
+}
 .markdown-preview .markdown {
   font-size: 14px;
 }
