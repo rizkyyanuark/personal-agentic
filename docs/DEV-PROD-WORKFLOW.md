@@ -1,6 +1,9 @@
 # Dev and production workflow
 
-## Production preparation — 2026-10-09
+This is the release procedure and dated preparation history. For the audited source/environment snapshot, see [ARCHITECTURE.md](../ARCHITECTURE.md). GitLab deployment records and the server release manifest establish the released revision; dated bootstrap observations below do not describe the current site.
+
+
+## Historical production preparation — 2026-10-09
 
 The server installation is `/opt/personal-agentic` on workspace EC2
 `34.196.37.78`. Local development data is unchanged. The new production
@@ -34,8 +37,8 @@ initially expiring 2027-01-06. This avoids changing TLS settings for other
 hostnames. `certbot.timer` handles renewal; its deploy hook validates and reloads
 Nginx. No certificate contact email has been configured.
 
-**The public site is in maintenance (HTTPS 503).** The final proxy configuration
-is staged at `/opt/personal-agentic/nginx.conf`. The integration MR is still
+**At this bootstrap snapshot, the public site was in maintenance (HTTPS 503).** The final proxy configuration
+is staged at `/opt/personal-agentic/nginx.conf`. At that time, the integration MR was still
 draft; this bootstrap is preparation, not a reviewed `main` release. The final
 activation must follow review and a successful protected-main image pipeline.
 
@@ -122,7 +125,7 @@ Infrastructure files are installed by an administrator after review. The image
 promotion job cannot replace its own root helper, sudoers, Compose or Nginx
 configuration. Changes to those files require a separate reviewed installation.
 
-After the reviewed release is ready, activate the staged proxy and check it:
+For initial activation after a reviewed release, activate the staged proxy and check it:
 
 ```sh
 sudo install -m 644 /opt/personal-agentic/nginx.conf /etc/nginx/sites-available/personal-agentic.conf

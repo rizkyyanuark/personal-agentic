@@ -41,6 +41,10 @@ and `src/cockpit`. Install web dependencies with `npm ci` from `src`; Docker bui
 one frontend bundle served by Rust on the same origin. See the
 [integration strategy](docs/cockpit-integration-strategy.md).
 
+## Development contracts
+
+Use [the AI-assisted development workflow](docs/development.md), [the architecture map](ARCHITECTURE.md), and [change contracts](openspec/README.md) when developing this product. GitLab Issues own priority and work status; versioned contracts own scope, scenarios, task dependencies and acceptance evidence. Changes to API, data, access, runtime or deployment need a contract; small fixes use the MR checklist. [AGENTS.md](AGENTS.md) defines the required real-product proof.
+
 ## Development and releases
 
 See [the dev/prod workflow](docs/DEV-PROD-WORKFLOW.md) for the GitLab release
@@ -50,7 +54,7 @@ ARM64 workspace EC2. Verification jobs have CPU, memory, and swap limits;
 the full merge-request pipeline has passed. Production Compose, bootstrap,
 restricted image promotion and HTTPS proxy configuration live in
 `infra/production`. The workflow records the verified server preparation and
-the remaining review/activation steps.
+operating limits and historical preparation evidence.
 
 The pipeline checks registry authentication, builds and smoke-tests an ARM64
 image, then offers a manual production deployment on protected `main`.
