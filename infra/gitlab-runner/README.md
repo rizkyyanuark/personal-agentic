@@ -25,8 +25,13 @@ Project concurrency one prevents overlapping personal-agentic jobs. Yunesa's
 separate `gitlab-build-runner` manager can still add load to the same workspace,
 so these bounds do not establish a host-wide budget. At inspection, the ARM64
 host had two CPUs, 1,835 MiB RAM with 1,069 MiB available, 1,320 MiB swap used and
-17 GiB disk free. This idle sample permits a bounded build trial; acceptance
-still requires the actual ARM64 pipeline and load evidence.
+17 GiB disk free. The real [ARM64 pipeline #58](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/pipelines/58)
+then passed four verification jobs. Over 67 samples, production health remained
+HTTP 200, maximum 1,108 ms, without OOM or restart. The backend job took 29 minutes;
+host swap peaked at 3,327 MiB and available RAM fell to 270 MiB. Linking creates
+substantial swap/I/O load. This verifies the observed bounded build and does not
+establish capacity for concurrent projects; detailed proof is in
+[CI-003](../../openspec/changes/CI-003-simple-automatic-releases/proposal.md).
 
 Preserve the image registration's `buildkit-seccomp.json`, `buildkit.apparmor`
 and `infra/ci/buildkit-runc.sh` for the restricted keyring operation. Verification
@@ -34,7 +39,8 @@ must not inherit packaging security options. Do not enable privileged mode or
 expose a Docker socket to merge-request code. Keep runner tokens private.
 
 Monitor workspace memory/swap, free disk and production HTTP during the actual
-backend build. Pause new CI jobs and investigate any OOM, repeated health failures
-or sustained swap pressure; pausing a registration does not stop an active job.
+backend build. Stop the affected CI job and investigate any OOM, repeated health
+failures or sustained production slowdown from swap pressure. Pause new jobs if
+needed; pausing a registration does not stop an active job.
 Keep production services and other projects' runners unchanged. Protected-main
 image publishing and real image smoke remain separate checks from the MR build.

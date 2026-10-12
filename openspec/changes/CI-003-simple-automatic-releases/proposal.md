@@ -7,8 +7,8 @@ initially requested builds outside the workspace, then chose the existing ARM64
 workspace runners after the GitLab-host feasibility audit found insufficient RAM.
 The GitLab-host migration and capacity increase are superseded. Use existing
 registrations #3 and #4 with bounded resources and one shared personal-agentic
-manager, not new GitLab-host runners. Production helper installation and merge
-remain separate release steps.
+manager, not new GitLab-host runners. Matching production helper installation and
+status acceptance are complete; merge and the main image/release pipeline remain.
 
 Checkout: `C:/Users/rizky/.codex/worktrees/cea5/personal-agentic`.
 Branch: `codex/ci-simplify-auto-deploy`; clean base:
@@ -69,9 +69,10 @@ personal-agentic concurrency one is a project budget, not a host-wide guarantee.
 | Frontend wiring | R1 | `npm run check` passed: strict TypeScript, lint, Vite and 203 cockpit tests; cockpit workspace 12/12 passed. Final real Edge flow create/rename/archive/restore/reload/delete group and chat persistence passed, zero browser errors/provider runs; archived writes 400 and knowledge read-only controls preserved |
 | Current-source application | R1 | Actual `src/Dockerfile`, final binary and frontend, local AMD64 candidate on loopback 18768 with isolated Linux volumes and 512 MiB RAM cap: health/login/state; anonymous state 401; removed GET/POST 404; no maintenance field/banner; ordinary chat persists, exact replay same ID, conflicting input 400, logout revocation 401. Preseeded sealed marker remains byte-identical |
 | Persistence / restart | R1 | Passed: actual stopped test-volume SQLite DB+WAL copied privately into tmpfs for read-only inspection; both API/UI messages have exactly one row, `PRAGMA integrity_check = ok`. Restarted candidate API returns both persisted messages, zero runs, no maintenance field and unchanged legacy marker |
-| GitLab pipeline simulation | R2, R4 | Initial source CI lint dry-run: protected main has seven jobs and automatic deploy; unprotected branch has only four verification jobs. Both valid with zero errors/warnings. Revalidation of the workspace-tag revision and actual ARM64 pipeline pending |
-| Workspace manager and real ARM64 CI | R4 | Existing #3/#4 registrations and shared concurrency-one manager verified live; no remote change required. Latest ARM64 MR pipeline and workspace load acceptance pending |
-| Installed helper / production release | R3 | Not run: separate reviewed administrative installation and release acceptance pending |
+| GitLab pipeline simulation | R2, R4 | Updated protected-main dry-run valid: seven automatic jobs use the existing workspace tags, zero errors/warnings. Initial unprotected branch dry-run had four verification jobs. Current open-MR branch push is deliberately suppressed by workflow rules; actual MR pipeline #58 passed |
+| Workspace manager and real ARM64 CI | R4 | [Pipeline #58](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/pipelines/58), source `df40c1130b04716a393a331e7cf4858453329890`, passed all four jobs on runner #3: frontend, Rust 145 tests/native binary/43,119,648-byte artifact archive, skills 24/documents 21, release helper 37/deploy client 10. Backend job took 1,764 seconds. Existing #3/#4 registrations and shared concurrency-one manager verified live; no remote runner change |
+| Workspace load during ARM64 CI | R4 | 67 samples over 33 minutes: production HTTP 200 in every sample, maximum 1,108 ms; no cgroup OOM kill, unchanged platform/Matrix identities and startup times. Minimum available RAM 270 MiB, host swap peak 3,327 MiB, job swap peak 1,944 MiB, free disk minimum 16.09 GiB. After CI: 1,126 MiB available and health 5 ms. Linking produced substantial swap/I/O cost; this accepts the observed bounded build, not simultaneous Yunesa load or a host-wide budget |
+| Installed helper / production release | R3 | Matching helper installed atomically under release lock, root:root 0755, SHA-256 `8b4d9b9030c59e1198e4dc673b07b3bca9b1f8fede9551e0c616ccacb7a48877`; old SHA `3fdb452259f2b86fb194c35a5992c5dc3125d4e9677f35cbd4d0359ea97ffdf5` privately backed up. Real status auth/state/cockpit/UI/logout/SVG smoke passed, active operations zero, pending null. Current release `47a74a051f4e9c34a947be11f9565c78e78648d7`, release journals, schema and container identities unchanged, zero restarts. Main protection, production-scoped protected SSH File variables and outdated-deployment prevention verified. No new application image deployed |
 
 Tests substitute only external Git/SSH deployment boundaries and one destructive
 Docker busy-preflight boundary. Actual HTTP transport, filesystem, SQLite and
@@ -80,8 +81,9 @@ drain removal. Provider continuation/collector behavior and terminal/Matrix repl
 fixes independent of drain are preserved.
 
 Generated state, owner keys, test databases, screenshots and build logs stay in
-ignored scratch/test volumes; sanitized outcomes belong here. Source proof does
-not establish latest ARM64 CI, merge or production activation. See the
+ignored scratch/test volumes; sanitized outcomes belong here. Local app proof,
+ARM64 MR acceptance and installed-helper smoke do not establish the main image
+smoke, merge or a new production release. See the
 [current runbook](../../../docs/DEV-PROD-WORKFLOW.md) for activation and recovery.
 
 Final local backend image: `sha256:08ebaa266abd1619d36ce1b8835794847446938255fba1c082b034d06a01fbce`.

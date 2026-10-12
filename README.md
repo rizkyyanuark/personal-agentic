@@ -59,8 +59,8 @@ The pipeline checks registry authentication, builds and smoke-tests an ARM64
 image, then automatically deploys the tested digest after a merge to protected
 `main`. Busy production work makes deployment fail clearly for later retry.
 Deployment drain has been removed. Backups, authenticated smoke, fixed release
-identity and restricted SSH remain. The latest ARM64 CI and matching installed
-server helper must be verified before merging this release change.
+identity and restricted SSH remain. ARM64 MR CI and the matching installed helper
+passed; the new production image still requires review, merge and the main pipeline.
 
 ## License
 

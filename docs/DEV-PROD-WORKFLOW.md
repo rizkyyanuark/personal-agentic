@@ -10,8 +10,9 @@ older installation and capacity evidence.
 ## Activation boundary
 
 This source removes deployment drain and configures automatic protected-main
-releases using the existing workspace runners. Source and local proof do not
-establish installed-helper acceptance or a production release.
+releases using the existing workspace runners. The matching reviewed helper is
+installed and its status smoke passed; the application image still awaits merge
+and the protected-main pipeline.
 Complete the following before merging this change:
 
 1. Preserve the existing project runner registrations #3 and #4 using
@@ -20,9 +21,9 @@ Complete the following before merging this change:
 2. Run the latest real ARM64 MR pipeline and inspect workspace memory, swap and
    production health during the backend build. Other projects use separate
    managers, so project concurrency does not establish a host-wide budget.
-3. Install the reviewed `infra/production/release.py` as the root-owned production
-   helper through the administrative connection, preserving its previous binary,
-   ownership, mode and release journals. Verify installed-source hash and `status`.
+3. Preserve the reviewed `infra/production/release.py` as the root-owned production
+   helper. Administrative installation retained the previous binary, ownership,
+   mode and release journals. Verify installed-source hash and `status` after any update.
    The deploy key cannot update this helper or its own access rules.
 4. Verify protected `main`, protected production-scoped SSH file variables,
    registry credentials and GitLab's prevention of outdated deployments.
@@ -34,6 +35,24 @@ sharing concurrency one. Jobs have one CPU, 1 GiB RAM and a 4 GiB combined
 memory/swap ceiling; the manager has a 192 MiB / 0.25 CPU cap. Workspace available
 RAM was 1,069 MiB, swap used 1,320 MiB and free disk 17 GiB. Verify build load
 rather than treating this idle sample as a capacity guarantee.
+
+[ARM64 MR pipeline #58](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/pipelines/58)
+passed all four verification jobs. During its 29-minute backend job, production
+remained HTTP 200 across the 67-sample observation window, with a maximum
+1,108 ms response and no OOM or service restart. Host swap peaked at 3,327 MiB
+and available RAM fell to 270 MiB; linking caused substantial swap and I/O.
+This proves the observed bounded build, not capacity for overlapping projects.
+
+The helper installed on 2026-10-13 has SHA-256
+`8b4d9b9030c59e1198e4dc673b07b3bca9b1f8fede9551e0c616ccacb7a48877`,
+root ownership and mode `0755`. The prior binary remains in the private
+`/opt/personal-agentic/helper-backups` directory. Real `status` smoke passed
+health, owner login, authenticated state, cockpit, UI, rejected login and revoked
+session checks, plus the current source SVG hash. The helper's native ARM64,
+registry digest, full commit and running-container identity guards also passed.
+Current image/commit, release journals, database schema and platform/Matrix
+container identity remained unchanged;
+no image pull, application redeploy or service restart was performed.
 
 The owner chose the workspace after the GitLab-host capacity audit found only
 272 MiB available RAM and 3,006 MiB swap used, despite 17 GiB free disk after log
