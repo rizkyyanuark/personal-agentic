@@ -13,7 +13,7 @@ stages:
 
 default:
   tags:
-    - personal-agentic-ci-gitlab
+    - personal-agentic-ci
   interruptible: true
 
 variables:
@@ -83,7 +83,7 @@ image_publish:
   extends: .image_rules
   stage: image
   tags:
-    - personal-agentic-image-gitlab
+    - personal-agentic-image
   image:
     name: moby/buildkit@sha256:65eca3c01cd1180c8f64565c4e3c5983af5145818b0e6fa863385d099eb73855
     entrypoint: [""]

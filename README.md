@@ -48,11 +48,10 @@ Use [the AI-assisted development workflow](docs/development.md), [the architectu
 ## Development and releases
 
 See [the dev/prod workflow](docs/DEV-PROD-WORKFLOW.md) for the GitLab release
-path, GitHub downstream copy, independent production state and activation
-requirements. CI requests dedicated ARM64 runners on the GitLab host, using
-new tags that cannot fall back to the workspace runners. Installation awaits
-the owner's capacity and migration approval; the existing 2 GiB GitLab host
-does not have enough measured memory headroom for Rust builds. Production
+path, GitHub downstream copy, independent production state and release
+requirements. CI uses the existing ARM64 workspace runners, with bounded
+resources and one shared manager limited to one personal-agentic job at a time.
+Other projects have separate managers and can still run concurrently. Production
 Compose, bootstrap, restricted image promotion and HTTPS proxy configuration
 live in `infra/production`.
 
@@ -60,8 +59,8 @@ The pipeline checks registry authentication, builds and smoke-tests an ARM64
 image, then automatically deploys the tested digest after a merge to protected
 `main`. Busy production work makes deployment fail clearly for later retry.
 Deployment drain has been removed. Backups, authenticated smoke, fixed release
-identity and restricted SSH remain. Runner migration and the matching server
-helper installation must complete before this source configuration is activated.
+identity and restricted SSH remain. The latest ARM64 CI and matching installed
+server helper must be verified before merging this release change.
 
 ## License
 

@@ -12,7 +12,7 @@
     services_privileged = false
     services_limit = 0
     volumes = ["/cache"]
-    memory = "3g"
+    memory = "1g"
     memory_swap = "4g"
     cpus = "1"
     cpu_shares = 256

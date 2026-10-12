@@ -10,28 +10,37 @@ older installation and capacity evidence.
 ## Activation boundary
 
 This source removes deployment drain and configures automatic protected-main
-releases. It is not proof that the new runners or server helper are installed.
+releases using the existing workspace runners. Source and local proof do not
+establish installed-helper acceptance or a production release.
 Complete the following before merging this change:
 
-1. Obtain the owner's approval for GitLab-host capacity and runner migration.
-2. Install the two project-only runner registrations with the new tags, sharing
-   one manager with `concurrent = 1`; run a real ARM64 MR pipeline and measure
-   GitLab responsiveness and memory during the backend build.
+1. Preserve the existing project runner registrations #3 and #4 using
+   `personal-agentic-ci` and `personal-agentic-image`, sharing one manager with
+   `concurrent = 1`. Preserve their separate verification and packaging privileges.
+2. Run the latest real ARM64 MR pipeline and inspect workspace memory, swap and
+   production health during the backend build. Other projects use separate
+   managers, so project concurrency does not establish a host-wide budget.
 3. Install the reviewed `infra/production/release.py` as the root-owned production
    helper through the administrative connection, preserving its previous binary,
    ownership, mode and release journals. Verify installed-source hash and `status`.
    The deploy key cannot update this helper or its own access rules.
 4. Verify protected `main`, protected production-scoped SSH file variables,
-   registry credentials and GitLab's prevention of outdated deployments. Remove
-   old workspace tags/registrations only after the replacement jobs have passed.
+   registry credentials and GitLab's prevention of outdated deployments.
 5. Merge only after review and CI acceptance. The main pipeline publishes and
    smoke-tests the image before automatic production promotion.
 
-The existing GitLab host is ARM64 with two CPUs and 1,835 MiB RAM. After the
-owner's colleague cleaned Docker logs, 17 GiB disk was free; memory available was
-272 MiB with 3,006 MiB swap used. This is insufficient measured headroom for a
-Rust runner. Increase capacity before installing; do not treat disk cleanup or
-idle container health as build-capacity proof. See the [runner setup](../infra/gitlab-runner/README.md).
+Live inspection on 2026-10-13 confirmed both project registrations online and
+sharing concurrency one. Jobs have one CPU, 1 GiB RAM and a 4 GiB combined
+memory/swap ceiling; the manager has a 192 MiB / 0.25 CPU cap. Workspace available
+RAM was 1,069 MiB, swap used 1,320 MiB and free disk 17 GiB. Verify build load
+rather than treating this idle sample as a capacity guarantee.
+
+The owner chose the workspace after the GitLab-host capacity audit found only
+272 MiB available RAM and 3,006 MiB swap used, despite 17 GiB free disk after log
+cleanup. The earlier GitLab-host migration proposal is superseded; no host resize
+or new runner registration is required. See the [runner setup](../infra/gitlab-runner/README.md)
+for the selected executor boundaries. Production still has the earlier helper;
+install and verify the current source before accepting automatic promotion.
 
 ## Pipeline
 
@@ -42,9 +51,10 @@ idle container health as build-capacity proof. See the [runner setup](../infra/g
 | Unprotected branch | Verification only; no release credentials or production deployment |
 | Busy production / stale main at deploy start | Fail visibly; retry the deploy job after work finishes, or use the newest main pipeline |
 
-CI requests `personal-agentic-ci-gitlab` and `personal-agentic-image-gitlab`.
-The old workspace registrations do not match these tags. Until the new runners
-are registered, jobs wait rather than building on the workspace server.
+CI requests the existing workspace tags `personal-agentic-ci` and
+`personal-agentic-image`. Both project registrations share one manager with
+global concurrency one. This prevents overlapping personal-agentic jobs;
+Yunesa and other independent managers may still add load to the same host.
 
 Frontend and Rust compile once in verification jobs. Packaging reuses their
 artifacts, including the stripped XZ backend to fit the GitLab upload limit.
