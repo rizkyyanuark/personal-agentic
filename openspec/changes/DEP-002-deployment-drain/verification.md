@@ -18,7 +18,7 @@ this change has not been installed and routine deployment remains manual.
 | UI/browser/auth | R5 | Passed before collector correction | Real SSE, preserved editable draft/focus, disabled new work, actual SSH terminal Stop/history, action/index controls, readable preview/download, seal/reopen and expiry. 320px no overflow; zero browser errors; contrast12.14 light/12.54 dark |
 | Frontend package checks | R5 | Passed | Build/typecheck, source lint, 12 frontend contracts and full203 cockpit tests; default lint excludes generated/dependency directories without weakening source rules. Existing chunk-size warning remains |
 | CI syntax/protocol assertions | R4/R5 | Passed syntax; packaged runtime pending | Bash syntax and16 embedded Perl assertion blocks compile; GitLab main dry-run valid, zero errors/warnings, production manual/non-optional, timeout90m |
-| Latest GitLab MR CI | R5 | Not run | Commit/push/Draft MR pending final local acceptance |
+| GitLab source MR CI | R5 | Passed | [MR !5](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/merge_requests/5), [pipeline53](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/pipelines/53), source commit d7645de0bb277fae153119161d61fa711e6e899b: registry_auth213, frontend214, backend215, ssh_bridge216 and production_config217 all success. ARM64 backend155 tests and binary artifact passed; final helper58 tests passed. Documentation closure receives its own latest MR pipeline; read its current result in the MR |
 | Production installation | R5 | Not run | Separate owner review and manual bootstrap required; current production has no drain protocol |
 | Routine automatic deployment | Subsequent change | Not run | Remains manual |
 
@@ -27,7 +27,7 @@ this change has not been installed and routine deployment remains manual.
 Final AMD64 candidate image:
 `sha256:e840388a33e25c46ee1572ed8e8d87c4f111cf9181cd2e0d56cc7b3e65f7135d`,
 protocol marker1. It was assembled from the final155-test Rust binary and verified
-frontend. The disposable candidate `personal-agentic-dep002-proof` listens only on
+frontend. The disposable candidate `personal-agentic-dep002-proof` was exercised on
 `127.0.0.1:18768`. Its data and workdir use separately labeled Linux named volumes;
 neither the original laptop service on18766 nor production volumes are used. The
 host `scratch/dep-002/org` is a private owner-key replica and browser evidence
@@ -36,6 +36,19 @@ known-hosts mounts are read-only and were explicitly approved for the isolated
 native proof, with separate authorization for the three-turn corrected attempt.
 Only an owned remote `/tmp/personal-agentic-dep002-*`
 fixture is inspected. No credential or native identifier belongs in source.
+
+After final acceptance, admission was open and active/in-flight counts were zero.
+Only the identity-checked disposable container was stopped and removed, withdrawing
+the key mounts. Test volumes/evidence were retained; the original laptop service's
+health remained200/ok.
+
+During pipeline53, one project CI job executed at a time on the shared host.
+Backend RSS samples reached883.6MiB under its1GiB RAM cap; observed linker swap
+was about1.6GiB, with zero cgroup OOM/OOM kills. Test compilation took12m05s,
+binary build11m29s and the full backend job27m23s. Root disk remained about18GiB
+free, and public production health returned200/ok during linking. These are
+observations of this run, not a cross-project host budget or proof of installed
+drain. Linker memory/CI speed optimization remains a separate change.
 
 The browser/API/helper proof uses an actual available Antigravity catalog over
 SSH for workspace validation and actual SSH terminal commands; it invokes no model
