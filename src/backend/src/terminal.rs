@@ -165,24 +165,7 @@ pub async fn start(
             }
             return Ok(Json(existing));
         }
-        if app.store.drain.maintenance()?.phase != crate::drain::Phase::Open {
-            let profile = agent(&app, &id)?;
-            let workspace = profile.workdir.as_ref().context("Attach a workdir first")?;
-            let env = if workspace.ssh_host.is_none() {
-                security::workdir_env(workspace)?
-            } else {
-                Default::default()
-            };
-            let mut secrets: Vec<String> =
-                env.values().filter(|s| !s.is_empty()).cloned().collect();
-            secrets.push(app.token.to_string());
-            if existing.command != security::redacted(&input.command, &secrets) {
-                return Err(anyhow::anyhow!("Command ID already used").into());
-            }
-            return Ok(Json(existing));
-        }
     }
-    let operation = app.store.drain.operation(crate::drain::Admission::Root)?;
     let profile = agent(&app, &id)?;
     let workspace = profile.workdir.as_ref().context("Attach a workdir first")?;
     let env = if workspace.ssh_host.is_none() {
@@ -232,65 +215,63 @@ pub async fn start(
         .cancellations
         .lock()
         .map_err(|_| anyhow::anyhow!("Cancellation registry unavailable"))?;
-    let admitted = app
-        .store
-        .write_admission(crate::drain::Admission::Root, |tx| {
-            if tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM terminal_runs WHERE id=?)",
-                [&run.id],
-                |row| row.get::<_, bool>(0),
-            )? {
-                let existing: TerminalRun = store::get(tx, "terminal_runs", &run.id)?;
-                ensure!(
-                    existing.agent_id == run.agent_id && existing.command == run.command,
-                    "Command ID already used"
-                );
-                run = existing;
-                return Ok(false);
-            }
-            let current: Agent = store::get(tx, "agents", &run.agent_id)?;
+    let admitted = app.store.write(|tx| {
+        if tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM terminal_runs WHERE id=?)",
+            [&run.id],
+            |row| row.get::<_, bool>(0),
+        )? {
+            let existing: TerminalRun = store::get(tx, "terminal_runs", &run.id)?;
             ensure!(
-                current.revision == profile.revision && current.deleted_at.is_none(),
-                "Profile changed; refresh before running"
+                existing.agent_id == run.agent_id && existing.command == run.command,
+                "Command ID already used"
             );
-            ensure!(
-                !busy(tx, &run.agent_id, &run.canonical_cwd)?,
-                "A terminal command is already running in this workdir"
-            );
-            ensure!(
-                !store::list::<Run>(tx, "runs")?
-                    .iter()
-                    .any(|r| coordination::active(r)
-                        && (r.agent_id == run.agent_id
-                            || r.profile.workdir.as_ref().is_some_and(|w| w
-                                .identity()
-                                .eq_ignore_ascii_case(&run.canonical_cwd)))),
-                "Wait for agent work in this workdir to finish, or cancel it in Runs"
-            );
-            let active: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM terminal_runs WHERE json_extract(data,'$.status')='running'",
-                [],
-                |row| row.get(0),
-            )?;
-            ensure!(
-                active < 2,
-                "Two terminal commands are already running; stop or finish one first"
-            );
-            store::put(tx, "terminal_runs", &run.id, &run)?;
-            tx.execute(
-                "INSERT INTO metadata(key,value) VALUES(?,?)",
-                [
-                    format!("terminal.input:{}", run.id),
-                    format!("{:x}", Sha256::digest(input.command.as_bytes())),
-                ],
-            )?;
-            store::event(
-                tx,
-                "terminal.started",
-                &json!({"agent_id":run.agent_id,"run_id":run.id}),
-            )?;
-            Ok(true)
-        })?;
+            run = existing;
+            return Ok(false);
+        }
+        let current: Agent = store::get(tx, "agents", &run.agent_id)?;
+        ensure!(
+            current.revision == profile.revision && current.deleted_at.is_none(),
+            "Profile changed; refresh before running"
+        );
+        ensure!(
+            !busy(tx, &run.agent_id, &run.canonical_cwd)?,
+            "A terminal command is already running in this workdir"
+        );
+        ensure!(
+            !store::list::<Run>(tx, "runs")?
+                .iter()
+                .any(|r| coordination::active(r)
+                    && (r.agent_id == run.agent_id
+                        || r.profile.workdir.as_ref().is_some_and(|w| w
+                            .identity()
+                            .eq_ignore_ascii_case(&run.canonical_cwd)))),
+            "Wait for agent work in this workdir to finish, or cancel it in Runs"
+        );
+        let active: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM terminal_runs WHERE json_extract(data,'$.status')='running'",
+            [],
+            |row| row.get(0),
+        )?;
+        ensure!(
+            active < 2,
+            "Two terminal commands are already running; stop or finish one first"
+        );
+        store::put(tx, "terminal_runs", &run.id, &run)?;
+        tx.execute(
+            "INSERT INTO metadata(key,value) VALUES(?,?)",
+            [
+                format!("terminal.input:{}", run.id),
+                format!("{:x}", Sha256::digest(input.command.as_bytes())),
+            ],
+        )?;
+        store::event(
+            tx,
+            "terminal.started",
+            &json!({"agent_id":run.agent_id,"run_id":run.id}),
+        )?;
+        Ok(true)
+    })?;
     if !admitted {
         return Ok(Json(run));
     }
@@ -298,7 +279,6 @@ pub async fn start(
     drop(registry);
     let response = run.clone();
     tokio::task::spawn_blocking(move || {
-        let _operation = operation;
         if let Err(error) = execute(
             &app,
             &profile,
@@ -501,6 +481,88 @@ fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn replay_preserves_exact_input_and_returns_saved_command_without_workdir_access()
+    -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let org = directory.path().join("org");
+        let store = Arc::new(store::Store::open(org.clone())?);
+        let command_id = crate::model::id();
+        let command = "printf secret-one";
+        let saved = TerminalRun {
+            id: command_id.clone(),
+            agent_id: "ceo".into(),
+            command: "printf [REDACTED]".into(),
+            cwd: "/previous-workdir".into(),
+            canonical_cwd: "/previous-workdir".into(),
+            shell: "sh".into(),
+            status: "completed".into(),
+            output: "[REDACTED]".into(),
+            created_at: now(),
+            ended_at: Some(now()),
+            exit_code: Some(0),
+            error: None,
+        };
+        store.write(|tx| {
+            store::put(tx, "terminal_runs", &command_id, &saved)?;
+            tx.execute(
+                "INSERT INTO metadata(key,value) VALUES(?,?)",
+                [
+                    format!("terminal.input:{command_id}"),
+                    format!("{:x}", Sha256::digest(command.as_bytes())),
+                ],
+            )?;
+            Ok(())
+        })?;
+        let app = App {
+            workspace_id: "default".into(),
+            identity: None,
+            public_url: Arc::new("http://127.0.0.1:8765".into()),
+            enabled: Arc::new(AtomicBool::new(false)),
+            store,
+            token: Arc::new("terminal-replay-owner".into()),
+            address: std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 8765),
+            codex: directory.path().join("provider-unused"),
+            codex_version: Arc::new(String::new()),
+            wake: Arc::new(tokio::sync::Notify::new()),
+            cancellations: Default::default(),
+            knowledge: Arc::new(crate::knowledge::Knowledge::new(org.join(".state"))),
+            tool_tokens: Default::default(),
+        };
+        let repeated = start(
+            State(app.clone()),
+            Path("ceo".into()),
+            Json(StartInput {
+                id: command_id.clone(),
+                command: command.into(),
+            }),
+        )
+        .await
+        .map_err(|error| anyhow::anyhow!(error.1))?
+        .0;
+        assert_eq!(repeated.id, saved.id);
+        assert_eq!(repeated.status, "completed");
+        assert_eq!(repeated.output, saved.output);
+        for (agent, input) in [("ceo", "printf secret-two"), ("another-agent", command)] {
+            let error = start(
+                State(app.clone()),
+                Path(agent.into()),
+                Json(StartInput {
+                    id: command_id.clone(),
+                    command: input.into(),
+                }),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
+            assert_eq!(error.1, "Command ID already used");
+        }
+        assert_eq!(app.store.list::<TerminalRun>("terminal_runs")?.len(), 1);
+        assert!(app.cancellations.lock().unwrap().is_empty());
+        Ok(())
+    }
+
     #[test]
     fn output_redaction_survives_split_reads() {
         let secrets = vec!["private-value".into(), "line1\nline2".into()];

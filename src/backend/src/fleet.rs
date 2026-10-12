@@ -365,14 +365,13 @@ fn inspect(app: &App, id: &str, path: &str, operation: &str, key: &str) -> Resul
         "Runtime is offline; reconnect it before attaching a workdir"
     );
     let job = model::id();
-    app.store
-        .write_admission(crate::drain::Admission::Root, |db| {
-            db.execute(
-                "INSERT INTO fleet_jobs(id,runtime,state,request) VALUES(?,?,'queued',?)",
-                params![job, id, json!({"op":operation,"path":path}).to_string()],
-            )?;
-            Ok(())
-        })?;
+    app.store.write(|db| {
+        db.execute(
+            "INSERT INTO fleet_jobs(id,runtime,state,request) VALUES(?,?,'queued',?)",
+            params![job, id, json!({"op":operation,"path":path}).to_string()],
+        )?;
+        Ok(())
+    })?;
     let deadline = Instant::now();
     loop {
         let done = app.store.read(|db| {
@@ -416,14 +415,13 @@ fn inspect(app: &App, id: &str, path: &str, operation: &str, key: &str) -> Resul
 }
 pub fn command(app: &App, runtime: &str) -> Result<Command> {
     let job = model::id();
-    app.store
-        .write_admission(crate::drain::Admission::Continuation, |db| {
-            db.execute(
-                "INSERT INTO fleet_jobs(id,runtime,state) VALUES(?,?,'preparing')",
-                [&job, runtime],
-            )?;
-            Ok(())
-        })?;
+    app.store.write(|db| {
+        db.execute(
+            "INSERT INTO fleet_jobs(id,runtime,state) VALUES(?,?,'preparing')",
+            [&job, runtime],
+        )?;
+        Ok(())
+    })?;
     let mut command = Command::new(std::env::current_exe()?);
     command
         .arg("--relay-db")

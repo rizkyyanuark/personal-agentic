@@ -4,21 +4,16 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Mutex,
 };
 
 pub struct Store {
     pub connection: Mutex<Connection>,
     pub org: PathBuf,
-    pub drain: Arc<crate::drain::Drain>,
 }
 
 impl Store {
     pub fn open(org: PathBuf) -> Result<Self> {
-        let drain = crate::drain::Drain::open(org.join(".state/deployment-drain.json"))?;
-        Self::open_with_drain(org, drain)
-    }
-    pub fn open_with_drain(org: PathBuf, drain: Arc<crate::drain::Drain>) -> Result<Self> {
         std::fs::create_dir_all(org.join(".state"))?;
         let conn = Connection::open(org.join(".state/app.sqlite3"))?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -40,7 +35,6 @@ impl Store {
         let store = Self {
             connection: Mutex::new(conn),
             org,
-            drain,
         };
         store.write(|conn| {
             conn.execute(
@@ -154,16 +148,6 @@ impl Store {
         f(&conn)
     }
     pub fn write<T>(&self, f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T>) -> Result<T> {
-        self.drain.transaction(None, || self.transaction(f))
-    }
-    pub fn write_admission<T>(
-        &self,
-        kind: crate::drain::Admission,
-        f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T>,
-    ) -> Result<T> {
-        self.drain.transaction(Some(kind), || self.transaction(f))
-    }
-    fn transaction<T>(&self, f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T>) -> Result<T> {
         let mut conn = self
             .connection
             .lock()

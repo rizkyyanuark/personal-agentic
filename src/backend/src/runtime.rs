@@ -33,15 +33,6 @@ fn dispatch(app: &App) -> Result<()> {
     if !app.enabled.load(Ordering::Relaxed) {
         return Ok(());
     }
-    let _dispatch = match app
-        .store
-        .drain
-        .operation(crate::drain::Admission::Continuation)
-    {
-        Ok(operation) => operation,
-        Err(error) if error.is::<crate::drain::Closed>() => return Ok(()),
-        Err(error) => return Err(error),
-    };
     crate::agent_tools::tick(app)?;
     crate::schedules::tick(app)?;
     crate::actions::tick(app)?;
@@ -59,47 +50,41 @@ fn dispatch(app: &App) -> Result<()> {
             continue;
         }
         let cancelled = Arc::new(AtomicBool::new(false));
-        let operation = app
-            .store
-            .drain
-            .operation(crate::drain::Admission::Continuation)?;
         app.cancellations
             .lock()
             .map_err(|_| anyhow::anyhow!("Cancellation registry unavailable"))?
             .insert(run.id.clone(), cancelled.clone());
-        let admitted = app
-            .store
-            .write_admission(crate::drain::Admission::Continuation, |tx| {
-                if crate::terminal::busy(
-                    tx,
-                    &run.agent_id,
-                    &run.profile
-                        .workdir
-                        .as_ref()
-                        .map(Workspace::identity)
-                        .unwrap_or_default(),
-                )? {
-                    return Ok(false);
-                }
-                let current: Run = store::get(tx, "runs", &run.id)?;
-                if current.status != "queued" {
-                    return Ok(false);
-                }
-                let group: Group = store::get(tx, "groups", &run.group_id)?;
-                if let Err(error) =
-                    crate::group_scope::access(tx, &group)?.ensure_allowed(&run.agent_id, run.kind)
-                {
-                    run.status = "failed".into();
-                    run.error = Some(error.to_string());
-                    run.ended_at = Some(now());
-                    store::put(tx, "runs", &run.id, &run)?;
-                    store::event(tx, "run.changed", &json!({"run_id":run.id}))?;
-                    return Ok(false);
-                }
-                run.status = "starting".into();
+        let admitted = app.store.write(|tx| {
+            if crate::terminal::busy(
+                tx,
+                &run.agent_id,
+                &run.profile
+                    .workdir
+                    .as_ref()
+                    .map(Workspace::identity)
+                    .unwrap_or_default(),
+            )? {
+                return Ok(false);
+            }
+            let current: Run = store::get(tx, "runs", &run.id)?;
+            if current.status != "queued" {
+                return Ok(false);
+            }
+            let group: Group = store::get(tx, "groups", &run.group_id)?;
+            if let Err(error) =
+                crate::group_scope::access(tx, &group)?.ensure_allowed(&run.agent_id, run.kind)
+            {
+                run.status = "failed".into();
+                run.error = Some(error.to_string());
+                run.ended_at = Some(now());
                 store::put(tx, "runs", &run.id, &run)?;
-                Ok(true)
-            })?;
+                store::event(tx, "run.changed", &json!({"run_id":run.id}))?;
+                return Ok(false);
+            }
+            run.status = "starting".into();
+            store::put(tx, "runs", &run.id, &run)?;
+            Ok(true)
+        })?;
         if !admitted {
             app.cancellations
                 .lock()
@@ -110,7 +95,6 @@ fn dispatch(app: &App) -> Result<()> {
         active.push(run.clone());
         let app = app.clone();
         tokio::task::spawn_blocking(move || {
-            let _operation = operation;
             if let Err(error) = execute(&app, &mut run, &cancelled) {
                 run.status = "failed".into();
                 run.error = Some(error.to_string());

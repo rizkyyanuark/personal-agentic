@@ -33,12 +33,10 @@ function AttachWorkdir({ onWorkdir }: { onWorkdir: () => void }) {
 
 export function AgentTerminal({
   agent,
-  maintenance = false,
   onWorkdir,
   onSkills,
 }: {
   agent: Agent;
-  maintenance?: boolean;
   onWorkdir: () => void;
   onSkills: () => void;
 }) {
@@ -92,7 +90,7 @@ export function AgentTerminal({
   }, [detail?.output]);
 
   async function run() {
-    if (sending || active || !command.trim() || maintenance) return;
+    if (sending || active || !command.trim()) return;
     setSending(true);
     setError("");
     try {
@@ -127,7 +125,6 @@ export function AgentTerminal({
         Commands run as {agent.workdir.ssh_host ? `your SSH account on ${agent.workdir.ssh_host}` : "you"}, with this workdir’s .env. Each command
         starts in this folder.
       </p>
-      {maintenance && <p className="hint" role="status">New terminal commands are unavailable during deployment maintenance. Existing output and Stop remain available.</p>}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -155,7 +152,7 @@ export function AgentTerminal({
           <Button
             type="submit"
             size="sm"
-            disabled={sending || !!active || !command.trim() || maintenance}
+            disabled={sending || !!active || !command.trim()}
           >
             <Play size={14} /> {sending ? "Starting…" : "Run command"}
           </Button>

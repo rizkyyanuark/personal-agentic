@@ -7,10 +7,9 @@ import type { Connection } from "./Connection";
 import type { Group } from "./Group";
 import type { GroupAccess } from "./GroupAccess";
 import type { GroupPreferences } from "./GroupPreferences";
-import type { Maintenance } from "./Maintenance";
 import type { QuestionRequest } from "./QuestionRequest";
 import type { Run } from "./Run";
 import type { Schedule } from "./Schedule";
 import type { Workstation } from "./Workstation";
 
-export type StateView = { maintenance: Maintenance, workstations: Array<Workstation>, questions: Array<QuestionRequest>, actions: Array<ActionItem>, project_connections: { [key in string]?: Connection }, project_layouts: { [key in string]?: { [key in string]?: ChartCard } }, connections: { [key in string]?: Connection }, agents: Array<Agent>, deleted_agents: Array<Agent>, chat_lead_id: string | null, groups: Array<Group>, group_access: { [key in string]?: GroupAccess }, group_preferences: GroupPreferences, schedules: Array<Schedule>, runs: Array<Run>, artifacts: Array<Artifact>, cursor: number, org_path: string, codex_path: string, codex_version: string, organization_layout: { [key in string]?: ChartCard }, panel_sizes: { [key in string]?: number }, };
+export type StateView = { workstations: Array<Workstation>, questions: Array<QuestionRequest>, actions: Array<ActionItem>, project_connections: { [key in string]?: Connection }, project_layouts: { [key in string]?: { [key in string]?: ChartCard } }, connections: { [key in string]?: Connection }, agents: Array<Agent>, deleted_agents: Array<Agent>, chat_lead_id: string | null, groups: Array<Group>, group_access: { [key in string]?: GroupAccess }, group_preferences: GroupPreferences, schedules: Array<Schedule>, runs: Array<Run>, artifacts: Array<Artifact>, cursor: number, org_path: string, codex_path: string, codex_version: string, organization_layout: { [key in string]?: ChartCard }, panel_sizes: { [key in string]?: number }, };

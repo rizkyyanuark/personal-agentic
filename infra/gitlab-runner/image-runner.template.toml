@@ -14,7 +14,7 @@
     services_limit = 0
     volumes = ["/cache"]
     memory = "1g"
-    memory_swap = "4g"
+    memory_swap = "2g"
     cpus = "1"
     cpu_shares = 256
     oom_score_adjust = 500

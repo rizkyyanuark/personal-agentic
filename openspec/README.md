@@ -6,10 +6,11 @@ Pola ini menggunakan Markdown dan tidak membutuhkan toolkit OpenSpec. GitLab Iss
 
 ## Pekerjaan terkait
 
+- [Issue 5: CI sederhana dan deployment otomatis](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/5), [kontrak CI-003](changes/CI-003-simple-automatic-releases/proposal.md).
 - [Issue 2: kontrak development](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/2).
 - [Issue 1: artefak run Antigravity](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/1).
 
-Kedua Issue menyimpan fase dan tindak lanjut aktual; link tidak menyatakan implementasi atau release telah selesai.
+Issue menyimpan fase dan tindak lanjut aktual; link tidak menyatakan implementasi atau release telah selesai.
 
 ## Memulai perubahan
 

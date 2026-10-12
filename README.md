@@ -49,17 +49,19 @@ Use [the AI-assisted development workflow](docs/development.md), [the architectu
 
 See [the dev/prod workflow](docs/DEV-PROD-WORKFLOW.md) for the GitLab release
 path, GitHub downstream copy, independent production state and activation
-requirements. The GitLab pipeline uses project runner #3 on the existing
-ARM64 workspace EC2. Verification jobs have CPU, memory, and swap limits;
-the full merge-request pipeline has passed. Production Compose, bootstrap,
-restricted image promotion and HTTPS proxy configuration live in
-`infra/production`. The workflow records the verified server preparation and
-operating limits and historical preparation evidence.
+requirements. CI requests dedicated ARM64 runners on the GitLab host, using
+new tags that cannot fall back to the workspace runners. Installation awaits
+the owner's capacity and migration approval; the existing 2 GiB GitLab host
+does not have enough measured memory headroom for Rust builds. Production
+Compose, bootstrap, restricted image promotion and HTTPS proxy configuration
+live in `infra/production`.
 
 The pipeline checks registry authentication, builds and smoke-tests an ARM64
-image, then offers a manual production deployment on protected `main`.
-Image publishing uses the approved dedicated rootless builder profiles described
-in the workflow. The verification runner retains its existing security settings.
+image, then automatically deploys the tested digest after a merge to protected
+`main`. Busy production work makes deployment fail clearly for later retry.
+Deployment drain has been removed. Backups, authenticated smoke, fixed release
+identity and restricted SSH remain. Runner migration and the matching server
+helper installation must complete before this source configuration is activated.
 
 ## License
 

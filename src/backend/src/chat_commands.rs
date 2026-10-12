@@ -36,7 +36,6 @@ pub async fn send(app: &App, mut input: SendInput) -> Result<Message> {
     })? {
         return Ok(old);
     }
-    let _operation = app.store.drain.operation(crate::drain::Admission::Root)?;
     let usage = if command == "usage" {
         let app = app.clone();
         let group = input.group_id.clone();

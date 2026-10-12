@@ -17,24 +17,12 @@ use subtle::ConstantTimeEq;
 pub struct ApiError(pub StatusCode, pub String);
 impl From<anyhow::Error> for ApiError {
     fn from(e: anyhow::Error) -> Self {
-        if e.is::<crate::drain::Closed>() {
-            return Self(StatusCode::SERVICE_UNAVAILABLE, e.to_string());
-        }
-        if e.is::<crate::drain::Conflict>() {
-            return Self(StatusCode::CONFLICT, e.to_string());
-        }
         Self(StatusCode::BAD_REQUEST, e.to_string())
     }
 }
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let mut response = (self.0, Json(json!({"error":self.1}))).into_response();
-        if self.0 == StatusCode::SERVICE_UNAVAILABLE {
-            response
-                .headers_mut()
-                .insert(header::RETRY_AFTER, "5".parse().expect("static header"));
-        }
-        response
+        (self.0, Json(json!({"error":self.1}))).into_response()
     }
 }
 pub type ApiResult<T> = std::result::Result<Json<T>, ApiError>;
@@ -97,79 +85,7 @@ pub async fn guard(State(app): State<App>, req: Request, next: Next) -> Response
                 .into_response();
         }
     }
-    let admission = if path == "/mcp" {
-        Some(crate::drain::Admission::Continuation)
-    } else if path.starts_with("/api/")
-        && ![
-            "/api/health",
-            "/api/login",
-            "/api/logout",
-            "/api/state",
-            "/api/events",
-        ]
-        .contains(&path)
-    {
-        if req.method() == axum::http::Method::GET {
-            Some(
-                if [
-                    "/api/search",
-                    "/api/codex/settings",
-                    "/api/harness/settings",
-                    "/api/workspaces/directories",
-                    "/api/export",
-                    "/api/backup",
-                ]
-                .contains(&path)
-                    || path.ends_with("/skills")
-                    || path.ends_with("/files")
-                    || path.ends_with("/documents")
-                {
-                    crate::drain::Admission::Continuation
-                } else {
-                    crate::drain::Admission::Progress
-                },
-            )
-        } else if path == "/api/messages"
-            || (path.ends_with("/terminal") && req.method() == axum::http::Method::POST)
-            || path.ends_with("/index")
-        {
-            Some(crate::drain::Admission::Progress)
-        } else if path.ends_with("/answer") || path.ends_with("/cancel") || path.ends_with("/stop")
-        {
-            Some(crate::drain::Admission::Progress)
-        } else {
-            Some(crate::drain::Admission::Root)
-        }
-    } else {
-        None
-    };
-    let _operation = match admission
-        .map(|kind| app.store.drain.operation(kind))
-        .transpose()
-    {
-        Ok(operation) => operation,
-        Err(error) => return ApiError::from(error).into_response(),
-    };
-    let mut response = if _operation.is_some() {
-        match tokio::spawn(async move {
-            let _operation = _operation;
-            next.run(req).await
-        })
-        .await
-        {
-            Ok(response) => response,
-            Err(error) => {
-                tracing::error!("Owned application request: {error}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error":"Application request did not finish"})),
-                )
-                    .into_response()
-            }
-        }
-    } else {
-        next.run(req).await
-    };
+    let mut response = next.run(req).await;
     response.headers_mut().insert(
         header::X_CONTENT_TYPE_OPTIONS,
         "nosniff".parse().expect("static header"),

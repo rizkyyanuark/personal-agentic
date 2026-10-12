@@ -10,7 +10,7 @@ import { api, post } from "./api";
 
 const MAX_PREVIEW_BYTES = 1024 * 1024;
 
-export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, onRefresh, artifacts, groupName, readOnly, readOnlyReason, maintenance = false }: {
+export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, onRefresh, artifacts, groupName, readOnly, readOnlyReason }: {
   file: MarkdownFile;
   onClose: () => void;
   onPreview: (file: MarkdownFile) => void;
@@ -19,7 +19,6 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
   artifacts: Artifact[];
   groupName: string;
   readOnly: boolean;
-  maintenance?: boolean;
   readOnlyReason: string;
 }) {
   const [loadedResult, setLoadedResult] = useState<{ url: string; text: string; source: Blob } | null>(null);
@@ -50,8 +49,6 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
   const saved = artifacts.find((artifact) => artifact.status !== "deleted" && artifact.id === savedId)
     ?? attachment ?? snapshot;
   const close = useRef<HTMLButtonElement>(null);
-  const writesBlocked = readOnly || maintenance;
-  const writeReason = maintenance ? "Deployment maintenance is active. Try again after maintenance finishes." : readOnlyReason;
   useEffect(() => {
     close.current?.focus();
   }, [file.url]);
@@ -86,7 +83,7 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
   }, [contentUrl]);
 
   async function recoverDocument() {
-    if (!runId || !sourcePath || !documentUrl || !document?.can_import || recovering || writesBlocked) return;
+    if (!runId || !sourcePath || !documentUrl || !document?.can_import || recovering || readOnly) return;
     setRecovering(true);
     setRecoveryError("");
     try {
@@ -100,7 +97,7 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
   }
 
   async function exportDocument() {
-    if (!snapshot || !document?.can_export || exporting || writesBlocked) return;
+    if (!snapshot || !document?.can_export || exporting || readOnly) return;
     setExporting(true);
     setExportError("");
     setExportedPath("");
@@ -113,7 +110,7 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
   }
 
   async function addToKnowledge() {
-    if (!loaded || adding || writesBlocked) return;
+    if (!loaded || adding || readOnly) return;
     setAdding(true);
     setAddError("");
     try { setSavedId((await onAddToKnowledge(file, loaded.source)).id); }
@@ -130,12 +127,12 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
       <button ref={close} aria-label="Close Markdown preview" title="Close preview (Esc)" onClick={onClose}><PanelRightClose size={18} /></button>
     </div>
     <div className="markdown-preview-actions">
-      <Button variant="outline" size="sm" disabled={writesBlocked || !loaded || adding || saved?.status === "indexing" || saved?.status === "indexed"}
+      <Button variant="outline" size="sm" disabled={readOnly || !loaded || adding || saved?.status === "indexing" || saved?.status === "indexed"}
         onClick={() => void addToKnowledge()}>
         {saved?.status === "indexed" ? <Check size={15} /> : <LibraryBig size={15} />}
         {adding ? "Adding…" : saved?.status === "indexing" ? "Preparing knowledge…" : saved?.status === "indexed" ? "Added to knowledge" : saved?.status === "failed" ? "Retry indexing" : "Add to knowledge"}
       </Button>
-      <span className="hint" role="status">{writesBlocked ? writeReason : saved?.status === "indexed" ? `Searchable in ${groupName}.` : `Save to ${groupName}`}</span>
+      <span className="hint" role="status">{readOnly ? readOnlyReason : saved?.status === "indexed" ? `Searchable in ${groupName}.` : `Save to ${groupName}`}</span>
       {(addError || saved?.status === "failed") && <p role="alert" className="error">{addError || `Saved, but indexing failed: ${saved?.error ?? "Please retry."}`}</p>}
     </div>
     {(runId && sourcePath) && <div className="markdown-preview-storage">
@@ -143,23 +140,23 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
         <p role="status">{origin.capture_kind === "historical_import" ? "Current version saved at import" : "Saved when this run completed"} · <time dateTime={origin.captured_at}>{new Date(origin.captured_at).toLocaleString()}</time></p>
         {origin.capture_kind === "historical_import" && <p className="hint">This copy may differ from the document when the original run finished.</p>}
         <p className="hint">Referenced images and local files are not included in this saved copy.</p>
-        <Button variant="outline" size="sm" disabled={writesBlocked || !document?.can_export || exporting}
+        <Button variant="outline" size="sm" disabled={readOnly || !document?.can_export || exporting}
           aria-expanded={exportOpen} onClick={() => { setExportOpen(!exportOpen); setExportError(""); }}>Export to workdir</Button>
-        {writesBlocked ? <p className="hint">Export is unavailable. {writeReason}</p>
+        {readOnly ? <p className="hint">Export is unavailable. {readOnlyReason}</p>
           : document && !document.can_export && <p className="hint">Export is unavailable for this run’s workdir or permissions.</p>}
         {exportOpen && <form className="markdown-export-form" onSubmit={(event) => { event.preventDefault(); void exportDocument(); }}>
           <Label htmlFor="report-export-path">Destination in workdir</Label>
           <div><Input id="report-export-path" value={exportPath} onChange={(event) => { setExportPath(event.target.value); setExportedPath(""); }}
-            placeholder="reports/report.md" required disabled={writesBlocked || exporting} aria-describedby="report-export-help" />
-            <Button type="submit" variant="outline" size="sm" disabled={writesBlocked || exporting || !exportPath.trim()}>{exporting ? "Exporting…" : "Export copy"}</Button></div>
+            placeholder="reports/report.md" required disabled={readOnly || exporting} aria-describedby="report-export-help" />
+            <Button type="submit" variant="outline" size="sm" disabled={readOnly || exporting || !exportPath.trim()}>{exporting ? "Exporting…" : "Export copy"}</Button></div>
           <p id="report-export-help" className="hint">Use a relative path. Existing files will not be overwritten.</p>
         </form>}
         {exportedPath && <p role="status" className="hint">Exported to {exportedPath}</p>}
         {exportError && <p role="alert" className="error">{exportError}</p>}
       </> : document?.can_import ? <>
         <p className="hint">This document has no saved copy. Recover its current version from the workstation.</p>
-        <Button variant="outline" size="sm" disabled={writesBlocked || recovering} onClick={() => void recoverDocument()}>{recovering ? "Saving current version…" : "Recover document"}</Button>
-        {writesBlocked && <p className="hint">Recovery is unavailable. {writeReason}</p>}
+        <Button variant="outline" size="sm" disabled={readOnly || recovering} onClick={() => void recoverDocument()}>{recovering ? "Saving current version…" : "Recover document"}</Button>
+        {readOnly && <p className="hint">Recovery is unavailable. {readOnlyReason}</p>}
       </> : !document && !documentError ? <p className="hint" role="status">Checking for a saved copy…</p> : null}
       {document?.error && (!loaded || !!origin) && <p className="hint">{document.error}</p>}
       {documentError && <p role="alert" className="error">Unable to check the saved copy: {documentError}</p>}
