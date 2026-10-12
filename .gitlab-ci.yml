@@ -98,6 +98,7 @@ production_config:
   image: python:3.11-slim
   script:
     - python -c "import ast, pathlib; ast.parse(pathlib.Path('infra/production/release.py').read_text())"
+    - python -B infra/production/tests/release_test.py
     - bash -n infra/production/bootstrap.sh
     - sh -n infra/production/deploy-command.sh
 

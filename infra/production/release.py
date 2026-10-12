@@ -5,7 +5,7 @@ from __future__ import annotations
 import fcntl
 from contextlib import closing
 import hashlib
-from http.client import HTTPMessage
+from http.client import HTTPMessage, IncompleteRead, RemoteDisconnected
 from http.cookies import SimpleCookie
 import json
 import os
@@ -206,7 +206,8 @@ class LocalOnlyRedirects(HTTPRedirectHandler):
 
 
 def request(route: str, token: str | None = None, body: object = None,
-            expected: int = 200, session: str | None = None) -> tuple[bytes, HTTPMessage]:
+            expected: int = 200, session: str | None = None, *, timeout: float = 15,
+            base: str = BASE) -> tuple[bytes, HTTPMessage]:
     headers = {"Host": HOST}
     if token is not None:
         headers["Authorization"] = "Bearer " + token
@@ -215,9 +216,9 @@ def request(route: str, token: str | None = None, body: object = None,
     data = None if body is None else json.dumps(body).encode()
     if data is not None:
         headers["Content-Type"] = "application/json"
-    operation = Request(BASE + route, data=data, headers=headers)
+    operation = Request(base + route, data=data, headers=headers)
     try:
-        response = build_opener(ProxyHandler({}), LocalOnlyRedirects()).open(operation, timeout=15)
+        response = build_opener(ProxyHandler({}), LocalOnlyRedirects()).open(operation, timeout=timeout)
     except HTTPError as error:
         response = error
     try:
@@ -229,16 +230,45 @@ def request(route: str, token: str | None = None, body: object = None,
         response.close()
 
 
+def wait_ready(*, timeout: float = 90, interval: float = 2, base: str = BASE) -> None:
+    require(0 < timeout <= 90 and 0 < interval <= 2, "Readiness timing is invalid")
+    deadline = time.monotonic() + timeout
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    require(signal.getitimer(signal.ITIMER_REAL) == (0, 0), "Readiness cannot overlap another deadline")
+
+    def expired(_number: int, _frame: object) -> None:
+        raise TimeoutError("Readiness deadline expired")
+
+    signal.signal(signal.SIGALRM, expired)
+    try:
+        signal.setitimer(signal.ITIMER_REAL, timeout)
+        while time.monotonic() < deadline:
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                health = json.loads(request("/api/health", timeout=min(15, remaining), base=base)[0])
+                require(isinstance(health, dict), "Application health payload is invalid")
+                require(health.get("status") == "ok", "Application health payload is invalid")
+                if time.monotonic() < deadline:
+                    return
+                break
+            except (ReleaseError, URLError, TimeoutError, ConnectionError,
+                    RemoteDisconnected, IncompleteRead, json.JSONDecodeError):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(interval, remaining))
+    except TimeoutError:
+        pass
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+    raise ReleaseError("Production controller did not become ready within the startup budget")
+
+
 def smoke(svg_sha256: str | None) -> dict[str, object]:
-    for attempt in range(45):
-        try:
-            health = json.loads(request("/api/health")[0])
-            require(health.get("status") == "ok", "Application health payload is invalid")
-            break
-        except (ReleaseError, URLError, TimeoutError, json.JSONDecodeError):
-            if attempt == 44:
-                raise ReleaseError("Production controller did not become ready") from None
-            time.sleep(2)
+    wait_ready()
     token = compose("exec", "-T", "platform", "cat", "/data/org/.state/owner.key").decode().strip()
     require(bool(token) and len(token) < 1024, "Production owner credential is unavailable")
     request("/api/state", expected=401)
@@ -273,6 +303,157 @@ def smoke(svg_sha256: str | None) -> dict[str, object]:
     return {"health": 200, "anonymous_state": 401, "invalid_login": 401, "owner_login": 200,
             "authenticated_state": 200, "cockpit": 200, "logout_revocation": 401,
             "ui": 200, "svg_sha256": actual}
+
+
+def release_identity(value: dict[str, object]) -> tuple[object, object, object]:
+    return value.get("image"), value.get("commit"), value.get("svg_sha256")
+
+
+def recovery_record(incoming: dict[str, object], current: dict[str, object] | None,
+                    previous: dict[str, object] | None,
+                    pending: dict[str, object] | None) -> dict[str, object] | None:
+    target = REPOSITORY + "@" + str(incoming["digest"])
+    identity = (target, incoming["commit"], incoming["svg_sha256"])
+    require(current is not None and current.get("status") == "verified", "A verified current release is required for recovery")
+    if pending is None:
+        require(release_identity(current) == identity, "Recovery does not match the verified current release")
+        return None
+    require(pending.get("action") == "promote" and pending.get("status") in (None, "failed", "verified"),
+            "Only a pending promotion can be recovered")
+    require(release_identity(pending) == identity, "Recovery identity does not match the pending release")
+    former = pending.get("previous")
+    require(isinstance(former, dict) and former.get("status") == "verified", "Recovery requires a verified predecessor")
+    require(isinstance(former.get("image"), str) and former["image"].startswith(REPOSITORY + "@")
+            and bool(DIGEST.fullmatch(former["image"].split("@", 1)[1]))
+            and isinstance(former.get("commit"), str) and bool(COMMIT.fullmatch(former["commit"]))
+            and isinstance(former.get("svg_sha256"), str) and bool(SHA.fullmatch(former["svg_sha256"])),
+            "Recovery predecessor identity is invalid")
+    require(release_identity(former) != identity, "Recovery predecessor must be a different release")
+    require(isinstance(pending.get("backup"), str) and former.get("backup") == pending.get("backup")
+            and isinstance(pending.get("schema_before"), dict) and bool(pending["schema_before"]),
+            "Recovery backup or schema record is incomplete")
+    if release_identity(current) == identity:
+        require(pending.get("status") == "verified" and all(current.get(key) == pending.get(key)
+                for key in ("action", "backup", "schema_before", "previous", "verified_at", "smoke")),
+                "Current release belongs to a different transaction")
+        require(previous == former, "Finalized predecessor record does not match the pending transaction")
+    else:
+        require(release_identity(current) == release_identity(former), "Current release is not the pending predecessor")
+        require(previous is None or previous.get("status") == "verified", "Previous release record is invalid")
+        if previous is not None and release_identity(previous) == release_identity(former):
+            require(previous == former, "Partially finalized predecessor record is inconsistent")
+    return pending
+
+
+def verify_recovery_backup(transaction: dict[str, object], *, root: Path = ROOT) -> dict[str, str]:
+    value = transaction.get("backup")
+    require(isinstance(value, str), "Recovery backup path is missing")
+    directory = Path(value)
+    backups = root / "backups"
+    protected(backups, private=True)
+    require(directory.is_absolute() and directory.parent == backups
+            and directory.resolve() == directory, "Recovery backup path escapes the fixed backup directory")
+    protected(directory, private=True)
+    manifest = read_record(directory / "manifest.json")
+    former = transaction.get("previous")
+    require(isinstance(manifest, dict) and isinstance(former, dict), "Recovery backup manifest is missing")
+    hashes = manifest.get("archives")
+    expected = {volume + ".tar.gz" for volume in VOLUMES} | {"runtime-workdirs.tar.gz"}
+    require(isinstance(hashes, dict) and set(hashes) == expected
+            and manifest.get("image") == former.get("image")
+            and manifest.get("schema") == transaction.get("schema_before"), "Recovery backup manifest does not match the transaction")
+    verified = {}
+    for name in sorted(expected):
+        expected_hash = hashes[name]
+        require(isinstance(expected_hash, str) and bool(SHA.fullmatch(expected_hash)), "Recovery archive hash is invalid")
+        archive = directory / name
+        protected(archive, private=True)
+        require(archive.is_file(), "Recovery archive is unavailable")
+        digest = hashlib.sha256()
+        with archive.open("rb") as content:
+            for chunk in iter(lambda: content.read(1024 * 1024), b""):
+                digest.update(chunk)
+        require(digest.hexdigest() == expected_hash, "Recovery archive integrity check failed")
+        verified[name] = expected_hash
+    for name in ("production.env", "compose.yaml", "runtime-ssh-id_ed25519"):
+        protected(directory / name, private=True)
+        require((directory / name).is_file(), "Recovery private backup file is unavailable")
+    return verified
+
+
+def verify_running_candidate(image: str, commit: str) -> None:
+    inspect_image(image, commit)
+    metadata = json.loads(docker("image", "inspect", image))[0]
+    containers = json.loads(docker("inspect", PROJECT + "-platform-1", PROJECT + "-matrix-1"))
+    require(len(containers) == 2 and all(value.get("State", {}).get("Running")
+            and not value.get("State", {}).get("OOMKilled") for value in containers), "Recovery requires running services without OOM")
+    platform = containers[0]
+    require(platform.get("Config", {}).get("Image") == image and platform.get("Image") == metadata.get("Id")
+            and (platform.get("Config", {}).get("Labels") or {}).get("org.opencontainers.image.revision") == commit,
+            "Running platform does not match the recovery candidate")
+
+
+def finalize_release(transaction: dict[str, object], proof: dict[str, object], *, directory: Path = RELEASES) -> dict[str, object]:
+    protected(directory, private=True)
+    former = transaction.get("previous")
+    require(former is None or isinstance(former, dict), "Previous release record is invalid")
+    failed_record = None
+    if transaction.get("status") == "failed":
+        fingerprint = hashlib.sha256(json.dumps(transaction, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        failed_record = directory / ("failed-" + fingerprint + ".json")
+        if failed_record.exists():
+            require(read_record(failed_record) == transaction, "Failed release audit record conflicts with the transaction")
+        else:
+            save(failed_record, transaction)
+    verified = dict(transaction)
+    verified.pop("error", None)
+    if transaction.get("status") == "verified":
+        require(isinstance(transaction.get("verified_at"), str) and bool(transaction["verified_at"])
+                and isinstance(transaction.get("smoke"), dict)
+                and transaction.get("svg_sha256") == proof["svg_sha256"],
+                "Verified pending evidence is incomplete")
+    else:
+        verified.update(status="verified", verified_at=datetime.now(timezone.utc).isoformat(),
+                        svg_sha256=proof["svg_sha256"], smoke=proof)
+    if failed_record is not None:
+        verified["failed_record"] = str(failed_record)
+    save(directory / "pending.json", verified)
+    if former is not None:
+        save(directory / "previous.json", former)
+    save(directory / "current.json", verified)
+    (directory / "pending.json").unlink()
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return verified
+
+
+def recover(incoming: dict[str, object], current_image: str, paths: dict[str, Path],
+            current: dict[str, object] | None, previous: dict[str, object] | None,
+            pending: dict[str, object] | None, schema: dict[str, str]) -> dict[str, object]:
+    transaction = recovery_record(incoming, current, previous, pending)
+    target = REPOSITORY + "@" + str(incoming["digest"])
+    commit, svg = str(incoming["commit"]), str(incoming["svg_sha256"])
+    require(current_image == target, "Configured image differs from the recovery request")
+    verify_running_candidate(target, commit)
+    archive_hashes = {}
+    if transaction is not None:
+        require(schema == transaction.get("schema_before"), "Database schema changed since the failed release")
+        archive_hashes = verify_recovery_backup(transaction)
+    proof = smoke(svg)
+    active, latest_schema = database_state(paths)
+    require(active == 0 and latest_schema == schema, "Production state changed during recovery verification")
+    require(image_reference() == target, "Configured image changed during recovery verification")
+    verify_running_candidate(target, commit)
+    require(read_record(RELEASES / "current.json") == current and read_record(RELEASES / "previous.json") == previous
+            and read_record(RELEASES / "pending.json") == pending, "Release journal changed during recovery verification")
+    if transaction is None:
+        return {"action": "recover", "unchanged": True, "image": target, "commit": commit, "smoke": proof}
+    verified = finalize_release(transaction, proof)
+    return {"action": "recover", "release": verified, "backup_archive_hashes": archive_hashes,
+            "services_restarted": False, "database_restored": False}
 
 
 def backup(paths: dict[str, Path], image: str, schema: dict[str, str]) -> Path:
@@ -325,12 +506,14 @@ def parse_request(raw: bytes) -> dict[str, object]:
     require(isinstance(value, dict), "Release request must be a JSON object")
     action = value.get("action")
     allowed = {"promote": {"action", "digest", "commit", "svg_sha256"},
+               "recover": {"action", "digest", "commit", "svg_sha256"},
                "rollback": {"action", "acknowledge_database_risk"}, "status": {"action"}}
     require(isinstance(action, str) and action in allowed and set(value).issubset(allowed[action]), "Release action or fields are unsupported")
-    if action == "promote":
+    if action in ("promote", "recover"):
         require(isinstance(value.get("digest"), str) and bool(DIGEST.fullmatch(value["digest"])), "Invalid image digest")
         require(isinstance(value.get("commit"), str) and bool(COMMIT.fullmatch(value["commit"])), "Invalid full commit SHA")
         require("svg_sha256" not in value or isinstance(value["svg_sha256"], str) and bool(SHA.fullmatch(value["svg_sha256"])), "Invalid SVG hash")
+        require(action != "recover" or "svg_sha256" in value, "Recovery requires an explicit source SVG hash")
     if action == "rollback":
         require(value.get("acknowledge_database_risk") is True, "Rollback requires explicit acknowledgement of database compatibility risk")
     return value
@@ -375,6 +558,8 @@ def main() -> dict[str, object]:
             return {"action": "status", "image": current_image, "active_operations": active,
                     "current": current, "previous": previous, "pending": pending, "smoke": smoke(None)}
         require(active == 0, "Production has active, queued or waiting runs, terminal commands, or indexing; release refused")
+        if incoming["action"] == "recover":
+            return recover(incoming, current_image, paths, current, previous, pending, schema)
         require(incoming["action"] == "rollback" or pending is None,
                 "A previous release is incomplete; resolve its pending record before another promotion")
         if incoming["action"] == "rollback":
@@ -427,7 +612,7 @@ def main() -> dict[str, object]:
                 set_image(target)
             compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
             proof = smoke(svg_hash)
-        except (ReleaseError, OSError, URLError, TimeoutError, json.JSONDecodeError) as error:
+        except (ReleaseError, OSError, URLError, TimeoutError, IncompleteRead, json.JSONDecodeError) as error:
             transaction["status"] = "failed"
             transaction["error"] = str(error) if isinstance(error, ReleaseError) else type(error).__name__
             try:
@@ -438,20 +623,14 @@ def main() -> dict[str, object]:
                 raise ReleaseError("Release recovery failed; inspect the pending record and retained backup before restarting services") from None
             raise ReleaseError("Candidate startup or verification failed: " + transaction["error"]
                                + "; state backup retained. No automatic database restore or image rollback was attempted") from None
-        transaction.update(status="verified", verified_at=datetime.now(timezone.utc).isoformat(),
-                           svg_sha256=proof["svg_sha256"], smoke=proof)
-        if former is not None:
-            save(RELEASES / "previous.json", former)
-        save(RELEASES / "current.json", transaction)
-        (RELEASES / "pending.json").unlink(missing_ok=True)
-        return transaction
+        return finalize_release(transaction, proof)
 
 
 if __name__ == "__main__":
     os.umask(0o077)
     try:
         print(json.dumps(main(), sort_keys=True))
-    except (ReleaseError, OSError, ValueError, KeyError, sqlite3.Error, URLError, TimeoutError) as error:
+    except (ReleaseError, OSError, ValueError, KeyError, sqlite3.Error, URLError, TimeoutError, IncompleteRead) as error:
         # Never emit Docker output, response bodies, configuration, or credential values.
         message = str(error) if isinstance(error, ReleaseError) else type(error).__name__
         print(json.dumps({"status": "failed", "error": message}), file=sys.stderr)

@@ -90,7 +90,8 @@ no forwarding and no PTY. Its forced command accepts only `release` and invokes
 `/usr/bin/python3 -I /usr/local/sbin/personal-agentic-release` through one exact
 sudoers rule. Application secrets and the registry credential stay on EC2.
 
-The helper accepts bounded JSON with `status`, `promote`, or `rollback` actions.
+The helper source accepts bounded JSON with `status`, `promote`, `recover`, or `rollback` actions.
+Availability on a server depends on the reviewed helper version installed there.
 It checks all persisted runs, terminals and indexing work, validates ARM64 and
 the image's commit label, and snapshots stopped production state before image
 replacement. It verifies login/session revocation, authenticated state, cockpit,
@@ -103,7 +104,9 @@ selected runtime SSH key. Archive hashes and database schema fingerprints are
 recorded in its manifest. Global AGY/provider authentication is excluded and
 must be re-established separately after a host recovery.
 
-Run read-only release verification from the server as an administrator:
+Run release verification from the server as an administrator. This `status`
+action performs login/logout smoke and therefore writes and revokes a temporary
+authentication session; it does not replace the image or restart services:
 
 ```sh
 printf '%s\n' '{"action":"status"}' | sudo python3 -I /usr/local/sbin/personal-agentic-release
@@ -120,6 +123,73 @@ again after stopping services and refuses an upgrade if work appeared during
 shutdown, but that work may have been interrupted. Release in a quiet window
 with schedules paused and no new user runs. Backups are on the same EC2 disk;
 off-host retention is still needed for recovery from instance/disk loss.
+
+### Startup readiness and failed-candidate recovery
+
+The DEP-001 source change gives startup health a 90-second monotonic budget,
+with request timeouts bounded by the remaining time and a POSIX process timer
+covering partial-response stalls. Connection reset/disconnect, truncated HTTP,
+timeout and a not-yet-healthy endpoint can retry inside that budget.
+Authenticated smoke, logout revocation, UI and SVG checks still have to pass;
+the helper does not replay login/logout mutations as a general error fallback.
+
+If a promoted candidate is already running but its journal is incomplete,
+an operator can explicitly request `recover` using its tested repository digest,
+full commit and source SVG hash. Recovery holds the same server release lock,
+checks the configured and actual container image, current/previous/pending
+transaction, unchanged schema, zero active operations and the stopped backup's
+four archive hashes. It then runs the existing full smoke and checks state again.
+It does not pull another image, restart services, replace the environment,
+restore databases or choose an automatic rollback. Risky image/database rollback
+still requires its separate explicit acknowledgement and compatibility review.
+
+The JSON shape is the same candidate tuple as promotion, with `action` set to
+`recover`. Obtain the tuple from the selected pipeline's `image.env`, tested SHA
+and source SVG; inspect `pending.json` privately before requesting recovery.
+Unknown fields, missing SVG, a stale transaction, an unrelated current release,
+pending rollback, corrupt backup, active work or schema drift fail closed.
+With no pending record, the exact verified current candidate may be rechecked
+idempotently and returns `unchanged: true`.
+
+Failed journal evidence is retained privately as `failed-<transaction-hash>.json`.
+Finalization persists verified pending evidence before updating previous/current,
+then removes pending and syncs the directory. Interrupted finalization may be
+resumed only for that same transaction; verified time/evidence stay stable.
+Review retained evidence on any conflict; do not delete pending to force a retry.
+
+The focused regression suite runs in the existing `production_config` CI job:
+
+```sh
+python3 -B infra/production/tests/release_test.py
+```
+
+It uses actual TCP transport faults, temporary private backup/journal files,
+tar archives and SQLite transitions. Targeted real application/CLI proof and
+installed-helper proof are recorded in [DEP-001](../openspec/changes/DEP-001-deployment-readiness-recovery/verification.md).
+
+### Accepted direction: phased automatic deployment
+
+The owner selected this policy on 12 October 2026: keep peer review and merge
+decisions in the development process; automate routine production deployment
+once its technical gates are proven; retain manual decisions for data, auth,
+infrastructure changes and risky recovery. This is an accepted direction, not
+a claim that automatic deployment is active in the current pipeline.
+
+DEP-001 retains the blocking manual production job. A subsequent change must
+provide atomic admission/drain across new runs, schedules, terminals and indexing,
+bounded waiting, verified capacity, release freshness and risk classification
+before removing the routine deploy click. Existing `resource_group` and server
+lock serialize releases; they do not prevent new application work or establish
+a shared-host resource budget. Real provider acceptance remains necessary for
+features whose runtime behavior changes. The image smoke does not invoke a provider.
+
+Deployment automation reduces repeated operator actions and makes releases
+consistent; insufficient admission, testing or monitoring can still interrupt
+work or release a regression. Manual approval can choose a quiet window or
+review a migration, but approval alone cannot replace those technical controls.
+This direction follows [DORA change approval](https://dora.dev/capabilities/streamlining-change-approval/)
+and [continuous delivery](https://dora.dev/capabilities/continuous-delivery/),
+with GitLab's [deployment safety](https://docs.gitlab.com/ci/environments/deployment_safety/).
 
 Infrastructure files are installed by an administrator after review. The image
 promotion job cannot replace its own root helper, sudoers, Compose or Nginx
