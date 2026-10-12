@@ -123,6 +123,115 @@ perl -MJSON::PP -0777 -e '
     unless $v->{schema_version} == 1 && $v->{workspace_id} eq "default"
       && ref($v->{agents}) eq "ARRAY" && ref($v->{totals}) eq "HASH";
 ' "$body"
+
+owner_headers="$smoke_dir/owner.headers"
+perl -0777 -e '
+  my $token = <>; $token =~ s/\s+\z//;
+  print "Authorization: Bearer $token\n";
+' "$smoke_dir/org/.state/owner.key" >"$owner_headers"
+drain_control() {
+  local expected=$1 action=$2 generation=$3 drain_timeout=${4:-60}
+  printf '{"action":"%s","generation":"%s"' "$action" "$generation" >"$smoke_dir/drain.json"
+  if [[ "$action" == begin ]]; then
+    printf ',"timeout_seconds":%s' "$drain_timeout" >>"$smoke_dir/drain.json"
+  fi
+  printf '}\n' >>"$smoke_dir/drain.json"
+  request "$expected" /api/deployment-drain --header "@$owner_headers" \
+    --header 'Content-Type: application/json' --data-binary "@$smoke_dir/drain.json"
+}
+assert_drain() {
+  SMOKE_DRAIN_PHASE=$1 SMOKE_DRAIN_GENERATION=${2:-} perl -MJSON::PP -0777 -e '
+    my $v = decode_json(<>);
+    my $phase = $ENV{SMOKE_DRAIN_PHASE};
+    my $generation = $ENV{SMOKE_DRAIN_GENERATION};
+    die "Unexpected deployment drain state\n"
+      unless $v->{protocol_version} == 1 && $v->{phase} eq $phase
+        && (length($generation) ? ($v->{generation} // "") eq $generation : !defined($v->{generation}));
+    die "Deployment drain deadline is invalid\n"
+      unless ($phase eq "draining"
+        ? defined($v->{deadline_unix_seconds}) && $v->{deadline_unix_seconds} =~ /^\d+$/
+        : !defined($v->{deadline_unix_seconds}));
+    die "Deployment drain counters are invalid\n"
+      unless defined($v->{active_operations}) && $v->{active_operations} =~ /^\d+$/
+        && defined($v->{inflight_operations}) && $v->{inflight_operations} =~ /^\d+$/
+        && $v->{active_operations} >= $v->{inflight_operations};
+    die "Sealed installation still counts active work\n"
+      if $phase eq "sealed" && ($v->{active_operations} != 0 || $v->{inflight_operations} != 0);
+  ' "$body"
+}
+request 401 /api/deployment-drain
+request 401 /api/deployment-drain --cookie "$cookies"
+request 200 /api/deployment-drain --header "@$owner_headers"
+assert_drain open
+drain_generation=$(cat /proc/sys/kernel/random/uuid)
+foreign_generation=$(cat /proc/sys/kernel/random/uuid)
+drain_control 200 begin "$drain_generation"
+assert_drain draining "$drain_generation"
+drain_deadline=$(perl -MJSON::PP -0777 -e 'print decode_json(<>)->{deadline_unix_seconds};' "$body")
+drain_control 200 begin "$drain_generation"
+assert_drain draining "$drain_generation"
+SMOKE_DRAIN_DEADLINE="$drain_deadline" perl -MJSON::PP -0777 -e '
+  die "Drain replay changed the deadline\n"
+    unless decode_json(<>)->{deadline_unix_seconds} == $ENV{SMOKE_DRAIN_DEADLINE};
+' "$body"
+drain_control 409 resume "$foreign_generation"
+request 503 /api/tenants --cookie "$cookies" --request POST \
+  --header 'Content-Type: application/json' --data '{"name":"Refused image-smoke workspace"}' \
+  --dump-header "$smoke_dir/maintenance.headers"
+perl -0777 -ne '
+  die "Maintenance refusal has no Retry-After\n" unless /^Retry-After:\s*\d+\r?$/mi;
+' "$smoke_dir/maintenance.headers"
+
+sealed=false
+for _ in {1..20}; do
+  printf '{"action":"seal","generation":"%s"}\n' "$drain_generation" >"$smoke_dir/drain.json"
+  status=$(curl --silent --show-error --max-time 15 --output "$body" --write-out '%{http_code}' \
+    --header "@$owner_headers" --header 'Content-Type: application/json' \
+    --data-binary "@$smoke_dir/drain.json" "$base/api/deployment-drain")
+  if [[ "$status" == 200 ]]; then
+    assert_drain sealed "$drain_generation"
+    sealed=true
+    break
+  fi
+  [[ "$status" == 409 ]] || {
+    printf 'Deployment seal returned HTTP %s; expected 200 or an owned busy 409\n' "$status" >&2
+    exit 1
+  }
+  request 200 /api/deployment-drain --header "@$owner_headers"
+  assert_drain draining "$drain_generation"
+  sleep 0.2
+done
+[[ "$sealed" == true ]] || {
+  echo 'Disposable installation could not seal within 20 attempts' >&2
+  exit 1
+}
+request 200 /api/groups/general/messages --cookie "$cookies"
+perl -MJSON::PP -0777 -e '
+  die "Sealed chat history is unavailable\n" unless ref(decode_json(<>)) eq "ARRAY";
+' "$body"
+request 200 /api/state --cookie "$cookies"
+perl -MJSON::PP -0777 -e '
+  my $v = decode_json(<>)->{maintenance};
+  die "Public sealed maintenance state is invalid\n"
+    unless $v->{phase} eq "sealed" && !exists($v->{generation});
+' "$body"
+request 200 /api/deployment-drain --header "@$owner_headers"
+assert_drain sealed "$drain_generation"
+drain_control 200 resume "$drain_generation"
+assert_drain open
+
+expiry_generation=$(cat /proc/sys/kernel/random/uuid)
+drain_control 200 begin "$expiry_generation" 3
+assert_drain draining "$expiry_generation"
+sleep 4
+request 200 /api/deployment-drain --header "@$owner_headers"
+assert_drain open
+drain_control 200 resume "$expiry_generation"
+assert_drain open
+request 200 /api/state --cookie "$cookies"
+perl -MJSON::PP -0777 -e '
+  die "Public maintenance state did not reopen\n" unless decode_json(<>)->{maintenance}->{phase} eq "open";
+' "$body"
 request 200 /api/logout --request POST --cookie "$cookies"
 request 401 /api/state --cookie "$cookies"
 
@@ -165,6 +274,9 @@ SMOKE_ASSET_COUNT="$asset_count" SMOKE_AGY_VERSION="$agy_version" \
     print encode_json({architecture => "arm64", dynamic_libraries_resolved => JSON::PP::true, health => 200,
       unauthenticated_state => 401, invalid_login => 401, owner_login => 200,
       authenticated_state => 200, cockpit => 200, logout_revocation => 401,
+      deployment_drain => {protocol_version => 1, cookie_only_control => 401,
+        root_refusal => 503, sealed_history => 200, sealed_active_operations => 0,
+        owned_resume => JSON::PP::true, deadline_expiry => JSON::PP::true},
       root_html_matches => JSON::PP::true, assets_verified => 0 + $ENV{SMOKE_ASSET_COUNT},
       antigravity_svg_sha256 => $ENV{SMOKE_EXPECTED_AGY_SHA256},
       agy_version => $ENV{SMOKE_AGY_VERSION}}), "\n";

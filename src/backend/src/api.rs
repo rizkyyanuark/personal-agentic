@@ -272,6 +272,7 @@ async fn state(State(app): State<App>) -> ApiResult<StateView> {
             .collect::<rusqlite::Result<_>>()?)
     })?;
     let mut view = StateView {
+        maintenance: app.store.drain.maintenance()?,
         workstations: crate::workstations::list(&app.store)?,
         questions: crate::questions::recent(&app)?,
         actions: app
@@ -1233,31 +1234,58 @@ async fn send_message(State(app): State<App>, Json(input): Json<SendInput>) -> A
     if crate::chat_commands::parse(&input.body)?.is_some_and(|command| command != "btw") {
         return Ok(Json(crate::chat_commands::send(&app, input).await?));
     }
-    let message = app.store.write(|tx| {
-        if let Some(identity) = &app.identity {
-            let old: Option<String> = tx
-                .query_row(
-                    "SELECT json_extract(data,'$.sender') FROM messages WHERE id=?",
-                    [&input.id],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            ensure!(
-                old.as_ref().is_none_or(|sender| sender == &identity.user),
-                "Message ID belongs to another sender"
-            );
-        }
-        let actor = app
-            .identity
-            .as_ref()
-            .map_or("owner", |identity| identity.user.as_str());
-        let mut message = submit_message_as(tx, input, None, actor)?;
-        if let Some(identity) = &app.identity {
-            message.sender = identity.user.clone();
-            store::put(tx, "messages", &message.id, &message)?;
-        }
-        Ok(message)
+    let actor = app
+        .identity
+        .as_ref()
+        .map_or("owner", |identity| identity.user.as_str());
+    let mut replay = SendInput {
+        id: input.id.clone(),
+        group_id: input.group_id.clone(),
+        side_chat_id: input.side_chat_id.clone(),
+        body: input.body.clone(),
+        recipients: input.recipients.clone(),
+        reply_to: input.reply_to.clone(),
+        artifacts: input.artifacts.clone(),
+    };
+    let old = app.store.read(|tx| {
+        prepare_message(tx, &mut replay, None, actor)?;
+        let old = existing_message(tx, &replay, None)?;
+        ensure!(
+            old.as_ref().is_none_or(|message| message.sender == actor),
+            "Message ID belongs to another sender"
+        );
+        Ok(old)
     })?;
+    if let Some(old) = old {
+        return Ok(Json(old));
+    }
+    let message = app
+        .store
+        .write_admission(crate::drain::Admission::Root, |tx| {
+            if let Some(identity) = &app.identity {
+                let old: Option<String> = tx
+                    .query_row(
+                        "SELECT json_extract(data,'$.sender') FROM messages WHERE id=?",
+                        [&input.id],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                ensure!(
+                    old.as_ref().is_none_or(|sender| sender == &identity.user),
+                    "Message ID belongs to another sender"
+                );
+            }
+            let actor = app
+                .identity
+                .as_ref()
+                .map_or("owner", |identity| identity.user.as_str());
+            let mut message = submit_message_as(tx, input, None, actor)?;
+            if let Some(identity) = &app.identity {
+                message.sender = identity.user.clone();
+                store::put(tx, "messages", &message.id, &message)?;
+            }
+            Ok(message)
+        })?;
     app.wake.notify_one();
     Ok(Json(message))
 }
@@ -1321,6 +1349,71 @@ pub(crate) fn submit_message_as(
     schedule_id: Option<String>,
     actor: &str,
 ) -> Result<Message> {
+    let starts_side = prepare_message(tx, &mut input, schedule_id.as_deref(), actor)?;
+    if let Some(old) = existing_message(tx, &input, schedule_id.as_deref())? {
+        return Ok(old);
+    }
+    crate::agent_tools::ensure_no_reset(tx, &input.group_id, input.side_chat_id.as_deref())?;
+    let group: Group = store::get(tx, "groups", &input.group_id)?;
+    group.ensure_active()?;
+    for artifact in &input.artifacts {
+        let a: Artifact = store::get(tx, "artifacts", artifact)?;
+        ensure!(
+            a.group_id == group.id && a.status != "deleted",
+            "Attachment not available to this group"
+        );
+    }
+    let message = Message {
+        id: input.id.clone(),
+        group_id: group.id.clone(),
+        side_chat_id: input.side_chat_id.clone(),
+        sender: actor.into(),
+        body: input.body.clone(),
+        recipients: input.recipients.clone(),
+        reply_to: input.reply_to.clone(),
+        artifacts: input.artifacts.clone(),
+        run_id: None,
+        created_at: now(),
+        auto_routed: false,
+        schedule_id,
+        command: starts_side.then(|| "btw".into()),
+        usage_report: None,
+    };
+    let project_lead = if group.project.is_some() && message.side_chat_id.is_none() {
+        crate::group_scope::access(tx, &group)?.chat_lead_id
+    } else {
+        None
+    };
+    for recipient in &message.recipients {
+        let agent: Agent = store::get(tx, "agents", recipient)?;
+        coordination::enqueue(
+            tx,
+            &message,
+            agent,
+            if project_lead.as_ref() == Some(recipient) {
+                RunKind::Coordinator
+            } else {
+                RunKind::Direct
+            },
+            None,
+            None,
+        )?;
+    }
+    store::put(tx, "messages", &message.id, &message)?;
+    store::event(
+        tx,
+        "message.created",
+        &json!({"group_id":group.id,"message_id":message.id}),
+    )?;
+    Ok(message)
+}
+
+fn prepare_message(
+    tx: &rusqlite::Connection,
+    input: &mut SendInput,
+    schedule_id: Option<&str>,
+    actor: &str,
+) -> Result<bool> {
     if input.recipients.is_empty() {
         let group: Group = store::get(tx, "groups", &input.group_id)?;
         input.recipients = crate::group_scope::mentions(tx, &group, &input.body)?;
@@ -1329,7 +1422,7 @@ pub(crate) fn submit_message_as(
         schedule_id.is_none() || !input.recipients.is_empty(),
         "Scheduled work must mention an invited agent explicitly"
     );
-    validate_message_input(&mut input)?;
+    validate_message_input(input)?;
     let starts_side =
         schedule_id.is_none() && crate::chat_commands::parse(&input.body)? == Some("btw");
     if starts_side {
@@ -1374,65 +1467,7 @@ pub(crate) fn submit_message_as(
             input.recipients.push(quoted.sender);
         }
     }
-    if let Some(old) = existing_message(tx, &input, schedule_id.as_deref())? {
-        return Ok(old);
-    }
-    crate::agent_tools::ensure_no_reset(tx, &input.group_id, input.side_chat_id.as_deref())?;
-    let group: Group = store::get(tx, "groups", &input.group_id)?;
-    group.ensure_active()?;
-    for artifact in &input.artifacts {
-        let a: Artifact = store::get(tx, "artifacts", artifact)?;
-        ensure!(
-            a.group_id == group.id && a.status != "deleted",
-            "Attachment not available to this group"
-        );
-    }
-    // A room message only invokes explicitly addressed agents.
-    let auto_routed = false;
-    let recipients = input.recipients.clone();
-    let message = Message {
-        id: input.id.clone(),
-        group_id: group.id.clone(),
-        side_chat_id: input.side_chat_id.clone(),
-        sender: actor.into(),
-        body: input.body.clone(),
-        recipients,
-        reply_to: input.reply_to.clone(),
-        artifacts: input.artifacts.clone(),
-        run_id: None,
-        created_at: now(),
-        auto_routed,
-        schedule_id,
-        command: starts_side.then(|| "btw".into()),
-        usage_report: None,
-    };
-    let project_lead = if group.project.is_some() && message.side_chat_id.is_none() {
-        crate::group_scope::access(tx, &group)?.chat_lead_id
-    } else {
-        None
-    };
-    for recipient in &message.recipients {
-        let agent: Agent = store::get(tx, "agents", recipient)?;
-        coordination::enqueue(
-            tx,
-            &message,
-            agent,
-            if project_lead.as_ref() == Some(recipient) {
-                RunKind::Coordinator
-            } else {
-                RunKind::Direct
-            },
-            None,
-            None,
-        )?;
-    }
-    store::put(tx, "messages", &message.id, &message)?;
-    store::event(
-        tx,
-        "message.created",
-        &json!({"group_id":group.id,"message_id":message.id}),
-    )?;
-    Ok(message)
+    Ok(starts_side)
 }
 async fn cancel(State(app): State<App>, Path(id): Path<String>) -> ApiResult<Run> {
     Ok(Json(runtime::cancel(&app, &id)?))
@@ -1639,25 +1674,30 @@ async fn download(State(app): State<App>, Path(id): Path<String>) -> Result<Resp
         .into_response())
 }
 async fn index_artifact(State(app): State<App>, Path(id): Path<String>) -> ApiResult<Artifact> {
-    let mut artifact = app.store.write(|tx| {
-        let mut artifact: Artifact = store::get(tx, "artifacts", &id)?;
-        store::get::<Group>(tx, "groups", &artifact.group_id)?.ensure_active()?;
-        ensure!(
-            ["stored", "failed", "indexed"].contains(&artifact.status.as_str()),
-            "Artifact cannot be indexed in this state"
-        );
-        ensure!(
-            artifact.media_type.starts_with("text/") || artifact.media_type.starts_with("image/"),
-            "Semantic indexing supports text and images"
-        );
-        artifact.status = "indexing".into();
-        artifact.in_knowledge = true;
-        artifact.error = None;
-        store::put(tx, "artifacts", &id, &artifact)?;
-        Ok(artifact)
-    })?;
+    let operation = app.store.drain.operation(crate::drain::Admission::Root)?;
+    let mut artifact = app
+        .store
+        .write_admission(crate::drain::Admission::Root, |tx| {
+            let mut artifact: Artifact = store::get(tx, "artifacts", &id)?;
+            store::get::<Group>(tx, "groups", &artifact.group_id)?.ensure_active()?;
+            ensure!(
+                ["stored", "failed", "indexed"].contains(&artifact.status.as_str()),
+                "Artifact cannot be indexed in this state"
+            );
+            ensure!(
+                artifact.media_type.starts_with("text/")
+                    || artifact.media_type.starts_with("image/"),
+                "Semantic indexing supports text and images"
+            );
+            artifact.status = "indexing".into();
+            artifact.in_knowledge = true;
+            artifact.error = None;
+            store::put(tx, "artifacts", &id, &artifact)?;
+            Ok(artifact)
+        })?;
     let pending = artifact.clone();
     tokio::spawn(async move {
+        let _operation = operation;
         let path = match security::artifact_path(&app.store.org, &id) {
             Ok(p) => p,
             Err(e) => {

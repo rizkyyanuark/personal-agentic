@@ -49,6 +49,10 @@ fn put(db: &Connection, key: &str, v: &Value) -> Result<()> {
     )?;
     Ok(())
 }
+fn cancel_job(db: &Connection, job: &str) -> Result<()> {
+    db.execute("UPDATE fleet_jobs SET done=CASE WHEN state IN ('preparing','queued') THEN 1 ELSE done END,state='cancelled' WHERE id=?", [job])?;
+    Ok(())
+}
 pub fn register(app: &App, name: &str) -> Result<Value> {
     ensure!(
         !name.trim().is_empty() && name.len() <= 80,
@@ -92,7 +96,7 @@ pub fn revoke(app: &App, id: &str) -> Result<()> {
         v["revoked"] = true.into();
         put(db, &key, &v)?;
         db.execute(
-            "UPDATE fleet_jobs SET state='cancelled' WHERE runtime=? AND done=0",
+            "UPDATE fleet_jobs SET done=CASE WHEN state IN ('preparing','queued') THEN 1 ELSE done END,state='cancelled' WHERE runtime=? AND done=0",
             [id],
         )?;
         Ok(())
@@ -361,13 +365,14 @@ fn inspect(app: &App, id: &str, path: &str, operation: &str, key: &str) -> Resul
         "Runtime is offline; reconnect it before attaching a workdir"
     );
     let job = model::id();
-    app.store.write(|db| {
-        db.execute(
-            "INSERT INTO fleet_jobs(id,runtime,state,request) VALUES(?,?,'queued',?)",
-            params![job, id, json!({"op":operation,"path":path}).to_string()],
-        )?;
-        Ok(())
-    })?;
+    app.store
+        .write_admission(crate::drain::Admission::Root, |db| {
+            db.execute(
+                "INSERT INTO fleet_jobs(id,runtime,state,request) VALUES(?,?,'queued',?)",
+                params![job, id, json!({"op":operation,"path":path}).to_string()],
+            )?;
+            Ok(())
+        })?;
     let deadline = Instant::now();
     loop {
         let done = app.store.read(|db| {
@@ -401,7 +406,7 @@ fn inspect(app: &App, id: &str, path: &str, operation: &str, key: &str) -> Resul
         }
         if deadline.elapsed() > Duration::from_secs(30) {
             app.store.write(|db| {
-                db.execute("UPDATE fleet_jobs SET state='cancelled' WHERE id=?", [&job])?;
+                cancel_job(db, &job)?;
                 Ok(())
             })?;
             anyhow::bail!("Runtime did not respond within 30 seconds");
@@ -411,13 +416,14 @@ fn inspect(app: &App, id: &str, path: &str, operation: &str, key: &str) -> Resul
 }
 pub fn command(app: &App, runtime: &str) -> Result<Command> {
     let job = model::id();
-    app.store.write(|db| {
-        db.execute(
-            "INSERT INTO fleet_jobs(id,runtime,state) VALUES(?,?,'preparing')",
-            [&job, runtime],
-        )?;
-        Ok(())
-    })?;
+    app.store
+        .write_admission(crate::drain::Admission::Continuation, |db| {
+            db.execute(
+                "INSERT INTO fleet_jobs(id,runtime,state) VALUES(?,?,'preparing')",
+                [&job, runtime],
+            )?;
+            Ok(())
+        })?;
     let mut command = Command::new(std::env::current_exe()?);
     command
         .arg("--relay-db")
@@ -469,7 +475,7 @@ pub fn relay(path: &Path, job: &str) -> Result<()> {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
         if cancelled.load(Ordering::SeqCst) {
-            db.execute("UPDATE fleet_jobs SET state='cancelled' WHERE id=?", [job])?;
+            cancel_job(&db, job)?;
         }
         let rows = {
             let mut q = db.prepare(
@@ -503,7 +509,7 @@ pub fn relay(path: &Path, job: &str) -> Result<()> {
             .unwrap_or(0);
         if started.elapsed() > Duration::from_secs(65) && seen < chrono::Utc::now().timestamp() - 60
         {
-            db.execute("UPDATE fleet_jobs SET state='cancelled' WHERE id=?", [job])?;
+            cancel_job(&db, job)?;
             anyhow::bail!(
                 "Runtime disconnected; execution was not replayed. Reconcile its workdir before retrying"
             );
@@ -548,7 +554,7 @@ pub fn worker_request(
                     if let Some((job,request))=job {
                         let request:Value=serde_json::from_str(&request)?;
                         let active=if matches!(request["op"].as_str(),Some("probe" | "directories")){true}else{let run:crate::model::Run=store::get(db,"runs",request["run_id"].as_str().context("Run required")?)?;["starting","running"].contains(&run.status.as_str())};
-                        if !active{db.execute("UPDATE fleet_jobs SET state='cancelled' WHERE id=?",[&job])?;}
+                        if !active{cancel_job(db,&job)?;}
                         else {db.execute("UPDATE fleet_jobs SET state='claimed' WHERE id=? AND state='queued'",[&job])?;response["job"]=json!({"id":job,"request":request});}
                     }
                     return Ok(Some(response));

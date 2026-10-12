@@ -147,6 +147,7 @@ function chatMessagesPath(groupId: string, side: string | null, before?: string)
 }
 export default function App({role = "owner", controllerAccess = true, user = "owner", workspaceName = "My workspace", workspaceId = "default", workspaceSettings}: {role?: string; controllerAccess?: boolean; user?: string; workspaceName?: string; workspaceId?: string; workspaceSettings?: ReactNode}) {
   const [data, setData] = useState<StateView | null>(null);
+  const admissionClosed = data?.maintenance.phase === "draining" || data?.maintenance.phase === "sealed";
   const [catalog, setCatalog] = useState<CodexSettings | null>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [navigationOpen, setNavigationOpen] = useState(true);
@@ -412,7 +413,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
   const agent = data?.agents.find((a) => a.id === selectedAgent);
 
   async function send() {
-    if (!draft.trim() || busy || groupClosed) return;
+    if (!draft.trim() || busy || groupClosed || admissionClosed) return;
     setBusy(true);
     await perform(async () => {
       const content = {
@@ -438,6 +439,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
     setBusy(false);
   }
   async function upload(file: File) {
+    if (admissionClosed) return;
     await perform(async () => {
       const form = new FormData();
       form.append("group_id", groupId);
@@ -544,7 +546,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
             </button>}
             {data && (
               <GroupList
-                readOnly={role !== "owner"}
+                readOnly={role !== "owner" || admissionClosed}
                 groups={data.groups}
                 preferences={data.group_preferences}
                 selected={["Organization", "Live Preview", "Action board", "User settings", "Profile", "Workspace settings"].includes(tab) ? null : groupId}
@@ -716,6 +718,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                     {role === "owner" && <Button
                       variant="outline"
                       size="sm"
+                      disabled={admissionClosed}
                       onClick={() => group && setGroupEditor(group)}
                     >
                       <Settings2 size={14} /> {group?.project?"Manage project":"Manage group"}
@@ -724,7 +727,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                 </header>
                 {groupClosed && <div className="group-status-banner" role="status">
                   <div><strong>{group?.deleted_at ? "Deleted group" : "Archived group"}</strong><p>History and files are kept. Restore this group to make changes. Scheduled tasks stay paused.</p></div>
-                  <Button size="sm" variant="outline" onClick={() => group && setGroupEditor(group)}>Restore group</Button>
+                  <Button size="sm" variant="outline" disabled={admissionClosed} onClick={() => group && setGroupEditor(group)}>Restore group</Button>
                 </div>}
                 <nav className="view-tabs" aria-label="Group views">
                   {(
@@ -774,6 +777,13 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
             {!connected && (
               <div className="banner notice" role="status">
                 Reconnecting to your workspace…
+              </div>
+            )}
+            {admissionClosed && (
+              <div className="banner notice" role="status" aria-label="Deployment maintenance" id="deployment-maintenance">
+                <span>Deployment maintenance. New work is temporarily unavailable. You can still read history, answer questions, and stop existing work.
+                  {data?.maintenance.phase === "draining" && data.maintenance.deadline_unix_seconds != null && <> Waiting for existing work until <time dateTime={new Date(data.maintenance.deadline_unix_seconds * 1000).toISOString()}>{new Date(data.maintenance.deadline_unix_seconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>.</>}
+                </span>
               </div>
             )}
             {notice && (
@@ -1049,7 +1059,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                       ref={composerInput}
                       onChange={setDraft}
                       onSend={() => void send()}
-                      busy={busy}
+                      busy={busy || admissionClosed}
                       placeholder={chatQuestions.length ? "Answer the question above to continue · new messages are queued" : sideChatId ? "Message this side chat · independent session" : `Message #${group?.name ?? ""} · / for commands`}
                     />
                     {attachments.length > 0 && (
@@ -1074,6 +1084,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                       <button aria-label="Mention an agent" onMouseDown={e=>e.preventDefault()} onClick={()=>composerInput.current?.openMentions()}> @ </button>
                       <button
                         aria-label="Attach file"
+                        disabled={admissionClosed}
                         onClick={() => uploadRef.current?.click()}
                       >
                         <Paperclip size={18} />
@@ -1089,7 +1100,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                       </span>
                       <Button
                         aria-label="Send message"
-                        disabled={!draft.trim() || busy}
+                        disabled={!draft.trim() || busy || admissionClosed}
                         size="icon"
                         onClick={() => void send()}
                       >
@@ -1151,7 +1162,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
             )}
             {tab === "Scheduled tasks" && (
               <ScheduledTasks
-                readOnly={groupClosed}
+                readOnly={groupClosed || admissionClosed}
                 key={`${groupId}:${groupClosed}`}
                 groupId={groupId}
                 tasks={
@@ -1165,6 +1176,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
             {tab === "Knowledge" && (
               <KnowledgeExplorer
                 readOnly={groupClosed}
+                maintenance={admissionClosed}
                 key={`${groupId}:${groupClosed}`}
                 files={
                   data?.artifacts.filter((a) => a.group_id === groupId && a.in_knowledge) ?? []
@@ -1237,11 +1249,12 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
           >
             {preview && <MarkdownPreview key={preview.url} file={preview} onClose={() => openPreview(null)} onPreview={openPreview}
               onAddToKnowledge={addReportToKnowledge} onRefresh={refresh} artifacts={(data?.artifacts ?? []).filter((file) => file.group_id === groupId)}
-              groupName={group?.name ?? "this group"} readOnly={groupClosed || role !== "owner"}
+              groupName={group?.name ?? "this group"} readOnly={groupClosed || role !== "owner"} maintenance={admissionClosed}
               readOnlyReason={groupClosed ? "Restore this group to save documents or add knowledge." : "Workspace owner access is required to save documents or add knowledge."} />}
             {agent && !preview && (
               <AgentInspector
                 controllerAccess={controllerAccess}
+                maintenance={admissionClosed}
                 key={`${agent.id}-${agent.revision}`}
                 agent={agent}
                 workstations={data?.workstations ?? []}
@@ -1302,6 +1315,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
         type="file"
         multiple
         aria-label="Upload attachment"
+        disabled={admissionClosed}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
           void (async () => {
@@ -1591,6 +1605,7 @@ function OrganizationRelationships({
 
 function AgentInspector({
   controllerAccess,
+  maintenance,
   workstations,
   connection,
   agent,
@@ -1605,6 +1620,7 @@ function AgentInspector({
 }: {
   connection?: Connection;
   controllerAccess: boolean;
+  maintenance: boolean;
   workstations: Workstation[];
   agent: Agent;
   agents: Agent[];
@@ -1685,6 +1701,7 @@ function AgentInspector({
       ? models?.reasoning
       : selectedModel?.default_reasoning_level;
   async function save(next = edited) {
+    if (maintenance) throw new Error("Deployment maintenance is active. Save changes after maintenance finishes.");
     const result = await put<Agent>(`/agents/${agent.id}`, next);
     setEdited(result);
     setSaved(true);
@@ -1757,6 +1774,7 @@ function AgentInspector({
         ))}
       </nav>
       <div className="inspector-body">
+        {maintenance && <p className="hint" role="status">Deployment maintenance is active. Profile and workdir changes are temporarily unavailable.</p>}
         <p className="project-kind">{agent.project_id ? "Project-specific agent" : agent.workdir?.ssh_host ? "Remote organization agent" : "Organization agent"}</p>
         {projectWorkdir && <p className="hint">Runs, terminal and skills use this project's workdir: <code>{projectWorkdir.path}</code>. <a href={`/projects/${agent.project_id}/structure`}>Open project structure</a></p>}
         {effectiveAgent.workdir?.ssh_host && <WorkstationStatus host={workstations.find(h => h.id === effectiveAgent.workdir?.ssh_host)?.name ?? effectiveAgent.workdir.ssh_host} connection={connection} />}
@@ -1936,6 +1954,7 @@ function AgentInspector({
             </label>
             <Button
               variant="outline"
+              disabled={maintenance}
               onClick={() =>
                 void perform(async () => {
                   const p = await post<{ message: string }>(
@@ -1966,7 +1985,7 @@ function AgentInspector({
             <p className="hint">Runtime: {runtimes.find(runtime => runtime.id === runtimeId)?.name ?? (runtimeId ? "Selected in Profile" : "Controller / SSH")}. <button type="button" onClick={() => onSectionChange("Profile")}>Change in Profile</button></p>
             {controllerAccess && !runtimeId && <WorkstationSelect id="workstation-host" value={sshHost} workstations={workstations} onChange={host => { setSshHost(host); setPath(""); setProbe(""); }}/> }
             <Label htmlFor="workdir-path">Absolute directory path</Label>
-            <Button variant="outline" disabled={!runtimeId && (!controllerAccess || (remote && !sshHost.trim()))} onClick={() => setFolderPicker(true)}>
+            <Button variant="outline" disabled={maintenance || (!runtimeId && (!controllerAccess || (remote && !sshHost.trim())))} onClick={() => setFolderPicker(true)}>
               <FolderOpen size={16} />
               Browse folders
             </Button>
@@ -1978,6 +1997,7 @@ function AgentInspector({
             />
             <Button
               variant="outline"
+              disabled={maintenance}
               onClick={() =>
                 void perform(async () => {
                   const result = await post<{
@@ -2017,6 +2037,7 @@ function AgentInspector({
               </p>
             )}
             <Button
+              disabled={maintenance}
               onClick={() =>
                 void perform(async () => {
                   const result = await post<{ workspace: Workspace }>(
@@ -2038,6 +2059,7 @@ function AgentInspector({
                 </div>
                 <Button
                   variant="ghost"
+                  disabled={maintenance}
                   onClick={() =>
                     void perform(() => save({ ...edited, workdir: null }))
                   }
@@ -2149,6 +2171,7 @@ function AgentInspector({
                   onChange={(e) => setScriptContent(e.target.value)}
                 />
                 <Button
+                  disabled={maintenance}
                   onClick={() =>
                     void perform(async () => {
                       await put(`/agents/${agent.id}/files`, {
@@ -2169,6 +2192,7 @@ function AgentInspector({
         {section === "Terminal" && (
           <AgentTerminal
             key={agent.id}
+            maintenance={maintenance}
             agent={effectiveAgent}
             onWorkdir={() => onSectionChange("Workdir")}
             onSkills={() => onSectionChange("Skills")}
@@ -2198,6 +2222,7 @@ function AgentInspector({
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={maintenance}
                     onClick={() =>
                       void perform(async () => {
                         await post(`/sessions/${s.id}/reset`);
@@ -2238,6 +2263,7 @@ function AgentInspector({
                 <Button
                   size="sm"
                   variant="outline"
+                  disabled={maintenance}
                   onClick={() =>
                     void perform(() => save({ ...r, revision: agent.revision }))
                   }
@@ -2251,6 +2277,7 @@ function AgentInspector({
         {["Profile", "Instructions"].includes(section) && (
           <Button
             className="save-profile"
+            disabled={maintenance}
             onClick={() => void perform(() => save())}
           >
             <Check size={15} />
@@ -2261,6 +2288,7 @@ function AgentInspector({
           <Button
             variant="destructive"
             className="delete-agent"
+            disabled={maintenance}
             onClick={() => setConfirmDelete(true)}
           >
             Delete agent
@@ -2292,6 +2320,7 @@ function AgentInspector({
           </DialogHeader>
           <Button
             variant="destructive"
+            disabled={maintenance}
             onClick={() =>
               void (async () => {
                 try {

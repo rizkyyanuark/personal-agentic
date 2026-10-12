@@ -118,11 +118,13 @@ equal schema alone cannot prove data-semantic compatibility. There is no
 automatic database restore. Review the saved manifest and application migrations
 before rollback. Never run `docker compose down -v`.
 
-The app currently has no atomic maintenance/drain endpoint. The helper checks
-again after stopping services and refuses an upgrade if work appeared during
-shutdown, but that work may have been interrupted. Release in a quiet window
-with schedules paused and no new user runs. Backups are on the same EC2 disk;
-off-host retention is still needed for recovery from instance/disk loss.
+The production installation audited before DEP-002 has no atomic maintenance/drain
+endpoint. Its DEP-001 helper checks again after stopping services and refuses an
+upgrade if work appeared during shutdown, but that work may have been interrupted.
+That legacy/bootstrap release still needs a quiet window with schedules paused
+and no new user runs. The DEP-002 source/installation boundary is described below.
+Backups are on the same EC2 disk; off-host retention is still needed for recovery
+from instance/disk loss.
 
 ### Startup readiness and failed-candidate recovery
 
@@ -175,9 +177,9 @@ once its technical gates are proven; retain manual decisions for data, auth,
 infrastructure changes and risky recovery. This is an accepted direction, not
 a claim that automatic deployment is active in the current pipeline.
 
-DEP-001 retains the blocking manual production job. A subsequent change must
-provide atomic admission/drain across new runs, schedules, terminals and indexing,
-bounded waiting, verified capacity, release freshness and risk classification
+DEP-001 retains the blocking manual production job. DEP-002 implements the drain
+foundation with installation acceptance tracked separately. Verified capacity,
+release freshness and risk classification remain prerequisites of a later change
 before removing the routine deploy click. Existing `resource_group` and server
 lock serialize releases; they do not prevent new application work or establish
 a shared-host resource budget. Real provider acceptance remains necessary for
@@ -194,6 +196,62 @@ with GitLab's [deployment safety](https://docs.gitlab.com/ci/environments/deploy
 Infrastructure files are installed by an administrator after review. The image
 promotion job cannot replace its own root helper, sudoers, Compose or Nginx
 configuration. Changes to those files require a separate reviewed installation.
+
+### DEP-002 source protocol and first installation
+
+The source protocol closes admission across controller workspaces before shutdown.
+Its contract and tested-version evidence are in
+[DEP-002](../openspec/changes/DEP-002-deployment-drain/proposal.md) and
+[Issue4](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/4).
+Source/MR proof is separate from installed production behavior.
+
+The fixed helper uses `GET/POST /api/deployment-drain` with the existing private
+bootstrap-owner bearer. Browser workspace ownership does not grant this global
+control. Protocol1 uses UUID-owned `begin`, `seal` and `resume`; it accepts no
+caller-selected URL/path. Public authenticated state includes only maintenance
+phase and deadline for the existing UI notice. Root credentials and ownership
+records stay off CI logs and chat.
+
+The helper prepares and inspects the candidate before beginning its fixed
+900-second wait. New root work is rejected clearly; previously accepted queue,
+delegation, summaries and answers continue. Due schedules/actions defer without
+losing their enabled state or claim. A draining deadline reopens admission without
+cancelling work. Seal requires no accepted/in-flight operation in any workspace;
+sealed state survives application restart and does not expire automatically.
+
+An owned private `releases/drain-lease.json` records source/candidate identity and
+generation before shutdown. A pre-shutdown failure reopens only that owned
+generation. After partial shutdown or candidate failure, retain closed ownership,
+lease/pending evidence and backups for identity-bound recovery. Before changing
+the image, restarting the unchanged verified source may restore availability only
+after its image, schema, running services, full smoke and owned protocol checks
+pass; failure of those checks stays closed. No automatic database restore occurs.
+Successful candidate verification/finalization resumes the exact owned generation.
+The explicit `recover` action retains DEP-001's pending-promotion scope. A failed
+guarded rollback with retained sealed ownership requires administrator
+reconciliation; it is not silently treated as a recoverable promotion.
+
+Guarded target images must carry
+`space.tugasakhir.personal-agentic.deployment-drain-protocol=1`.
+Protocol absence/404 or an incompatible rollback image fails closed; there is no
+CI `skip_drain` switch. The manual production job has a 90-minute upper timeout to
+contain the 15-minute wait plus the existing bounded image/backup operations.
+This is not a promise of a 90-minute maintenance window; drain happens before the
+single-instance stop/backup/recreate service gap.
+
+First installation order is intentionally separate:
+
+1. Review/merge the change and verify its protected-main image and smoke.
+2. In a separately approved quiet window, use the already installed DEP-001 helper
+   to deploy the first drain-capable image. This one-time bootstrap retains the
+   legacy admission-race limitation; do not install the new helper onto app47 first.
+3. Verify protocol authorization, public maintenance state, actual work completion,
+   timeout/reopening, and sealed persistence across an approved restart.
+4. Back up and install the exact reviewed new helper, verify the image marker and
+   its status/recover path. Preserve the old helper and rollback/data backups.
+5. Keep routine deployment manual until installed acceptance and the later
+   capacity/freshness/risk-policy change are reviewed. Legacy incompatible image
+   rollback needs separate compatibility handling, never an implicit bypass.
 
 For initial activation after a reviewed release, activate the staged proxy and check it:
 

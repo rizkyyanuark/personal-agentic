@@ -33,6 +33,15 @@ fn dispatch(app: &App) -> Result<()> {
     if !app.enabled.load(Ordering::Relaxed) {
         return Ok(());
     }
+    let _dispatch = match app
+        .store
+        .drain
+        .operation(crate::drain::Admission::Continuation)
+    {
+        Ok(operation) => operation,
+        Err(error) if error.is::<crate::drain::Closed>() => return Ok(()),
+        Err(error) => return Err(error),
+    };
     crate::agent_tools::tick(app)?;
     crate::schedules::tick(app)?;
     crate::actions::tick(app)?;
@@ -50,41 +59,47 @@ fn dispatch(app: &App) -> Result<()> {
             continue;
         }
         let cancelled = Arc::new(AtomicBool::new(false));
+        let operation = app
+            .store
+            .drain
+            .operation(crate::drain::Admission::Continuation)?;
         app.cancellations
             .lock()
             .map_err(|_| anyhow::anyhow!("Cancellation registry unavailable"))?
             .insert(run.id.clone(), cancelled.clone());
-        let admitted = app.store.write(|tx| {
-            if crate::terminal::busy(
-                tx,
-                &run.agent_id,
-                &run.profile
-                    .workdir
-                    .as_ref()
-                    .map(Workspace::identity)
-                    .unwrap_or_default(),
-            )? {
-                return Ok(false);
-            }
-            let current: Run = store::get(tx, "runs", &run.id)?;
-            if current.status != "queued" {
-                return Ok(false);
-            }
-            let group: Group = store::get(tx, "groups", &run.group_id)?;
-            if let Err(error) =
-                crate::group_scope::access(tx, &group)?.ensure_allowed(&run.agent_id, run.kind)
-            {
-                run.status = "failed".into();
-                run.error = Some(error.to_string());
-                run.ended_at = Some(now());
+        let admitted = app
+            .store
+            .write_admission(crate::drain::Admission::Continuation, |tx| {
+                if crate::terminal::busy(
+                    tx,
+                    &run.agent_id,
+                    &run.profile
+                        .workdir
+                        .as_ref()
+                        .map(Workspace::identity)
+                        .unwrap_or_default(),
+                )? {
+                    return Ok(false);
+                }
+                let current: Run = store::get(tx, "runs", &run.id)?;
+                if current.status != "queued" {
+                    return Ok(false);
+                }
+                let group: Group = store::get(tx, "groups", &run.group_id)?;
+                if let Err(error) =
+                    crate::group_scope::access(tx, &group)?.ensure_allowed(&run.agent_id, run.kind)
+                {
+                    run.status = "failed".into();
+                    run.error = Some(error.to_string());
+                    run.ended_at = Some(now());
+                    store::put(tx, "runs", &run.id, &run)?;
+                    store::event(tx, "run.changed", &json!({"run_id":run.id}))?;
+                    return Ok(false);
+                }
+                run.status = "starting".into();
                 store::put(tx, "runs", &run.id, &run)?;
-                store::event(tx, "run.changed", &json!({"run_id":run.id}))?;
-                return Ok(false);
-            }
-            run.status = "starting".into();
-            store::put(tx, "runs", &run.id, &run)?;
-            Ok(true)
-        })?;
+                Ok(true)
+            })?;
         if !admitted {
             app.cancellations
                 .lock()
@@ -95,6 +110,7 @@ fn dispatch(app: &App) -> Result<()> {
         active.push(run.clone());
         let app = app.clone();
         tokio::task::spawn_blocking(move || {
+            let _operation = operation;
             if let Err(error) = execute(&app, &mut run, &cancelled) {
                 run.status = "failed".into();
                 run.error = Some(error.to_string());
@@ -756,10 +772,7 @@ fn execute_turn(
     let mut was_waiting = false;
     let mut last_heartbeat = Instant::now();
     let mut remote_stop_at = None;
-    let mut protocol = Protocol {
-        workdir: workspace.canonical_path.clone(),
-        ..Default::default()
-    };
+    let mut protocol = Protocol::for_run(workspace.canonical_path.clone(), run.kind);
     let mut stopped = None;
     app.store.event("run.changed", json!({"run_id":run.id}))?;
     loop {
@@ -1065,6 +1078,7 @@ pub(crate) fn read_pipe(
 #[derive(Default)]
 struct Protocol {
     workdir: String,
+    summary_response: bool,
     activities: BTreeMap<u32, crate::activity::RunActivity>,
     remote_started: Option<Value>,
     remote_finished: Option<Value>,
@@ -1080,6 +1094,13 @@ struct Protocol {
     malformed: bool,
 }
 impl Protocol {
+    fn for_run(workdir: String, kind: RunKind) -> Self {
+        Self {
+            workdir,
+            summary_response: kind == RunKind::Summary,
+            ..Default::default()
+        }
+    }
     fn capture(
         &mut self,
         app: &App,
@@ -1170,7 +1191,21 @@ impl Protocol {
                     }
                     if result["status"] == "SUCCESS" {
                         self.completed = true;
-                        if let Some(structured) = result
+                        if self.summary_response {
+                            if let Some(response) = result["response"]
+                                .as_str()
+                                .filter(|response| !response.trim().is_empty())
+                            {
+                                self.text = response.into();
+                            } else {
+                                self.completed = false;
+                                self.text.clear();
+                                self.error = Some(
+                                    "Antigravity summary returned no current textual response"
+                                        .into(),
+                                );
+                            }
+                        } else if let Some(structured) = result
                             .get("structured_output")
                             .filter(|value| value.is_object())
                         {
@@ -1672,6 +1707,49 @@ mod tests {
         assert!(p.completed);
         assert!(p.error.is_none());
         assert_eq!(serde_json::from_str::<Value>(&p.text).unwrap(), structured);
+    }
+
+    #[test]
+    fn antigravity_resumed_summary_uses_current_response_instead_of_cached_routing() {
+        let captured: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/antigravity-resumed-summary.json"
+        ))
+        .unwrap();
+        let mut summary = Protocol::for_run(String::new(), RunKind::Summary);
+        summary.observe(&captured);
+        assert!(summary.completed);
+        assert!(summary.error.is_none());
+        assert_eq!(
+            summary.text,
+            captured["result"]["response"].as_str().unwrap()
+        );
+        assert!(summary.text.contains("CAPTURED_WORKER_EVIDENCE"));
+        let mut coordinator = Protocol::for_run(String::new(), RunKind::Coordinator);
+        coordinator.observe(&captured);
+        assert_eq!(
+            serde_json::from_str::<Value>(&coordinator.text).unwrap(),
+            captured["result"]["structured_output"]
+        );
+    }
+
+    #[test]
+    fn antigravity_summary_missing_current_response_cannot_publish_cached_routing() {
+        for response in [Value::Null, json!(""), json!("   ")] {
+            let mut summary = Protocol::for_run(String::new(), RunKind::Summary);
+            summary.observe(
+                &json!({"event":"step_update","step_update":{"text_delta":"Old routing"}}),
+            );
+            summary.observe(&json!({"event":"result","result":{"status":"SUCCESS","response":response,"structured_output":{"reply":"Old routing","delegations":[]}}}));
+            assert!(!summary.completed);
+            assert!(summary.text.is_empty());
+            assert!(
+                summary
+                    .error
+                    .as_deref()
+                    .unwrap()
+                    .contains("no current textual response")
+            );
+        }
     }
 
     #[test]

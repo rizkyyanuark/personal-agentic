@@ -45,6 +45,7 @@ RUN cargo fmt --all --check
 RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/build/target cargo test --workspace --locked --jobs 2
 
 FROM debian:bookworm-slim AS platform
+LABEL space.tugasakhir.personal-agentic.deployment-drain-protocol="1"
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl perl libssl3 libgomp1 git openssh-client && rm -rf /var/lib/apt/lists/* && useradd --create-home --uid 10001 agent && mkdir /data /workdir && chown agent:agent /data /workdir
 COPY scripts/install-onnx.sh /tmp/install-onnx.sh
 RUN bash /tmp/install-onnx.sh /usr/local/lib && ldconfig && rm /tmp/install-onnx.sh

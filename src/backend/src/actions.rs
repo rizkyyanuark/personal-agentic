@@ -215,7 +215,11 @@ pub async fn save(State(app): State<App>, Json(input): Json<ActionInput>) -> Api
     Ok(Json(item))
 }
 pub async fn invoke(State(app): State<App>, Path(id): Path<String>) -> ApiResult<ActionItem> {
-    let item = app.store.write(|conn| dispatch_item(conn, &id, "owner"))?;
+    let item = app
+        .store
+        .write_admission(crate::drain::Admission::Root, |conn| {
+            dispatch_item(conn, &id, "owner")
+        })?;
     app.wake.notify_one();
     Ok(Json(item))
 }
@@ -281,29 +285,54 @@ pub async fn delete(State(app): State<App>, Path(id): Path<String>) -> ApiResult
 }
 
 pub fn tick(app: &App) -> Result<()> {
-    app.store.write(|conn| {
-        let runs = store::list::<Run>(conn, "runs")?;
-        for mut item in store::list::<ActionItem>(conn, "action_items")? {
-            if item.status == "scheduled"
-                && item.planned_start.as_ref().is_some_and(|d| d <= &now())
-            {
-                // Transactional claim: restart cannot enqueue a claimed action twice.
+    let items = app.store.list::<ActionItem>("action_items")?;
+    for item in items.into_iter().filter(|item| {
+        item.status == "scheduled"
+            && item
+                .planned_start
+                .as_ref()
+                .is_some_and(|date| date <= &now())
+    }) {
+        let result = app
+            .store
+            .write_admission(crate::drain::Admission::Root, |conn| {
+                let mut item: ActionItem = store::get(conn, "action_items", &item.id)?;
+                if item.status != "scheduled"
+                    || !item
+                        .planned_start
+                        .as_ref()
+                        .is_some_and(|date| date <= &now())
+                {
+                    return Ok(());
+                }
                 if crate::agent_tools::ensure_no_reset(conn, &item.group_id, None).is_err() {
-                    continue;
+                    return Ok(());
                 }
                 conn.execute_batch("SAVEPOINT action_dispatch")?;
                 match dispatch_item(conn, &item.id, &item.created_by) {
-                    Ok(_) => {
-                        conn.execute_batch("RELEASE action_dispatch")?;
-                        continue;
-                    }
+                    Ok(_) => conn.execute_batch("RELEASE action_dispatch")?,
                     Err(error) => {
                         conn.execute_batch("ROLLBACK TO action_dispatch; RELEASE action_dispatch")?;
                         item.status = "failed".into();
                         item.error = Some(error.to_string());
+                        item.updated_at = now();
+                        item.revision += 1;
+                        store::put(conn, "action_items", &item.id, &item)?;
+                        store::event(conn, "action.changed", &json!({"action_id":item.id}))?;
                     }
                 }
-            } else if ["queued", "running"].contains(&item.status.as_str()) {
+                Ok(())
+            });
+        match result {
+            Ok(()) => {}
+            Err(error) if error.is::<crate::drain::Closed>() => {}
+            Err(error) => return Err(error),
+        }
+    }
+    app.store.write(|conn| {
+        let runs = store::list::<Run>(conn, "runs")?;
+        for mut item in store::list::<ActionItem>(conn, "action_items")? {
+            if ["queued", "running"].contains(&item.status.as_str()) {
                 let Some(run) = runs.iter().find(|r| Some(&r.id) == item.run_id.as_ref()) else {
                     continue;
                 };

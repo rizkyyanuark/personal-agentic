@@ -10,8 +10,10 @@ use axum::{
     Json,
     extract::{Path, State},
 };
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::{
     io::Read,
     process::{Command, Stdio},
@@ -135,6 +137,52 @@ pub async fn start(
             anyhow::anyhow!("Command must contain 1–16384 bytes without null characters").into(),
         );
     }
+    if let Some(existing) = app.store.read(|tx| {
+        tx.query_row(
+            "SELECT data FROM terminal_runs WHERE id=?",
+            [&input.id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    })? {
+        let existing: TerminalRun = serde_json::from_str(&existing).map_err(anyhow::Error::from)?;
+        if existing.agent_id != id {
+            return Err(anyhow::anyhow!("Command ID already used").into());
+        }
+        let fingerprint = app.store.read(|tx| {
+            tx.query_row(
+                "SELECT value FROM metadata WHERE key=?",
+                [format!("terminal.input:{}", input.id)],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(Into::into)
+        })?;
+        if let Some(fingerprint) = fingerprint {
+            if fingerprint != format!("{:x}", Sha256::digest(input.command.as_bytes())) {
+                return Err(anyhow::anyhow!("Command ID already used").into());
+            }
+            return Ok(Json(existing));
+        }
+        if app.store.drain.maintenance()?.phase != crate::drain::Phase::Open {
+            let profile = agent(&app, &id)?;
+            let workspace = profile.workdir.as_ref().context("Attach a workdir first")?;
+            let env = if workspace.ssh_host.is_none() {
+                security::workdir_env(workspace)?
+            } else {
+                Default::default()
+            };
+            let mut secrets: Vec<String> =
+                env.values().filter(|s| !s.is_empty()).cloned().collect();
+            secrets.push(app.token.to_string());
+            if existing.command != security::redacted(&input.command, &secrets) {
+                return Err(anyhow::anyhow!("Command ID already used").into());
+            }
+            return Ok(Json(existing));
+        }
+    }
+    let operation = app.store.drain.operation(crate::drain::Admission::Root)?;
     let profile = agent(&app, &id)?;
     let workspace = profile.workdir.as_ref().context("Attach a workdir first")?;
     let env = if workspace.ssh_host.is_none() {
@@ -184,56 +232,65 @@ pub async fn start(
         .cancellations
         .lock()
         .map_err(|_| anyhow::anyhow!("Cancellation registry unavailable"))?;
-    let admitted = app.store.write(|tx| {
-        if tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM terminal_runs WHERE id=?)",
-            [&run.id],
-            |row| row.get::<_, bool>(0),
-        )? {
-            let existing: TerminalRun = store::get(tx, "terminal_runs", &run.id)?;
+    let admitted = app
+        .store
+        .write_admission(crate::drain::Admission::Root, |tx| {
+            if tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM terminal_runs WHERE id=?)",
+                [&run.id],
+                |row| row.get::<_, bool>(0),
+            )? {
+                let existing: TerminalRun = store::get(tx, "terminal_runs", &run.id)?;
+                ensure!(
+                    existing.agent_id == run.agent_id && existing.command == run.command,
+                    "Command ID already used"
+                );
+                run = existing;
+                return Ok(false);
+            }
+            let current: Agent = store::get(tx, "agents", &run.agent_id)?;
             ensure!(
-                existing.agent_id == run.agent_id && existing.command == run.command,
-                "Command ID already used"
+                current.revision == profile.revision && current.deleted_at.is_none(),
+                "Profile changed; refresh before running"
             );
-            run = existing;
-            return Ok(false);
-        }
-        let current: Agent = store::get(tx, "agents", &run.agent_id)?;
-        ensure!(
-            current.revision == profile.revision && current.deleted_at.is_none(),
-            "Profile changed; refresh before running"
-        );
-        ensure!(
-            !busy(tx, &run.agent_id, &run.canonical_cwd)?,
-            "A terminal command is already running in this workdir"
-        );
-        ensure!(
-            !store::list::<Run>(tx, "runs")?
-                .iter()
-                .any(|r| coordination::active(r)
-                    && (r.agent_id == run.agent_id
-                        || r.profile.workdir.as_ref().is_some_and(|w| w
-                            .identity()
-                            .eq_ignore_ascii_case(&run.canonical_cwd)))),
-            "Wait for agent work in this workdir to finish, or cancel it in Runs"
-        );
-        let active: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM terminal_runs WHERE json_extract(data,'$.status')='running'",
-            [],
-            |row| row.get(0),
-        )?;
-        ensure!(
-            active < 2,
-            "Two terminal commands are already running; stop or finish one first"
-        );
-        store::put(tx, "terminal_runs", &run.id, &run)?;
-        store::event(
-            tx,
-            "terminal.started",
-            &json!({"agent_id":run.agent_id,"run_id":run.id}),
-        )?;
-        Ok(true)
-    })?;
+            ensure!(
+                !busy(tx, &run.agent_id, &run.canonical_cwd)?,
+                "A terminal command is already running in this workdir"
+            );
+            ensure!(
+                !store::list::<Run>(tx, "runs")?
+                    .iter()
+                    .any(|r| coordination::active(r)
+                        && (r.agent_id == run.agent_id
+                            || r.profile.workdir.as_ref().is_some_and(|w| w
+                                .identity()
+                                .eq_ignore_ascii_case(&run.canonical_cwd)))),
+                "Wait for agent work in this workdir to finish, or cancel it in Runs"
+            );
+            let active: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM terminal_runs WHERE json_extract(data,'$.status')='running'",
+                [],
+                |row| row.get(0),
+            )?;
+            ensure!(
+                active < 2,
+                "Two terminal commands are already running; stop or finish one first"
+            );
+            store::put(tx, "terminal_runs", &run.id, &run)?;
+            tx.execute(
+                "INSERT INTO metadata(key,value) VALUES(?,?)",
+                [
+                    format!("terminal.input:{}", run.id),
+                    format!("{:x}", Sha256::digest(input.command.as_bytes())),
+                ],
+            )?;
+            store::event(
+                tx,
+                "terminal.started",
+                &json!({"agent_id":run.agent_id,"run_id":run.id}),
+            )?;
+            Ok(true)
+        })?;
     if !admitted {
         return Ok(Json(run));
     }
@@ -241,6 +298,7 @@ pub async fn start(
     drop(registry);
     let response = run.clone();
     tokio::task::spawn_blocking(move || {
+        let _operation = operation;
         if let Err(error) = execute(
             &app,
             &profile,

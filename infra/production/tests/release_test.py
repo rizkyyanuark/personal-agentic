@@ -44,8 +44,9 @@ def http_fixture(actions: list[tuple[str, object]]):
             self.respond()
 
         def respond(self) -> None:
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             with guard:
-                receipts.append((self.command, self.path, dict(self.headers)))
+                receipts.append((self.command, self.path, dict(self.headers), body))
                 action, value = actions[min(len(receipts) - 1, len(actions) - 1)]
             if action == "reset":
                 self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
@@ -60,7 +61,8 @@ def http_fixture(actions: list[tuple[str, object]]):
                 time.sleep(float(value))
                 value = {"status": "ok"}
             body = value if isinstance(value, bytes) else json.dumps(value).encode()
-            self.send_response(503 if action == "unavailable" else 200)
+            self.send_response({"unavailable": 503, "conflict": 409,
+                                "unauthorized": 401, "missing": 404}.get(action, 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body) + 80 if action == "truncated" else len(body)))
             self.end_headers()
@@ -190,6 +192,193 @@ class ReadinessTests(unittest.TestCase):
         for options in ({"timeout": 0}, {"timeout": 91}, {"interval": 0}, {"interval": 3}):
             with self.subTest(options=options), self.assertRaises(release.ReleaseError):
                 release.wait_ready(base="http://127.0.0.1:1", **options)
+
+
+GENERATION = "cd4c5d4f-1949-4a1e-a618-6d9957705c19"
+OTHER_GENERATION = "377b6542-374f-471f-bf0e-ed0ea7c60632"
+
+
+def drain_state(phase: str = "draining", active: int = 0, inflight: int = 0,
+                generation: str = GENERATION) -> dict[str, object]:
+    return {"protocol_version": 1, "phase": phase,
+            "generation": None if phase == "open" else generation,
+            "deadline_unix_seconds": int(time.time()) + 900 if phase == "draining" else None,
+            "active_operations": active, "inflight_operations": inflight}
+
+
+class DrainTransportTests(unittest.TestCase):
+    def test_application_reopening_before_helper_deadline_aborts_without_more_mutations(self) -> None:
+        actions = [("json", drain_state(active=1)), ("json", drain_state("open", active=1))]
+        with http_fixture(actions) as (base, receipts):
+            with self.assertRaisesRegex(release.ReleaseError,
+                                        "admission reopened before seal; release aborted without stopping work"):
+                release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                            timeout=0.5, interval=0.01, base=base)
+        self.assertEqual([r[0] for r in receipts], ["POST", "GET"])
+        self.assertEqual(json.loads(receipts[0][3])["action"], "begin")
+
+    def test_begin_waits_for_work_and_inflight_then_seals_with_owner_bearer(self) -> None:
+        actions = [("json", drain_state(active=2, inflight=1)),
+                   ("json", drain_state(inflight=1)), ("json", drain_state()),
+                   ("json", drain_state("sealed"))]
+        with http_fixture(actions) as (base, receipts):
+            state = release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                                 timeout=0.5, interval=0.01, base=base)
+        self.assertEqual(state["phase"], "sealed")
+        self.assertEqual([r[:2] for r in receipts], [("POST", release.DRAIN_ROUTE),
+                         ("GET", release.DRAIN_ROUTE), ("GET", release.DRAIN_ROUTE),
+                         ("POST", release.DRAIN_ROUTE)])
+        for receipt in receipts:
+            self.assertEqual(receipt[2]["Host"], release.HOST)
+            self.assertEqual(receipt[2]["Authorization"], "Bearer fixture-owner")
+            self.assertNotIn("Cookie", receipt[2])
+        self.assertEqual(json.loads(receipts[0][3]),
+                         {"action": "begin", "generation": GENERATION, "timeout_seconds": 1})
+        self.assertEqual(json.loads(receipts[-1][3]), {"action": "seal", "generation": GENERATION})
+
+    def test_transient_status_reset_is_retried_without_repeating_mutations(self) -> None:
+        actions = [("json", drain_state(active=1)), ("reset", None),
+                   ("json", drain_state()), ("json", drain_state("sealed"))]
+        with http_fixture(actions) as (base, receipts):
+            release.begin_and_seal_drain("fixture-owner", GENERATION, timeout=0.5,
+                                         interval=0.01, base=base)
+        self.assertEqual([r[0] for r in receipts], ["POST", "GET", "GET", "POST"])
+
+    def test_begin_and_seal_transport_mutations_are_not_replayed(self) -> None:
+        with http_fixture([('reset', None)]) as (base, receipts):
+            with self.assertRaises((OSError, release.URLError, release.RemoteDisconnected)):
+                release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                             timeout=0.5, interval=0.01, base=base)
+        self.assertEqual([r[0] for r in receipts], ["POST"])
+        for observed in (drain_state("sealed"), drain_state()):
+            actions = [("json", drain_state()), ("reset", None), ("json", observed)]
+            with self.subTest(observed=observed["phase"]), http_fixture(actions) as (base, receipts):
+                if observed["phase"] == "sealed":
+                    self.assertEqual(release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                     timeout=0.5, interval=0.01, base=base)["phase"], "sealed")
+                else:
+                    with self.assertRaises(release.ReleaseError):
+                        release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                                     timeout=0.5, interval=0.01, base=base)
+            self.assertEqual([r[0] for r in receipts], ["POST", "POST", "GET"])
+            self.assertEqual([json.loads(r[3])["action"] for r in receipts[:2]], ["begin", "seal"])
+
+    def test_seal_busy_race_rechecks_same_owner_without_resetting_begin(self) -> None:
+        actions = [("json", drain_state()), ("conflict", {"error": "busy"}),
+                   ("json", drain_state(active=1)), ("json", drain_state()),
+                   ("json", drain_state("sealed"))]
+        with http_fixture(actions) as (base, receipts):
+            result = release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                                  timeout=0.5, interval=0.01, base=base)
+        self.assertEqual(result["phase"], "sealed")
+        self.assertEqual([r[0] for r in receipts], ["POST", "POST", "GET", "GET", "POST"])
+        self.assertEqual([json.loads(r[3])["action"] for r in receipts if r[0] == "POST"],
+                         ["begin", "seal", "seal"])
+
+    def test_expiry_or_foreign_generation_refuses_before_seal(self) -> None:
+        for state in (drain_state("open"), drain_state(generation=OTHER_GENERATION)):
+            actions = [("json", drain_state(active=1)), ("json", state)]
+            with self.subTest(state=state), http_fixture(actions) as (base, receipts):
+                with self.assertRaises(release.ReleaseError):
+                    release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                                 timeout=0.5, interval=0.01, base=base)
+            self.assertEqual([r[0] for r in receipts], ["POST", "GET"])
+
+    def test_persistent_work_times_out_without_seal_or_work_cancellation(self) -> None:
+        with http_fixture([("json", drain_state(active=1))]) as (base, receipts):
+            started = time.monotonic()
+            with self.assertRaises(release.ReleaseError) as captured:
+                release.begin_and_seal_drain("fixture-owner", GENERATION, timeout=0.08,
+                                             interval=0.01, base=base)
+            self.assertLess(time.monotonic() - started, 0.3)
+        self.assertIn("release aborted without stopping work", str(captured.exception))
+        self.assertEqual(json.loads(receipts[0][3])["action"], "begin")
+        self.assertTrue(all(r[0] == "GET" for r in receipts[1:]))
+
+    def test_slow_drip_begin_cannot_escape_total_deadline(self) -> None:
+        with http_fixture([("drip", drain_state(active=1))]) as (base, receipts):
+            started = time.monotonic()
+            with self.assertRaises(release.ReleaseError):
+                release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                             timeout=0.08, interval=0.01, base=base)
+            self.assertLess(time.monotonic() - started, 0.3)
+        self.assertEqual(len(receipts), 1)
+
+    def test_missing_legacy_api_auth_failure_and_seal_conflict_fail_closed(self) -> None:
+        for actions in ([('missing', {"error": "private-legacy-response"})],
+                        [('unauthorized', {"error": "private-auth-response"})],
+                        [("json", drain_state()), ("conflict", {"error": "private-conflict-response"}),
+                         ("json", drain_state(generation=OTHER_GENERATION))]):
+            with self.subTest(stage=actions[-1][0]), http_fixture(actions) as (base, receipts):
+                with self.assertRaises(release.ReleaseError) as captured:
+                    release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                                 timeout=0.5, interval=0.01, base=base)
+            self.assertNotIn("private", str(captured.exception))
+            self.assertEqual(len(receipts), len(actions))
+
+    def test_invalid_protocol_shapes_never_reach_seal(self) -> None:
+        invalid = [[], {**drain_state(), "protocol_version": True},
+                   {**drain_state(), "active_operations": False},
+                   {**drain_state(), "inflight_operations": -1},
+                   {**drain_state(), "generation": "../foreign"},
+                   {**drain_state(), "deadline_unix_seconds": None},
+                   {**drain_state("sealed"), "active_operations": 1},
+                   {**drain_state("open"), "generation": GENERATION},
+                   {key: value for key, value in drain_state("open").items() if key != "generation"},
+                   b"private-invalid-json"]
+        for value in invalid:
+            with self.subTest(value=value), http_fixture([("json", value)]) as (base, receipts):
+                with self.assertRaises(release.ReleaseError) as captured:
+                    release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                                 timeout=0.5, interval=0.01, base=base)
+            self.assertNotIn("private", str(captured.exception))
+            self.assertEqual(len(receipts), 1)
+
+    def test_resume_only_owns_exact_generation_and_open_is_idempotent(self) -> None:
+        with http_fixture([("json", drain_state("sealed")), ("json", drain_state("open"))]) as (base, receipts):
+            self.assertEqual(release.resume_drain("fixture-owner", GENERATION, base=base)["phase"], "open")
+        self.assertEqual(json.loads(receipts[-1][3]), {"action": "resume", "generation": GENERATION})
+        with http_fixture([("json", drain_state("open"))]) as (base, receipts):
+            release.resume_drain("fixture-owner", GENERATION, base=base)
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(receipts[0][0], "GET")
+        with http_fixture([("json", drain_state("sealed", generation=OTHER_GENERATION))]) as (base, receipts):
+            with self.assertRaises(release.ReleaseError):
+                release.resume_drain("fixture-owner", GENERATION, base=base)
+        self.assertEqual(len(receipts), 1)
+
+    def test_timer_handler_restored_and_existing_timer_preserved(self) -> None:
+        previous = signal.getsignal(signal.SIGALRM)
+
+        def handler(_number: int, _frame: object) -> None:
+            pass
+
+        signal.signal(signal.SIGALRM, handler)
+        try:
+            with http_fixture([("json", drain_state()), ("json", drain_state("sealed"))]) as (base, _):
+                release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                             timeout=0.5, interval=0.01, base=base)
+            self.assertEqual(signal.getsignal(signal.SIGALRM), handler)
+            self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0, 0))
+            signal.setitimer(signal.ITIMER_REAL, 2)
+            with http_fixture([("json", drain_state())]) as (base, receipts):
+                with self.assertRaises(release.ReleaseError):
+                    release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                                 timeout=0.5, interval=0.01, base=base)
+            self.assertEqual(receipts, [])
+            self.assertGreater(signal.getitimer(signal.ITIMER_REAL)[0], 1)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+
+    def test_invalid_timing_generation_and_control_refused_before_network(self) -> None:
+        for options in ({"timeout": 0}, {"timeout": 901}, {"interval": 0}, {"interval": 3}):
+            with self.subTest(options=options), self.assertRaises(release.ReleaseError):
+                release.begin_and_seal_drain("fixture-owner", GENERATION,
+                                             base="http://127.0.0.1:1", **options)
+        for action, generation in (("skip", GENERATION), ("begin", "invalid")):
+            with self.subTest(action=action), self.assertRaises(release.ReleaseError):
+                release.drain_request("fixture-owner", action, generation, base="http://127.0.0.1:1")
 
 
 class ReleaseFixtures(unittest.TestCase):
@@ -345,6 +534,146 @@ class RequestAndIdentityTests(ReleaseFixtures):
                 release.recovery_record(self.incoming, {**pending, key: value}, self.former, pending)
         with self.assertRaises(release.ReleaseError):
             release.recovery_record(self.incoming, pending, self.previous, pending)
+
+
+class DrainLeaseAndRecoveryTests(ReleaseFixtures):
+    def setUp(self) -> None:
+        super().setUp()
+        self.lease = {"protocol_version": 1, "generation": GENERATION, "action": "promote",
+                      "source_image": self.old_image, "source_commit": self.former["commit"],
+                      "target_image": self.image, "target_commit": self.incoming["commit"],
+                      "stop_started": True}
+        self.pending["drain_generation"] = GENERATION
+
+    def test_failed_candidate_requires_matching_lease_predecessor_and_sealed_owner(self) -> None:
+        result = release.recovery_drain_identity(self.lease, self.pending, self.current,
+                                                 self.image, str(self.incoming["commit"]), drain_state("sealed"))
+        self.assertEqual(result, (GENERATION, False))
+        for lease, pending, state in (({**self.lease, "target_commit": "e" * 40}, self.pending, drain_state("sealed")),
+                                     (self.lease, {**self.pending, "drain_generation": OTHER_GENERATION}, drain_state("sealed")),
+                                     (self.lease, {**self.pending, "previous": self.previous}, drain_state("sealed")),
+                                     (self.lease, self.pending, drain_state("sealed", generation=OTHER_GENERATION)),
+                                     (self.lease, self.pending, drain_state("open")),
+                                     (self.lease, self.pending, drain_state())):
+            with self.subTest(lease=lease, state=state), self.assertRaises(release.ReleaseError):
+                release.recovery_drain_identity(lease, pending, self.current,
+                                                self.image, str(self.incoming["commit"]), state)
+
+    def test_finalized_current_preserves_generation_for_lost_resume_response(self) -> None:
+        current = {**self.pending, "status": "verified", "smoke": self.proof,
+                   "verified_at": "2026-10-12T01:02:03+00:00"}
+        for state in (drain_state("sealed"), drain_state("open")):
+            with self.subTest(state=state):
+                self.assertEqual(release.recovery_drain_identity(self.lease, None, current, self.image,
+                                 str(self.incoming["commit"]), state), (GENERATION, False))
+        with self.assertRaises(release.ReleaseError):
+            release.recovery_drain_identity(self.lease, None, {**current, "drain_generation": OTHER_GENERATION},
+                                            self.image, str(self.incoming["commit"]), drain_state("sealed"))
+
+    def test_source_abort_before_stop_can_reopen_without_cancelling_waiting_work(self) -> None:
+        lease = {**self.lease, "stop_started": False}
+        for state in (drain_state(active=2, inflight=1), drain_state("sealed"), drain_state("open")):
+            with self.subTest(state=state):
+                self.assertEqual(release.recovery_drain_identity(lease, None, self.current, self.old_image,
+                                 str(self.former["commit"]), state), (GENERATION, True))
+
+    def test_source_partial_stop_requires_closed_gate_until_verified_source_recovery(self) -> None:
+        self.assertEqual(release.recovery_drain_identity(self.lease, None, self.current, self.old_image,
+                         str(self.former["commit"]), drain_state("sealed")), (GENERATION, True))
+        for state in (drain_state(), drain_state("open")):
+            with self.subTest(state=state), self.assertRaises(release.ReleaseError):
+                release.recovery_drain_identity(self.lease, None, self.current, self.old_image,
+                                                str(self.former["commit"]), state)
+        lease = {**self.lease, "source_verified": True,
+                 "source_smoke": {**self.proof, "svg_sha256": self.current["svg_sha256"]}}
+        self.assertEqual(release.recovery_drain_identity(lease, None, self.current, self.old_image,
+                         str(self.former["commit"]), drain_state("open")), (GENERATION, True))
+        with self.assertRaises(release.ReleaseError):
+            release.recovery_drain_identity({**lease, "source_smoke": self.proof}, None, self.current,
+                                            self.old_image, str(self.former["commit"]), drain_state("open"))
+
+    def test_unowned_closed_gate_refused_and_legacy_record_requires_open_protocol(self) -> None:
+        self.assertEqual(release.recovery_drain_identity(None, None, self.current, self.old_image,
+                         str(self.former["commit"]), drain_state("open")), (None, False))
+        for transaction, state in ((None, drain_state("sealed")), (self.pending, drain_state("open"))):
+            with self.subTest(state=state), self.assertRaises(release.ReleaseError):
+                release.recovery_drain_identity(None, transaction, self.current, self.old_image,
+                                                str(self.former["commit"]), state)
+
+    def test_lease_fields_and_fixed_image_identity_fail_closed(self) -> None:
+        for value in ({**self.lease, "generation": "INVALID"}, {**self.lease, "protocol_version": True},
+                      {**self.lease, "stop_started": 1}, {**self.lease, "action": "skip_drain"},
+                      {**self.lease, "source_image": "other@sha256:" + "1" * 64},
+                      {**self.lease, "target_commit": "short"}):
+            with self.subTest(value=value), self.assertRaises(release.ReleaseError):
+                release.validate_drain_lease(value)
+
+    def test_clear_only_exact_private_lease_and_preserve_conflicting_generation(self) -> None:
+        path = self.directory / "drain-lease.json"
+        release.save(path, self.lease)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        before = path.read_bytes()
+        with self.assertRaises(release.ReleaseError):
+            release.clear_drain_lease({**self.lease, "generation": OTHER_GENERATION}, path=path)
+        self.assertEqual(path.read_bytes(), before)
+        release.clear_drain_lease(self.lease, path=path)
+        self.assertFalse(path.exists())
+
+    def test_partial_finalization_cannot_change_drain_generation(self) -> None:
+        pending = {**self.pending, "status": "verified", "verified_at": "2026-10-12T01:02:03+00:00",
+                   "smoke": self.proof}
+        with self.assertRaises(release.ReleaseError):
+            release.recovery_record(self.incoming, {**pending, "drain_generation": OTHER_GENERATION}, self.former, pending)
+
+    def test_source_restart_guard_uses_real_schema_and_unchanged_private_journal(self) -> None:
+        release.save(self.directory / "current.json", self.current)
+        release.save(self.directory / "previous.json", self.previous)
+        active, schema = release.database_state(self.paths)
+        options = {"directory": self.directory, "configured_image": self.old_image}
+        release.source_restart_guard(self.current, self.previous, None, self.old_image,
+                                     str(self.former["commit"]), active, schema, schema, **options)
+        for override in ({"configured_image": self.image}, {"configured_image": "untrusted"}):
+            with self.subTest(override=override), self.assertRaises(release.ReleaseError):
+                release.source_restart_guard(self.current, self.previous, None, self.old_image,
+                                             str(self.former["commit"]), active, schema, schema,
+                                             **{**options, **override})
+        with sqlite3.connect(self.app) as connection:
+            connection.execute("INSERT INTO runs VALUES (?,?)", ("waiting", json.dumps({"status": "waiting"})))
+        with self.assertRaises(release.ReleaseError):
+            release.source_restart_guard(self.current, self.previous, None, self.old_image,
+                                         str(self.former["commit"]), release.database_state(self.paths)[0],
+                                         schema, schema, **options)
+        with sqlite3.connect(self.app) as connection:
+            connection.execute("DELETE FROM runs")
+            connection.execute("ALTER TABLE runs ADD COLUMN migration_marker TEXT")
+        with self.assertRaises(release.ReleaseError):
+            release.source_restart_guard(self.current, self.previous, None, self.old_image,
+                                         str(self.former["commit"]), 0, schema,
+                                         release.database_state(self.paths)[1], **options)
+
+    def test_source_restart_refuses_candidate_journal_or_changed_predecessor(self) -> None:
+        release.save(self.directory / "current.json", self.current)
+        release.save(self.directory / "previous.json", self.previous)
+        _, schema = release.database_state(self.paths)
+        options = {"directory": self.directory, "configured_image": self.old_image}
+        for path, value in ((self.directory / "pending.json", self.pending),
+                            (self.directory / "current.json", {**self.current, "commit": "e" * 40}),
+                            (self.directory / "previous.json", self.former)):
+            original = release.read_record(path)
+            release.save(path, value)
+            with self.subTest(path=path), self.assertRaises(release.ReleaseError):
+                release.source_restart_guard(self.current, self.previous, None, self.old_image,
+                                             str(self.former["commit"]), 0, schema, schema, **options)
+            if original is None:
+                path.unlink()
+            else:
+                release.save(path, original)
+
+    def test_cli_cannot_override_drain_policy_or_ownership(self) -> None:
+        promote = {**self.incoming, "action": "promote"}
+        for key, value in (("skip_drain", True), ("timeout_seconds", 1), ("generation", GENERATION)):
+            with self.subTest(key=key), self.assertRaises(release.ReleaseError):
+                release.parse_request(json.dumps({**promote, key: value}).encode())
 
 
 class BackupAndDatabaseTests(ReleaseFixtures):
