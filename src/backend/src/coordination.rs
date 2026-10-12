@@ -461,7 +461,7 @@ pub fn complete(
 }
 
 pub fn summarize_ready(app: &App) -> Result<()> {
-    app.store.write(|conn| {
+    app.store.write_admission(crate::drain::Admission::Continuation, |conn| {
         let runs = store::list::<Run>(conn, "runs")?;
         for mut root in runs
             .iter()
@@ -522,7 +522,7 @@ pub fn summarize_ready(app: &App) -> Result<()> {
 }
 
 pub fn review_failures(app: &App) -> Result<()> {
-    app.store.write(|conn| {
+    app.store.write_admission(crate::drain::Admission::Continuation, |conn| {
         let since: String = conn.query_row("SELECT value FROM metadata WHERE key='failure_review_started_at'", [], |r|r.get(0))?;
         let runs = store::list::<Run>(conn,"runs")?;
         let agents = store::list::<Agent>(conn,"agents")?;

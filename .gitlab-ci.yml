@@ -177,6 +177,7 @@ image_publish:
         --opt build-arg:BACKEND_SOURCE=backend-ci \
         --opt label:org.opencontainers.image.revision="$CI_COMMIT_SHA" \
         --opt label:org.opencontainers.image.source="$CI_PROJECT_URL" \
+        --opt label:space.tugasakhir.personal-agentic.deployment-drain-protocol=1 \
         --import-cache type=registry,ref="$registry_image/cache:$CI_COMMIT_REF_SLUG" \
         --export-cache type=registry,ref="$registry_image/cache:$CI_COMMIT_REF_SLUG",mode=min \
         --output type=image,name="$registry_image/platform:$CI_COMMIT_SHA",push=true \
@@ -230,7 +231,7 @@ deploy_production:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
       when: manual
       allow_failure: false
-  timeout: 20m
+  timeout: 90m
   before_script:
     - apt-get update
     - apt-get install -y --no-install-recommends openssh-client ca-certificates curl

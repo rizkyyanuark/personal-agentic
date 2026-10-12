@@ -1,0 +1,16 @@
+{
+  "event": "result",
+  "result": {
+    "status": "SUCCESS",
+    "response": "### Verification Summary\n\nThe verification task delegated to **Drain Proof Reader** (`captured-worker`) has completed successfully.\n\n#### Worker Evidence\n* **Status**: Succeeded (`run_id: captured-worker`)\n* **Target File**: `proof.txt` (read via native file-read operation)\n* **Contents**:\n```\nCAPTURED_WORKER_EVIDENCE\n```\n",
+    "structured_output": {
+      "delegations": [
+        {
+          "agent_id": "captured-worker",
+          "task": "Read proof.txt in your current workdir (/tmp/drain-fixture) and return its entire content using a native file-read operation. Scope is strictly read-only inspection of proof.txt. Verification evidence expected is the exact, complete file content."
+        }
+      ],
+      "reply": "Delegating the verification of proof.txt to Drain Proof Reader (captured-worker). The worker will read proof.txt in its workdir and report the full content."
+    }
+  }
+}

@@ -204,7 +204,7 @@ fn call(app: &App, run: &Run, name: &str, args: Value) -> Result<Value> {
             run.side_chat_id.as_deref(),
         )?)?);
     }
-    let result = app.store.write(|conn| {
+    let result = app.store.write_admission(crate::drain::Admission::Continuation, |conn| {
         let current: Run = store::get(conn, "runs", &run.id)?;
         ensure!(["starting", "running"].contains(&current.status.as_str()), "Run is no longer active");
         store::get::<Group>(conn, "groups", &run.group_id)?.ensure_active()?;
@@ -303,7 +303,7 @@ pub fn ensure_no_reset(conn: &Connection, group_id: &str, side: Option<&str>) ->
 }
 
 pub fn tick(app: &App) -> Result<()> {
-    app.store.write(|conn| {
+    app.store.write_admission(crate::drain::Admission::Continuation, |conn| {
         for mut h in store::list::<Handoff>(conn,"handoffs")?.into_iter().filter(|h| !h.delivered) {
             let source: Run = store::get(conn,"runs",&h.source_run_id)?;
             let target: Run = store::get(conn,"runs",&h.target_run_id)?;

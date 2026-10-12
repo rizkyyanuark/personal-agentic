@@ -8,6 +8,7 @@ import hashlib
 from http.client import HTTPMessage, IncompleteRead, RemoteDisconnected
 from http.cookies import SimpleCookie
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -37,11 +38,20 @@ ACTIVE = ("queued", "starting", "running", "waiting")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 SHA = re.compile(r"[0-9a-f]{64}\Z")
+DRAIN_ROUTE = "/api/deployment-drain"
+DRAIN_LABEL = "space.tugasakhir.personal-agentic.deployment-drain-protocol"
+DRAIN_LEASE = RELEASES / "drain-lease.json"
 COMMAND_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/root", "LANG": "C.UTF-8"}
 
 
 class ReleaseError(RuntimeError):
     pass
+
+
+class ApplicationHttpError(ReleaseError):
+    def __init__(self, route: str, status: int):
+        super().__init__("Application endpoint failed: " + route + " HTTP " + str(status))
+        self.status = status
 
 
 def require(condition: bool, message: str) -> None:
@@ -137,6 +147,13 @@ def inspect_image(image: str, expected_commit: str | None = None) -> str:
     return revision
 
 
+def require_drain_image(image: str) -> None:
+    metadata = json.loads(docker("image", "inspect", image))[0]
+    labels = metadata.get("Config", {}).get("Labels") or {}
+    require(labels.get(DRAIN_LABEL) == "1",
+            "Target image does not declare deployment drain protocol 1; reviewed bootstrap or legacy rollback is required")
+
+
 def volume_paths() -> dict[str, Path]:
     volumes = json.loads(docker("volume", "inspect", *VOLUMES))
     require(len(volumes) == len(VOLUMES), "Production volumes are incomplete")
@@ -222,7 +239,8 @@ def request(route: str, token: str | None = None, body: object = None,
     except HTTPError as error:
         response = error
     try:
-        require(response.status == expected, "Application endpoint failed: " + route + " HTTP " + str(response.status))
+        if response.status != expected:
+            raise ApplicationHttpError(route, response.status)
         content = response.read(32 * 1024 * 1024 + 1)
         require(len(content) <= 32 * 1024 * 1024, "Application response exceeds the smoke-test limit")
         return content, response.headers
@@ -267,10 +285,177 @@ def wait_ready(*, timeout: float = 90, interval: float = 2, base: str = BASE) ->
     raise ReleaseError("Production controller did not become ready within the startup budget")
 
 
-def smoke(svg_sha256: str | None) -> dict[str, object]:
-    wait_ready()
+def owner_token() -> str:
     token = compose("exec", "-T", "platform", "cat", "/data/org/.state/owner.key").decode().strip()
     require(bool(token) and len(token) < 1024, "Production owner credential is unavailable")
+    return token
+
+
+def valid_generation(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        return str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
+def validate_drain(value: object) -> dict[str, object]:
+    require(isinstance(value, dict) and type(value.get("protocol_version")) is int
+            and value.get("protocol_version") == 1
+            and {"phase", "generation", "deadline_unix_seconds", "active_operations", "inflight_operations"}.issubset(value),
+            "Application deployment drain protocol is unavailable or incompatible")
+    phase = value.get("phase")
+    require(phase in ("open", "draining", "sealed"), "Application drain phase is invalid")
+    require(all(type(value.get(key)) is int and value[key] >= 0
+                for key in ("active_operations", "inflight_operations")),
+            "Application drain operation counts are invalid")
+    generation = value.get("generation")
+    deadline = value.get("deadline_unix_seconds")
+    require((phase == "open" and generation is None and deadline is None)
+            or (phase != "open" and valid_generation(generation)
+                and (deadline is None or type(deadline) is int and deadline > 0)),
+            "Application drain ownership or deadline is invalid")
+    require(phase != "draining" or type(deadline) is int,
+            "Application draining deadline is missing")
+    require(phase != "sealed" or value["active_operations"] == 0 and value["inflight_operations"] == 0,
+            "Sealed application still reports active operations")
+    return value
+
+
+def drain_request(token: str, action: str | None = None, generation: str | None = None,
+                  *, timeout: float = 15, duration: int = 900, base: str = BASE) -> dict[str, object]:
+    body = None
+    if action is not None:
+        require(action in ("begin", "seal", "resume") and valid_generation(generation),
+                "Drain control action or generation is invalid")
+        body = {"action": action, "generation": generation}
+        if action == "begin":
+            require(type(duration) is int and 1 <= duration <= 900, "Drain duration is invalid")
+            body["timeout_seconds"] = duration
+    content = request(DRAIN_ROUTE, token=token, body=body, timeout=timeout, base=base)[0]
+    try:
+        value = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReleaseError("Application drain response is invalid") from error
+    return validate_drain(value)
+
+
+def require_owned_drain(value: dict[str, object], generation: str, *, sealed: bool = False) -> None:
+    require(value.get("generation") == generation and value.get("phase") in
+            (("sealed",) if sealed else ("draining", "sealed")),
+            "Application drain ownership changed or expired; release refused")
+
+
+def begin_and_seal_drain(token: str, generation: str, *, timeout: float = 900,
+                         interval: float = 2, base: str = BASE) -> dict[str, object]:
+    require(0 < timeout <= 900 and 0 < interval <= 2 and valid_generation(generation),
+            "Drain timing or generation is invalid")
+    deadline = time.monotonic() + timeout
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    require(signal.getitimer(signal.ITIMER_REAL) == (0, 0), "Drain cannot overlap another deadline")
+
+    def expired(_number: int, _frame: object) -> None:
+        raise TimeoutError("Drain deadline expired")
+
+    def still_owned(value: dict[str, object], *, sealed: bool = False) -> None:
+        require(value["phase"] != "open",
+                "Application admission reopened before seal; release aborted without stopping work")
+        require_owned_drain(value, generation, sealed=sealed)
+
+    signal.signal(signal.SIGALRM, expired)
+    try:
+        signal.setitimer(signal.ITIMER_REAL, timeout)
+        state = drain_request(token, "begin", generation, timeout=min(15, timeout),
+                              duration=math.ceil(timeout), base=base)
+        while time.monotonic() < deadline:
+            still_owned(state)
+            if state["active_operations"] == 0 and state["inflight_operations"] == 0:
+                if state["phase"] != "sealed":
+                    try:
+                        state = drain_request(token, "seal", generation,
+                                              timeout=min(15, max(0.001, deadline - time.monotonic())), base=base)
+                    except ApplicationHttpError as error:
+                        if error.status != 409:
+                            raise
+                        state = drain_request(token, timeout=min(15, max(0.001, deadline - time.monotonic())), base=base)
+                        still_owned(state)
+                    except (URLError, ConnectionError, RemoteDisconnected, IncompleteRead):
+                        state = drain_request(token, timeout=min(15, max(0.001, deadline - time.monotonic())), base=base)
+                        still_owned(state, sealed=True)
+                if state["phase"] == "sealed":
+                    still_owned(state, sealed=True)
+                    require(time.monotonic() < deadline, "Drain deadline expired before seal confirmation")
+                    return state
+            time.sleep(min(interval, max(0, deadline - time.monotonic())))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                state = drain_request(token, timeout=min(15, remaining), base=base)
+            except (URLError, ConnectionError, RemoteDisconnected, IncompleteRead, TimeoutError):
+                continue
+    except TimeoutError:
+        pass
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+    raise ReleaseError("Production work did not drain within 15 minutes; release aborted without stopping work")
+
+
+def resume_drain(token: str, generation: str, *, base: str = BASE) -> dict[str, object]:
+    state = drain_request(token, base=base)
+    if state["phase"] == "open":
+        return state
+    require_owned_drain(state, generation)
+    state = drain_request(token, "resume", generation, base=base)
+    require(state["phase"] == "open", "Application did not confirm reopening admission")
+    return state
+
+
+def validate_drain_lease(value: dict[str, object]) -> dict[str, object]:
+    require(type(value.get("protocol_version")) is int and value.get("protocol_version") == 1
+            and valid_generation(value.get("generation"))
+            and value.get("action") in ("promote", "rollback")
+            and type(value.get("stop_started")) is bool,
+            "Production drain lease is invalid")
+    for prefix in ("source", "target"):
+        image, commit = value.get(prefix + "_image"), value.get(prefix + "_commit")
+        require(isinstance(image, str) and image.startswith(REPOSITORY + "@")
+                and bool(DIGEST.fullmatch(image.split("@", 1)[1]))
+                and isinstance(commit, str) and bool(COMMIT.fullmatch(commit)),
+                "Production drain lease image identity is invalid")
+    return value
+
+
+def clear_drain_lease(lease: dict[str, object], *, path: Path = DRAIN_LEASE) -> None:
+    require(read_record(path) == lease, "Production drain lease changed during release")
+    path.unlink()
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def source_restart_guard(current: dict[str, object] | None, previous: dict[str, object] | None,
+                         pending: dict[str, object] | None, image: str, commit: str,
+                         active: int, schema: dict[str, str], latest_schema: dict[str, str],
+                         *, directory: Path = RELEASES, configured_image: str) -> None:
+    require(current is not None and current.get("status") == "verified"
+            and current.get("image") == image and current.get("commit") == commit
+            and isinstance(current.get("svg_sha256"), str) and bool(SHA.fullmatch(current["svg_sha256"])),
+            "Source restart requires the unchanged verified release")
+    require(pending is None and configured_image == image and active == 0 and latest_schema == schema
+            and read_record(directory / "current.json") == current
+            and read_record(directory / "previous.json") == previous
+            and read_record(directory / "pending.json") is None,
+            "Source restart identity, schema or release journal changed")
+
+
+def smoke(svg_sha256: str | None) -> dict[str, object]:
+    wait_ready()
+    token = owner_token()
     request("/api/state", expected=401)
     request("/api/cockpit/state", expected=401)
     request("/api/login", body={"token": "invalid-production-smoke-key"}, expected=401)
@@ -334,7 +519,7 @@ def recovery_record(incoming: dict[str, object], current: dict[str, object] | No
             "Recovery backup or schema record is incomplete")
     if release_identity(current) == identity:
         require(pending.get("status") == "verified" and all(current.get(key) == pending.get(key)
-                for key in ("action", "backup", "schema_before", "previous", "verified_at", "smoke")),
+                for key in ("action", "backup", "schema_before", "previous", "verified_at", "smoke", "drain_generation")),
                 "Current release belongs to a different transaction")
         require(previous == former, "Finalized predecessor record does not match the pending transaction")
     else:
@@ -430,30 +615,81 @@ def finalize_release(transaction: dict[str, object], proof: dict[str, object], *
     return verified
 
 
+def recovery_drain_identity(lease: dict[str, object] | None, transaction: dict[str, object] | None,
+                            current: dict[str, object], image: str, commit: str,
+                            state: dict[str, object]) -> tuple[str | None, bool]:
+    if lease is None:
+        require(state["phase"] == "open" and (transaction is None or transaction.get("drain_generation") is None),
+                "Recovery lacks the matching production drain lease")
+        return None, False
+    validate_drain_lease(lease)
+    generation = str(lease["generation"])
+    source_abort = (transaction is None and image == lease["source_image"]
+                    and commit == lease["source_commit"])
+    if not source_abort:
+        record = current if transaction is None else transaction
+        require(image == lease["target_image"] and commit == lease["target_commit"]
+                and record.get("drain_generation") == generation,
+                "Recovery candidate does not own the production drain lease")
+        if transaction is not None:
+            former = transaction.get("previous")
+            require(isinstance(former, dict) and former.get("image") == lease["source_image"]
+                    and former.get("commit") == lease["source_commit"],
+                    "Recovery predecessor does not match the drain lease")
+    if state["phase"] == "open":
+        source_verified = (lease.get("source_verified") is True
+                           and isinstance(lease.get("source_smoke"), dict)
+                           and lease["source_smoke"].get("svg_sha256") == current.get("svg_sha256"))
+        require(transaction is None and (not source_abort or not lease["stop_started"] or source_verified),
+                "An incomplete stopped release unexpectedly reopened admission")
+    else:
+        require_owned_drain(state, generation, sealed=not source_abort or bool(lease["stop_started"]))
+    return generation, source_abort
+
+
 def recover(incoming: dict[str, object], current_image: str, paths: dict[str, Path],
             current: dict[str, object] | None, previous: dict[str, object] | None,
-            pending: dict[str, object] | None, schema: dict[str, str]) -> dict[str, object]:
+            pending: dict[str, object] | None, schema: dict[str, str],
+            lease: dict[str, object] | None) -> dict[str, object]:
     transaction = recovery_record(incoming, current, previous, pending)
     target = REPOSITORY + "@" + str(incoming["digest"])
     commit, svg = str(incoming["commit"]), str(incoming["svg_sha256"])
     require(current_image == target, "Configured image differs from the recovery request")
+    require_drain_image(target)
     verify_running_candidate(target, commit)
+    token = owner_token()
+    state = drain_request(token)
+    require(current is not None, "A verified current release is required for recovery")
+    generation, source_abort = recovery_drain_identity(lease, transaction, current, target, commit, state)
+    pre_stop_abort = (source_abort and lease is not None
+                     and (not lease["stop_started"] or state["phase"] == "open" and lease.get("source_verified") is True))
+    active, before_schema = database_state(paths)
+    require((pre_stop_abort or active == 0) and before_schema == schema,
+            "Production state changed before recovery verification")
     archive_hashes = {}
     if transaction is not None:
         require(schema == transaction.get("schema_before"), "Database schema changed since the failed release")
         archive_hashes = verify_recovery_backup(transaction)
     proof = smoke(svg)
     active, latest_schema = database_state(paths)
-    require(active == 0 and latest_schema == schema, "Production state changed during recovery verification")
+    require((pre_stop_abort or active == 0) and latest_schema == schema, "Production state changed during recovery verification")
     require(image_reference() == target, "Configured image changed during recovery verification")
     verify_running_candidate(target, commit)
     require(read_record(RELEASES / "current.json") == current and read_record(RELEASES / "previous.json") == previous
             and read_record(RELEASES / "pending.json") == pending, "Release journal changed during recovery verification")
+    require(read_record(DRAIN_LEASE) == lease, "Production drain lease changed during recovery verification")
+    latest = drain_request(token)
+    recovery_drain_identity(lease, transaction, current, target, commit, latest)
+    verified = None if transaction is None else finalize_release(transaction, proof)
+    if generation is not None:
+        latest = resume_drain(token, generation)
+        require(lease is not None, "Production drain lease disappeared")
+        clear_drain_lease(lease)
     if transaction is None:
-        return {"action": "recover", "unchanged": True, "image": target, "commit": commit, "smoke": proof}
-    verified = finalize_release(transaction, proof)
+        return {"action": "recover", "unchanged": True, "image": target, "commit": commit,
+                "smoke": proof, "drain": latest, "source_release_abort": source_abort}
     return {"action": "recover", "release": verified, "backup_archive_hashes": archive_hashes,
-            "services_restarted": False, "database_restored": False}
+            "services_restarted": False, "database_restored": False, "drain": latest}
 
 
 def backup(paths: dict[str, Path], image: str, schema: dict[str, str]) -> Path:
@@ -554,12 +790,16 @@ def main() -> dict[str, object]:
         current = read_record(RELEASES / "current.json")
         previous = read_record(RELEASES / "previous.json")
         pending = read_record(RELEASES / "pending.json")
+        lease = read_record(DRAIN_LEASE)
+        if lease is not None:
+            validate_drain_lease(lease)
         if incoming["action"] == "status":
             return {"action": "status", "image": current_image, "active_operations": active,
-                    "current": current, "previous": previous, "pending": pending, "smoke": smoke(None)}
-        require(active == 0, "Production has active, queued or waiting runs, terminal commands, or indexing; release refused")
+                    "current": current, "previous": previous, "pending": pending,
+                    "drain_lease": lease, "drain": drain_request(owner_token()), "smoke": smoke(None)}
         if incoming["action"] == "recover":
-            return recover(incoming, current_image, paths, current, previous, pending, schema)
+            return recover(incoming, current_image, paths, current, previous, pending, schema, lease)
+        require(lease is None, "A previous production drain lease requires identity-bound recovery before another release")
         require(incoming["action"] == "rollback" or pending is None,
                 "A previous release is incomplete; resolve its pending record before another promotion")
         if incoming["action"] == "rollback":
@@ -578,52 +818,110 @@ def main() -> dict[str, object]:
         require(isinstance(target, str) and target.startswith(REPOSITORY + "@") and bool(DIGEST.fullmatch(target.split("@", 1)[1])), "Recorded release image is invalid")
         docker("pull", target, timeout=600)
         revision = inspect_image(target, expected_commit)
+        require_drain_image(target)
         previous_revision = inspect_image(current_image)
+        verify_running_candidate(current_image, previous_revision)
         if incoming["action"] == "rollback" and pending is not None:
             before_smoke = {"svg_sha256": pending.get("svg_sha256")}
         else:
             before_smoke = smoke(None)
+        token = owner_token()
+        drain = drain_request(token)
+        require(drain["phase"] == "open", "Application admission is already closed without a matching release lease")
         if target == current_image and current is not None and pending is None:
             return {"action": incoming["action"], "unchanged": True, "image": target,
-                    "commit": revision, "smoke": smoke(svg_hash)}
-        active, latest_schema = database_state(paths)
-        require(active == 0 and latest_schema == schema, "Production state changed during image preparation; release refused")
+                    "commit": revision, "smoke": smoke(svg_hash), "drain": drain}
+        generation = str(uuid.uuid4())
+        lease = {"protocol_version": 1, "generation": generation, "action": incoming["action"],
+                 "source_image": current_image, "source_commit": previous_revision,
+                 "target_image": target, "target_commit": revision, "stop_started": False}
+        save(DRAIN_LEASE, lease)
+        transaction = None
         try:
+            begin_and_seal_drain(token, generation)
+            active, latest_schema = database_state(paths)
+            require(active == 0 and latest_schema == schema, "Production state changed while draining; release refused")
+            require(image_reference() == current_image
+                    and read_record(RELEASES / "current.json") == current
+                    and read_record(RELEASES / "previous.json") == previous
+                    and read_record(RELEASES / "pending.json") == pending,
+                    "Production release identity changed while draining")
+            require_owned_drain(drain_request(token), generation, sealed=True)
+            lease["stop_started"] = True
+            save(DRAIN_LEASE, lease)
             compose("stop", "--timeout", "30", "platform", "matrix")
             active, stopped_schema = database_state(paths)
             require(active == 0, "A run started during the shutdown window; upgrade refused. Inspect interrupted work before retrying")
             require(stopped_schema == schema, "Application schema changed during release preflight")
             backup_directory = backup(paths, current_image, stopped_schema)
-        except (ReleaseError, OSError, sqlite3.Error):
-            # The image has not changed, so restarting these services cannot introduce a migration.
-            compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
-            raise
-        initial = target == current_image and current is None and pending is None
-        former = None if initial else {"image": current_image, "commit": previous_revision,
-                  "svg_sha256": before_smoke["svg_sha256"], "backup": str(backup_directory),
-                  "status": "failed" if incoming["action"] == "rollback" and pending is not None else "verified"}
-        transaction = {"action": incoming["action"], "image": target, "commit": revision,
-                       "svg_sha256": svg_hash,
-                       "previous": former, "backup": str(backup_directory), "schema_before": stopped_schema,
-                       "database_risk": "Image rollback does not reverse database or data migrations"}
-        try:
+            initial = target == current_image and current is None and pending is None
+            former = None if initial else {"image": current_image, "commit": previous_revision,
+                      "svg_sha256": before_smoke["svg_sha256"], "backup": str(backup_directory),
+                      "status": "failed" if incoming["action"] == "rollback" and pending is not None else "verified"}
+            transaction = {"action": incoming["action"], "image": target, "commit": revision,
+                           "svg_sha256": svg_hash, "drain_generation": generation,
+                           "previous": former, "backup": str(backup_directory), "schema_before": stopped_schema,
+                           "database_risk": "Image rollback does not reverse database or data migrations"}
             save(RELEASES / "pending.json", transaction)
             if target != current_image:
                 set_image(target)
             compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
+            wait_ready()
+            verify_running_candidate(target, revision)
+            require_owned_drain(drain_request(token), generation, sealed=True)
             proof = smoke(svg_hash)
-        except (ReleaseError, OSError, URLError, TimeoutError, IncompleteRead, json.JSONDecodeError) as error:
-            transaction["status"] = "failed"
-            transaction["error"] = str(error) if isinstance(error, ReleaseError) else type(error).__name__
+            verify_running_candidate(target, revision)
+            require_owned_drain(drain_request(token), generation, sealed=True)
+            require(database_state(paths)[0] == 0, "Candidate started work before release verification completed")
+        except (ReleaseError, OSError, sqlite3.Error, URLError, TimeoutError, IncompleteRead, json.JSONDecodeError) as error:
+            message = str(error) if isinstance(error, ReleaseError) else type(error).__name__
+            if not lease["stop_started"]:
+                try:
+                    resume_drain(token, generation)
+                    clear_drain_lease(lease)
+                except (ReleaseError, OSError, URLError, TimeoutError, IncompleteRead):
+                    raise ReleaseError("Release aborted before shutdown; owned drain recovery is required") from None
+                raise ReleaseError("Release aborted before shutdown: " + message + "; admission reopened and work preserved") from None
             try:
-                if image_reference() == current_image:
-                    compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
-                save(RELEASES / "pending.json", transaction)
+                active, source_schema = database_state(paths)
+                source_restart_guard(current, previous, pending, current_image, previous_revision,
+                                     active, schema, source_schema, configured_image=image_reference())
+                compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
+                wait_ready()
+                require_owned_drain(drain_request(token), generation, sealed=True)
+                source_proof = smoke(str(current["svg_sha256"]))
+                verify_running_candidate(current_image, previous_revision)
+                active, source_schema = database_state(paths)
+                source_restart_guard(current, previous, pending, current_image, previous_revision,
+                                     active, schema, source_schema, configured_image=image_reference())
+                require_owned_drain(drain_request(token), generation, sealed=True)
+                lease.update(source_verified=True, source_smoke=source_proof)
+                save(DRAIN_LEASE, lease)
+                resume_drain(token, generation)
+                clear_drain_lease(lease)
+            except (ReleaseError, OSError, sqlite3.Error, URLError, TimeoutError, IncompleteRead, json.JSONDecodeError) as restart_error:
+                source_restart_error = (str(restart_error) if isinstance(restart_error, ReleaseError)
+                                        else type(restart_error).__name__)
+            else:
+                raise ReleaseError("Release aborted after shutdown began: " + message
+                                   + "; the same verified source was restarted and admission reopened") from None
+            try:
+                lease.update(last_error=message, source_restart_error=source_restart_error)
+                save(DRAIN_LEASE, lease)
+                candidate_record = read_record(RELEASES / "pending.json")
+                if (transaction is not None and candidate_record is not None
+                        and candidate_record.get("drain_generation") == generation
+                        and release_identity(candidate_record) == release_identity(transaction)):
+                    transaction.update(status="failed", error=message)
+                    save(RELEASES / "pending.json", transaction)
             except (ReleaseError, OSError):
-                raise ReleaseError("Release recovery failed; inspect the pending record and retained backup before restarting services") from None
-            raise ReleaseError("Candidate startup or verification failed: " + transaction["error"]
-                               + "; state backup retained. No automatic database restore or image rollback was attempted") from None
-        return finalize_release(transaction, proof)
+                raise ReleaseError("Release failure evidence could not be saved; admission remains sealed and manual recovery is required") from None
+            raise ReleaseError("Release failed after shutdown began: " + message
+                               + "; admission remains sealed. Inspect the drain lease, release records and any retained backup before recovery") from None
+        verified = finalize_release(transaction, proof)
+        drain = resume_drain(token, generation)
+        clear_drain_lease(lease)
+        return {**verified, "drain": drain}
 
 
 if __name__ == "__main__":
