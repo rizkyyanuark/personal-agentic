@@ -72,9 +72,9 @@ production_config:
   script:
     - python -B infra/production/tests/release_test.py
     - python -B infra/ci/tests/deploy_test.py
-    - bash -n infra/production/bootstrap.sh infra/ci/build-backend.sh infra/ci/publish-image.sh infra/ci/smoke-image.sh
-    - sh -n infra/production/deploy-command.sh infra/ci/buildkit-runc.sh
-
+    - bash -n infra/production/bootstrap.sh infra/ci/build-backend.sh infra/ci/smoke-image.sh
+    - sh -n infra/production/deploy-command.sh infra/ci/buildkit-runc.sh infra/ci/publish-image.sh
+  
 .image_rules:
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
@@ -92,7 +92,7 @@ image_publish:
   variables:
     BUILDKITD_FLAGS: --oci-worker-no-process-sandbox --oci-worker-snapshotter=native --oci-worker-binary /tmp/personal-agentic-runc --config /tmp/personal-agentic-buildkit.toml
   script:
-    - bash infra/ci/publish-image.sh
+    - sh infra/ci/publish-image.sh
   artifacts:
     expire_in: 7 days
     paths:

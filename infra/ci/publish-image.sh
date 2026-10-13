@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 umask 077
 test "$(uname -m)" = aarch64
 test "$(id -u)" = 1000
