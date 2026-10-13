@@ -15,66 +15,37 @@ The browser smoke tests in `frontend/tests/native-smoke.mjs` exercise the runnin
 
 Some phases require a signed-in provider CLI or a configured SSH workstation and may use provider quota. Keep test organizations and evidence outside the repository; never commit credentials, private addresses, runtime state, screenshots, or production run records.
 
-## Deployment drain
+## Production release checks
 
-The Rust workspace suite covers global bootstrap-owner authorization, real SQLite
-admission races, accepted coordination/scheduling paths, in-flight cleanup,
-Matrix authorization/replay and an actual terminal process. Run the helper's
-physical HTTP, filesystem, archive and journal tests on Linux:
+Run the helper and CI deploy-client tests on Linux:
 
 ```sh
 python3 -B infra/production/tests/release_test.py
+python3 -B infra/ci/tests/deploy_test.py
+bash -n infra/production/bootstrap.sh infra/ci/build-backend.sh infra/ci/publish-image.sh infra/ci/smoke-image.sh
+sh -n infra/production/deploy-command.sh infra/ci/buildkit-runc.sh
 ```
 
-For real application acceptance, start a disposable candidate on loopback port
-18768 with separate Linux named volumes for `/data` and `/workdir`, owned by the
-image's application user. Do not mount a production volume or relax the private
-organization permissions to accommodate a Windows bind mount. Copy only that
-candidate's owner key into an ignored `scratch/dep-002/org/.state/owner.key`
-replica for the host test clients; its real SQLite data remains in the test volume.
-Set `AE_TEST_URL`, `AE_TEST_ORG` to that replica and `AE_TEST_PROOF_DIR`, then run
-from `src`:
+The helper suite uses real HTTP transport faults, SQLite, private filesystem
+journals and archive hashes. Destructive Docker operations are not run against
+production by these tests. The deploy-client suite checks immutable release
+identity, protected-main/freshness refusal, helper failure reporting and a real
+HTTP health server; external Git/SSH boundaries are substituted for regression
+cases that must not deploy production.
 
-```sh
-node backend/tests/deployment-drain.mjs
-# Restart only the identified disposable candidate, preserving its test organization.
-node backend/tests/deployment-drain.mjs --after-restart
-node frontend/tests/deployment-drain.mjs
-```
+For application acceptance, use a disposable loopback candidate with separate
+Linux data/workdir volumes, owned by its normal application user. Keep the owner
+key private in an ignored host replica for test clients. Verify authenticated
+state has no `maintenance` field, removed deployment-drain GET/POST return 404,
+and normal UI chat/group actions persist. Seed an old sealed drain marker before
+startup and verify it cannot block work. `frontend/tests/native-smoke.mjs basic`
+includes the state/banner removal regressions; existing authorization and archived
+read-only behavior must still hold.
 
-The API suite leaves admission sealed for the restart check and proves exact-owner
-resume afterward. The browser suite uses Edge by default and verifies real SSE,
-draft preservation, new-work controls, terminal Stop, read-only preview/history,
-deadline reopening, contrast and a 320px viewport. Neither suite invokes a model
-turn. Workspace validation still needs an actual available harness catalog.
-For the recorded Windows candidate, a signed-in SSH Antigravity catalog and owned
-remote temporary workdir were used; set `AE_TEST_WORKDIR` to the prepared workdir
-for the browser test. Terminal commands then execute over that real SSH transport.
-
-`infra/production/tests/drain_application.py` runs the actual helper drain client
-against that controller from a Python 3.11+ Linux container sharing the candidate's
-network namespace. Mount only the repository read-only and the disposable org at
-`/org`; set `AE_TEST_ORG=/org`, `AE_TEST_API_URL=http://127.0.0.1:8765` and
-`AE_TEST_HOST=127.0.0.1:18768`. Its physical loopback Host adapter preserves the
-helper's fixed production origin while forwarding to the real test application.
-It proves accepted terminal completion and timeout preservation, without invoking
-the destructive promotion CLI or replacing Docker/SQLite with mocks.
-
-Native provider continuation requires separate evidence from a signed-in provider
-and an isolated workdir. `node backend/tests/deployment-drain-provider.mjs --prepare`
-reads the real SSH catalog and creates an owned `/tmp/personal-agentic-dep002-*`
-fixture without invoking a model. Its invocation without `--prepare` exercises
-one coordinator, one delegate and one resumed summary while draining, with at most
-one executing turn at a time. It verifies native receipts, actual file evidence,
-chat publication, unchanged fixture hashes and owned cleanup. Any credential mount
-and provider quota must be authorized for this isolated candidate. Preserve a
-failed proof separately before another authorized attempt; never replace a failed
-acceptance with a captured-frame unit result. The sanitized resumed-summary fixture
-regression checks current textual response selection when structured output is stale.
-
-Packaged ARM64 protocol smoke runs in `image_smoke` on main; local AMD64 acceptance
-does not establish production installation. Record evidence and remaining limits
-in the DEP-002 change contract.
+Packaged native ARM64 image smoke runs on protected main and uses actual
+SQLite/auth/UI/cockpit/asset paths. Local AMD64 acceptance does not establish
+latest ARM64 CI, installed production helper or release activation. Record the
+exact revision, proof and pending dependencies in [CI-003](../openspec/changes/CI-003-simple-automatic-releases/proposal.md).
 
 ## Organization Live Preview
 

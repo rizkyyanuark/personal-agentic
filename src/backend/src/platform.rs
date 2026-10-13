@@ -116,7 +116,6 @@ impl Platform {
                 .map_err(|_| anyhow::anyhow!("Workspace registry unavailable"))?
                 .insert(tenant.id, app);
         }
-        Self::start_maintenance_monitor(&platform);
         Ok(platform)
     }
     fn load(&self, tenant: &Tenant) -> Result<App> {
@@ -124,9 +123,8 @@ impl Platform {
         app.workspace_id = tenant.id.clone();
         app.enabled = Arc::new(AtomicBool::new(!tenant.deleted));
         if tenant.id != "default" {
-            app.store = Arc::new(Store::open_with_drain(
+            app.store = Arc::new(Store::open(
                 self.base.store.org.join("workspaces").join(&tenant.id),
-                self.base.store.drain.clone(),
             )?);
             app.knowledge = Arc::new(crate::knowledge::Knowledge::new(
                 app.store.org.join(".state"),
@@ -186,71 +184,6 @@ impl Platform {
             .collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
-    fn active_operations(&self) -> Result<usize> {
-        let apps = self
-            .apps
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Workspace registry unavailable"))?;
-        let mut count = 0;
-        for app in apps.values() {
-            count += app.store.read(|db| {
-                let mut count = 0usize;
-                for query in [
-                    "SELECT COUNT(*) FROM runs WHERE json_extract(data,'$.status') IN ('queued','starting','running','waiting')",
-                    "SELECT COUNT(*) FROM terminal_runs WHERE json_extract(data,'$.status')='running'",
-                    "SELECT COUNT(*) FROM artifacts WHERE json_extract(data,'$.status')='indexing'",
-                    "SELECT COUNT(*) FROM fleet_jobs WHERE done=0 AND state IN ('preparing','queued','claimed','cancelled')",
-                ] {
-                    count += usize::try_from(db.query_row(query, [], |row| row.get::<_, i64>(0))?)?;
-                }
-                if app.enabled.load(Ordering::SeqCst) {
-                    count += usize::try_from(db.query_row("SELECT COUNT(*) FROM handoffs WHERE COALESCE(json_extract(data,'$.delivered'),0)=0", [], |row| row.get::<_, i64>(0))?)?;
-                    count += usize::try_from(db.query_row("SELECT COUNT(*) FROM runs r JOIN groups g ON g.id=json_extract(r.data,'$.group_id') WHERE json_extract(r.data,'$.status') IN ('failed','timed_out','interrupted') AND json_extract(r.data,'$.kind') NOT IN ('delegate','review') AND json_extract(r.data,'$.created_at') >= (SELECT value FROM metadata WHERE key='failure_review_started_at') AND json_extract(g.data,'$.archived_at') IS NULL AND json_extract(g.data,'$.deleted_at') IS NULL AND NOT EXISTS(SELECT 1 FROM metadata WHERE key='failure_review:'||r.id)", [], |row| row.get::<_, i64>(0))?)?;
-                }
-                Ok(count)
-            })?;
-        }
-        Ok(count)
-    }
-    fn emit_maintenance(&self, maintenance: &crate::drain::Maintenance) -> Result<()> {
-        let apps: Vec<_> = self
-            .apps
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Workspace registry unavailable"))?
-            .values()
-            .cloned()
-            .collect();
-        for app in apps {
-            app.store
-                .event("deployment.maintenance", serde_json::to_value(maintenance)?)?;
-            app.wake.notify_one();
-        }
-        Ok(())
-    }
-    fn start_maintenance_monitor(platform: &Arc<Self>) {
-        let platform = Arc::downgrade(platform);
-        tokio::spawn(async move {
-            let mut last = None;
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                let Some(platform) = platform.upgrade() else {
-                    break;
-                };
-                match platform.base.store.drain.maintenance() {
-                    Ok(maintenance) if last.as_ref() != Some(&maintenance) => {
-                        match platform.emit_maintenance(&maintenance) {
-                            Ok(()) => last = Some(maintenance),
-                            Err(error) => {
-                                tracing::error!("Publish deployment maintenance: {error}")
-                            }
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(error) => tracing::error!("Deployment maintenance expiry: {error}"),
-                }
-            }
-        });
-    }
     async fn handle(self: &Arc<Self>, mut req: Request) -> Result<Response, ApiError> {
         let path = req.uri().path().to_owned();
         let method = req.method().clone();
@@ -286,44 +219,6 @@ impl Platform {
                     "Cross-origin request rejected".into(),
                 ));
             }
-        }
-        if path == "/api/deployment-drain" {
-            let bearer = req
-                .headers()
-                .get(header::AUTHORIZATION)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.strip_prefix("Bearer "));
-            if !bearer
-                .is_some_and(|value| bool::from(value.as_bytes().ct_eq(self.base.token.as_bytes())))
-            {
-                return Err(ApiError(
-                    StatusCode::UNAUTHORIZED,
-                    "Bootstrap owner bearer required".into(),
-                ));
-            }
-            let status = if method == Method::GET {
-                self.base.store.drain.status(|| self.active_operations())?
-            } else if method == Method::POST {
-                let input: crate::drain::Control = serde_json::from_slice(
-                    &to_bytes(req.into_body(), 4096)
-                        .await
-                        .map_err(anyhow::Error::from)?,
-                )
-                .map_err(anyhow::Error::from)?;
-                self.base
-                    .store
-                    .drain
-                    .control(input, || self.active_operations())?
-            } else {
-                return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
-            };
-            if method == Method::POST {
-                self.emit_maintenance(&crate::drain::Maintenance {
-                    phase: status.phase,
-                    deadline_unix_seconds: status.deadline_unix_seconds,
-                })?;
-            }
-            return Ok(axum::Json(status).into_response());
         }
         if path == "/api/auth" {
             return Ok(axum::Json(json!({"matrix":self.homeserver.is_some()})).into_response());
@@ -499,11 +394,6 @@ impl Platform {
                 return Ok(axum::Json(values).into_response());
             }
             if method == Method::POST {
-                let _permit = self
-                    .base
-                    .store
-                    .drain
-                    .operation(crate::drain::Admission::Root)?;
                 let input: Value = serde_json::from_slice(
                     &to_bytes(req.into_body(), 16384)
                         .await
@@ -543,16 +433,6 @@ impl Platform {
             return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
         }
         if let Some(rest) = path.strip_prefix("/api/tenants/") {
-            let _operation = if method != Method::GET {
-                Some(
-                    self.base
-                        .store
-                        .drain
-                        .operation(crate::drain::Admission::Root)?,
-                )
-            } else {
-                None
-            };
             let (id, sub) = rest.split_once('/').unwrap_or((rest, ""));
             let role = self.db(|db| {
                 Ok(db
@@ -706,11 +586,6 @@ impl Platform {
                     "Workspace owner required".into(),
                 ));
             }
-            let operation = if method != Method::GET {
-                Some(app.store.drain.operation(crate::drain::Admission::Root)?)
-            } else {
-                None
-            };
             if path == "/api/runtimes" && method == Method::GET {
                 return Ok(axum::Json(crate::fleet::list(&app)?).into_response());
             }
@@ -743,7 +618,6 @@ impl Platform {
                         .to_owned();
                     let id = id.to_owned();
                     let result = tokio::task::spawn_blocking(move || {
-                        let _operation = operation;
                         crate::fleet::directories(&app, &id, &folder)
                     })
                     .await

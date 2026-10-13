@@ -951,6 +951,8 @@ try {
       `PASS groups: all 3 groups see both agents, including one added later; no checklist; validation and separate history preserved; real Codex run ${run.id} returned ORG_WIDE_OK`,
     );
   } else if (phase === "basic") {
+    assert.equal(Object.hasOwn(await state(), "maintenance"), false);
+    await expect(page.getByRole("status", { name: "Deployment maintenance", exact: true })).toHaveCount(0);
     proof.workspace = await mkdtemp(
       path.join(tmpdir(), "Agentic Enterprise codebase "),
     );
@@ -1047,6 +1049,14 @@ try {
       "GET",
     );
     assert.equal(messages.filter((m) => m.id === message.id).length, 1);
+    const composer = page.getByRole("textbox", { name: "Message", exact: true });
+    await composer.fill("Normal chat submission remains available.");
+    await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeEnabled();
+    await page.getByRole("button", { name: "Send message", exact: true }).click();
+    await expect(composer).toHaveValue("");
+    const submitted = await until(async () => (await call(`/groups/${proof.group}/messages`, undefined, "GET"))
+      .find((m) => m.body === "Normal chat submission remains available."));
+    assert.deepEqual(submitted.recipients, []);
     const values = { AE_PROBE_VALUE: 'literal-$HOME-"quoted"-sample' };
     await writeFile(path.join(proof.workspace, ".env"), `AE_PROBE_VALUE='${values.AE_PROBE_VALUE}'\n`);
     proof.envProbeValue = values.AE_PROBE_VALUE;
@@ -1077,9 +1087,11 @@ try {
       passed: true,
       at: new Date().toISOString(),
       duplicateCount: 1,
+      maintenanceRemoved: true,
+      browserMessageId: submitted.id,
     };
     console.log(
-      "PASS browser: create group/agent, attach existing workdir, save instructions; API: auth/origin, idempotency, env round trip, traversal",
+      "PASS browser: create group/agent, attach existing workdir, save instructions, send ordinary chat without maintenance; API: auth/origin, idempotency, env round trip, traversal",
     );
   } else if (phase === "codex") {
     const agent = (await state()).agents.find((a) => a.id === proof.agent);

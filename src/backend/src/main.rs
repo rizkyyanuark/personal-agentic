@@ -9,9 +9,6 @@ mod codex_rpc;
 mod codex_settings;
 mod codex_usage;
 mod coordination;
-mod drain;
-#[cfg(test)]
-mod drain_tests;
 mod fleet;
 mod group_scope;
 mod knowledge;

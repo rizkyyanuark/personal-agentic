@@ -272,7 +272,6 @@ pub struct Event {
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub struct StateView {
-    pub maintenance: crate::drain::Maintenance,
     pub workstations: Vec<crate::workstations::Workstation>,
     pub questions: Vec<crate::questions::QuestionRequest>,
     pub actions: Vec<ActionItem>,

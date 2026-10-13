@@ -31,7 +31,7 @@ Indeks hanya berisi link; fase Issue tidak disalin ke banyak dokumen. Checklist 
 | CI/review | Pipeline commit terbaru lulus; reviewer menilai kontrak, perilaku dan bukti; revisi diverifikasi secara relevan |
 | Merge | Maintainer menilai hasil review dan CI sebelum merge ke protected main |
 | Main image + smoke | Image ARM64 dari SHA main dipublish; digest tercatat; smoke pada data terisolasi lulus |
-| Manual production gate | Release tepat, tidak ada pekerjaan aktif, backup konsisten dan risiko rollback ditinjau; deploy dipilih operator |
+| Automatic production deployment | Setelah merge ke protected main dan image smoke lulus, deploy berjalan otomatis; pekerjaan aktif menolak deploy, backup konsisten dan identitas release tetap diwajibkan |
 | Production proof | Jalur produksi yang berubah terbukti; SHA/digest, hasil, backup dan keterbatasan tercatat |
 
 Pengujian lokal, sukses CI, merge, dan deployment adalah hasil yang berbeda. Gate release hanya diterapkan ketika pekerjaan mencakup release. Kemampuan belum ditandai deployed sebelum identitas release dan bukti produksi tersedia.

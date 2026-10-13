@@ -272,7 +272,6 @@ async fn state(State(app): State<App>) -> ApiResult<StateView> {
             .collect::<rusqlite::Result<_>>()?)
     })?;
     let mut view = StateView {
-        maintenance: app.store.drain.maintenance()?,
         workstations: crate::workstations::list(&app.store)?,
         questions: crate::questions::recent(&app)?,
         actions: app
@@ -1259,33 +1258,31 @@ async fn send_message(State(app): State<App>, Json(input): Json<SendInput>) -> A
     if let Some(old) = old {
         return Ok(Json(old));
     }
-    let message = app
-        .store
-        .write_admission(crate::drain::Admission::Root, |tx| {
-            if let Some(identity) = &app.identity {
-                let old: Option<String> = tx
-                    .query_row(
-                        "SELECT json_extract(data,'$.sender') FROM messages WHERE id=?",
-                        [&input.id],
-                        |r| r.get(0),
-                    )
-                    .optional()?;
-                ensure!(
-                    old.as_ref().is_none_or(|sender| sender == &identity.user),
-                    "Message ID belongs to another sender"
-                );
-            }
-            let actor = app
-                .identity
-                .as_ref()
-                .map_or("owner", |identity| identity.user.as_str());
-            let mut message = submit_message_as(tx, input, None, actor)?;
-            if let Some(identity) = &app.identity {
-                message.sender = identity.user.clone();
-                store::put(tx, "messages", &message.id, &message)?;
-            }
-            Ok(message)
-        })?;
+    let message = app.store.write(|tx| {
+        if let Some(identity) = &app.identity {
+            let old: Option<String> = tx
+                .query_row(
+                    "SELECT json_extract(data,'$.sender') FROM messages WHERE id=?",
+                    [&input.id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            ensure!(
+                old.as_ref().is_none_or(|sender| sender == &identity.user),
+                "Message ID belongs to another sender"
+            );
+        }
+        let actor = app
+            .identity
+            .as_ref()
+            .map_or("owner", |identity| identity.user.as_str());
+        let mut message = submit_message_as(tx, input, None, actor)?;
+        if let Some(identity) = &app.identity {
+            message.sender = identity.user.clone();
+            store::put(tx, "messages", &message.id, &message)?;
+        }
+        Ok(message)
+    })?;
     app.wake.notify_one();
     Ok(Json(message))
 }
@@ -1674,30 +1671,25 @@ async fn download(State(app): State<App>, Path(id): Path<String>) -> Result<Resp
         .into_response())
 }
 async fn index_artifact(State(app): State<App>, Path(id): Path<String>) -> ApiResult<Artifact> {
-    let operation = app.store.drain.operation(crate::drain::Admission::Root)?;
-    let mut artifact = app
-        .store
-        .write_admission(crate::drain::Admission::Root, |tx| {
-            let mut artifact: Artifact = store::get(tx, "artifacts", &id)?;
-            store::get::<Group>(tx, "groups", &artifact.group_id)?.ensure_active()?;
-            ensure!(
-                ["stored", "failed", "indexed"].contains(&artifact.status.as_str()),
-                "Artifact cannot be indexed in this state"
-            );
-            ensure!(
-                artifact.media_type.starts_with("text/")
-                    || artifact.media_type.starts_with("image/"),
-                "Semantic indexing supports text and images"
-            );
-            artifact.status = "indexing".into();
-            artifact.in_knowledge = true;
-            artifact.error = None;
-            store::put(tx, "artifacts", &id, &artifact)?;
-            Ok(artifact)
-        })?;
+    let mut artifact = app.store.write(|tx| {
+        let mut artifact: Artifact = store::get(tx, "artifacts", &id)?;
+        store::get::<Group>(tx, "groups", &artifact.group_id)?.ensure_active()?;
+        ensure!(
+            ["stored", "failed", "indexed"].contains(&artifact.status.as_str()),
+            "Artifact cannot be indexed in this state"
+        );
+        ensure!(
+            artifact.media_type.starts_with("text/") || artifact.media_type.starts_with("image/"),
+            "Semantic indexing supports text and images"
+        );
+        artifact.status = "indexing".into();
+        artifact.in_knowledge = true;
+        artifact.error = None;
+        store::put(tx, "artifacts", &id, &artifact)?;
+        Ok(artifact)
+    })?;
     let pending = artifact.clone();
     tokio::spawn(async move {
-        let _operation = operation;
         let path = match security::artifact_path(&app.store.org, &id) {
             Ok(p) => p,
             Err(e) => {

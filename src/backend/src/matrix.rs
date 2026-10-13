@@ -76,17 +76,8 @@ pub async fn start(platform: Arc<Platform>) -> Result<()> {
             if event.sender == bot {
                 return;
             }
-            match ingest(&p, room.room_id().as_str(), event) {
-                Ok(Some(transaction)) => {
-                    let notice = RoomMessageEventContent::text_plain(
-                        "Deployment maintenance is active. Your message was not queued. Please resend it after maintenance finishes.",
-                    );
-                    if let Err(error) = room.send(notice).with_transaction_id(transaction).await {
-                        tracing::warn!("Matrix maintenance notice could not be delivered: {error}");
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => tracing::warn!("Matrix incoming message rejected: {error}"),
+            if let Err(error) = ingest(&p, &room, event) {
+                tracing::warn!("Matrix incoming message rejected: {error}");
             }
         }
     });
@@ -127,13 +118,9 @@ pub async fn start(platform: Arc<Platform>) -> Result<()> {
     });
     Ok(())
 }
-pub(crate) fn ingest(
-    platform: &Platform,
-    room_id: &str,
-    event: OriginalSyncRoomMessageEvent,
-) -> Result<Option<OwnedTransactionId>> {
+fn ingest(platform: &Platform, room: &Room, event: OriginalSyncRoomMessageEvent) -> Result<()> {
     let MessageType::Text(text) = event.content.msgtype else {
-        return Ok(None);
+        return Ok(());
     };
     let apps: Vec<_> = platform
         .apps
@@ -147,7 +134,9 @@ pub(crate) fn ingest(
             continue;
         }
         for group in app.store.list::<Group>("groups")? {
-            if metadata(&app, &format!("matrix_room:{}", group.id))?.as_deref() != Some(room_id) {
+            if metadata(&app, &format!("matrix_room:{}", group.id))?.as_deref()
+                != Some(room.room_id().as_str())
+            {
                 continue;
             }
             let user = event.sender.to_string();
@@ -178,7 +167,7 @@ pub(crate) fn ingest(
                     |row| row.get::<_, bool>(0),
                 )?)
             })? {
-                return Ok(None);
+                return Ok(());
             }
             let input = SendInput {
                 id: id.clone(),
@@ -189,29 +178,21 @@ pub(crate) fn ingest(
                 reply_to: None,
                 artifacts: vec![],
             };
-            let accepted = app
-                .store
-                .write_admission(crate::drain::Admission::Root, |tx| {
-                    let mut message = crate::api::submit_message_as(tx, input, None, &user)?;
-                    message.sender = user;
-                    store::put(tx, "messages", &message.id, &message)?;
-                    tx.execute(
-                        "INSERT OR IGNORE INTO metadata VALUES(?,?)",
-                        [format!("matrix_sent:{id}"), event.event_id.to_string()],
-                    )?;
-                    Ok(())
-                });
-            if let Err(error) = accepted {
-                if error.downcast_ref::<crate::drain::Closed>().is_some() {
-                    return Ok(Some(format!("ae-drain-{id}").into()));
-                }
-                return Err(error);
-            }
+            app.store.write(|tx| {
+                let mut message = crate::api::submit_message_as(tx, input, None, &user)?;
+                message.sender = user;
+                store::put(tx, "messages", &message.id, &message)?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO metadata VALUES(?,?)",
+                    [format!("matrix_sent:{id}"), event.event_id.to_string()],
+                )?;
+                Ok(())
+            })?;
             app.wake.notify_one();
-            return Ok(None);
+            return Ok(());
         }
     }
-    Ok(None)
+    Ok(())
 }
 pub fn mentions(app: &App, group: &Group, body: &str) -> Result<Vec<String>> {
     app.store

@@ -181,7 +181,7 @@ pub fn tick(app: &App) -> Result<()> {
         Ok(query.query_map([current.to_rfc3339()], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
     })?;
     for id in due_ids {
-        let result = app.store.write_admission(crate::drain::Admission::Root, |tx| {
+        app.store.write(|tx| {
             // Recheck inside the claim transaction so edits, pause and deletion win safely.
             let data: Option<String> = {
                 use rusqlite::OptionalExtension;
@@ -221,12 +221,7 @@ pub fn tick(app: &App) -> Result<()> {
             store::put(tx, "schedules", &id, &schedule)?;
             store::event(tx, "schedule.dispatched", &json!({"schedule_id":id,"group_id":schedule.group_id,"message_id":schedule.last_message_id,"error":schedule.last_error}))?;
             Ok(())
-        });
-        match result {
-            Ok(()) => {}
-            Err(error) if error.is::<crate::drain::Closed>() => {}
-            Err(error) => return Err(error),
-        }
+        })?;
     }
     Ok(())
 }

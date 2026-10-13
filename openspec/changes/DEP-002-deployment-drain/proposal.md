@@ -1,5 +1,7 @@
 # DEP-002 — deployment drain
 
+Historical contract: the owner requested removal of this feature in [CI-003](../CI-003-simple-automatic-releases/proposal.md). Evidence below describes DEP-002 at its recorded revision, not the current release procedure.
+
 ## Identity, baseline and authorization
 
 Issue: [GitLab #4](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/4).

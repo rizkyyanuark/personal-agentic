@@ -40,7 +40,6 @@ const status = (file: Artifact) =>
 // explorer + single-file preview interaction. See UPSTREAM.md.
 export function KnowledgeExplorer({
   readOnly = false,
-  maintenance = false,
   files,
   groupName,
   onUpload,
@@ -48,7 +47,6 @@ export function KnowledgeExplorer({
   perform,
 }: {
   readOnly?: boolean;
-  maintenance?: boolean;
   files: Artifact[];
   groupName: string;
   onUpload: () => void;
@@ -120,7 +118,7 @@ export function KnowledgeExplorer({
           <ChevronRight size={14} />
           <strong>Knowledge</strong>
         </div>
-        <Button disabled={readOnly || maintenance} onClick={onUpload}>
+        <Button disabled={readOnly} onClick={onUpload}>
           <Plus size={16} /> Upload files
         </Button>
       </div>
@@ -317,7 +315,7 @@ export function KnowledgeExplorer({
             {category(file) !== "Other files" && (
               <Button
                 variant="outline"
-                disabled={readOnly || maintenance || file.status === "indexing"}
+                disabled={readOnly || file.status === "indexing"}
                 onClick={() =>
                   void perform(async () => {
                     await post(`/artifacts/${file.id}/index`);
@@ -335,7 +333,7 @@ export function KnowledgeExplorer({
             <Button
               variant="ghost"
               aria-label={`Delete ${file.name}`}
-              disabled={readOnly || maintenance}
+              disabled={readOnly}
               onClick={() =>
                 void perform(async () => {
                   await api(`/artifacts/${file.id}`, { method: "DELETE" });
