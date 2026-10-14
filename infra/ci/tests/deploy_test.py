@@ -174,6 +174,22 @@ class DeploymentTests(unittest.TestCase):
             with self.subTest(stderr=stderr):
                 self.assertNotIn("PRIVATE_SECRET", deployment.helper_failure(stderr))
 
+    def test_safe_stage_category_and_diagnostic_reference_survive_client_mapping(self):
+        for category, expected in (("backup_space", "free disk space"), ("runtime_key", "permissions"),
+                                   ("command_failed", "command failed"), ("source_restarted", "source was restarted"),
+                                   ("guard", "private server release journal")):
+            failure = {"status": "failed", "error": "PRIVATE_SECRET", "stage": "backup",
+                       "category": category, "diagnostic_reference": "release-" + "a" * 32,
+                       "private_stderr": "PRIVATE_SECRET"}
+            message = deployment.helper_failure(json.dumps(failure).encode())
+            self.assertIn(expected, message)
+            self.assertIn("stage: backup", message)
+            self.assertIn("release-" + "a" * 32, message)
+            self.assertNotIn("PRIVATE_SECRET", message)
+            failure["diagnostic_reference"] = "PRIVATE_SECRET"
+            failure["stage"] = "PRIVATE_SECRET"
+            self.assertNotIn("PRIVATE_SECRET", deployment.helper_failure(json.dumps(failure).encode()))
+
     def test_failed_public_health_retains_verified_release_record_without_health_success(self):
         with health_server({"status": "starting", "product": "Agentic Enterprise"}) as (url, requests), self.command_boundary():
             with self.assertRaisesRegex(ValueError, "readiness"):

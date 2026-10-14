@@ -18,7 +18,7 @@ Every change must move the real application toward an end-user-visible outcome. 
 
 
 
-1\. Read the task, README.md, PRD.md, ARCHITECTURE.md, docs/development.md, the active change contract linked from its GitLab Issue, existing code, and relevant configs before coding. Read INFO.md in a directory when additional context is needed. Use src/VERIFICATION.md for checks and docs/DEV-PROD-WORKFLOW.md for releases.
+1\. Read the task, README.md, PRD.md, ARCHITECTURE.md, docs/development.md, the active change contract linked from its GitLab Issue, existing code, and relevant configs before coding. Read INFO.md in a directory when additional context is needed. Use src/VERIFICATION.md for checks and docs/deployment.md for releases.
 
 2\. Identify the real user flow, API path, CLI path, or system behavior being changed.
 

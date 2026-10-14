@@ -35,5 +35,3 @@ configuration boundary before owner questions and enterprise tool calls can be
 enabled. No ephemeral token is written into global or project native config.
 Registered workers and event-based updates remain subsequent work, not alternate
 paths enabled by this decision.
-
-See [pilot and evidence requirements](../../../../docs/antigravity-ssh-cockpit-pilot.md).

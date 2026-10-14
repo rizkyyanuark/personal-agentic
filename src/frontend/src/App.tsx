@@ -147,7 +147,6 @@ function chatMessagesPath(groupId: string, side: string | null, before?: string)
 }
 export default function App({role = "owner", controllerAccess = true, user = "owner", workspaceName = "My workspace", workspaceId = "default", workspaceSettings}: {role?: string; controllerAccess?: boolean; user?: string; workspaceName?: string; workspaceId?: string; workspaceSettings?: ReactNode}) {
   const [data, setData] = useState<StateView | null>(null);
-  const [catalog, setCatalog] = useState<CodexSettings | null>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [navigationOpen, setNavigationOpen] = useState(true);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
@@ -160,7 +159,6 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
     media.addEventListener("change", resize);
     return () => media.removeEventListener("change", resize);
   }, []);
-  const catalogRevision = data?.agents.map((a) => `${a.id}:${a.revision}`).join(",");
   const route = useRoute();
   const groupId = route.groupId;
   const sideChatId = route.sideChatId;
@@ -287,10 +285,6 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
       setMessagesScope(scope);
     }
   }, [setMessages, setMessagesScope]);
-  useEffect(() => {
-    if (!authenticated || !controllerAccess) return;
-    void perform(async () => setCatalog(await api<CodexSettings>("/codex/settings")), false);
-  }, [authenticated, catalogRevision, perform, controllerAccess]);
   useEffect(() => {
     void perform(async () => {
       const fragment = new URLSearchParams(location.hash.slice(1)).get("key");
@@ -880,7 +874,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                             <span className="bot-badge" title={position}>{position}</span>
                           )}
                           {!isHuman && m.sender !== "system" && m.run_id && (
-                            <MessageModelBadge runId={m.run_id} run={data?.runs.find((r) => r.id === m.run_id)} catalog={catalog} />
+                            <MessageModelBadge runId={m.run_id} run={data?.runs.find((r) => r.id === m.run_id)} />
                           )}
                           {m.schedule_id && (
                             <span className="scheduled-message-label">
@@ -1632,7 +1626,8 @@ function AgentInspector({
   const effectiveAgent = projectWorkdir ? {...agent,workdir:projectWorkdir} : agent;
   const [path, setPath] = useState(agent.workdir?.path ?? "");
   const [sshHost, setSshHost] = useState(agent.workdir?.ssh_host ?? "");
-  const [runtimeId, setRuntimeId] = useState(projectWorkdir?.runtime_id ?? agent.runtime_id ?? agent.workdir?.runtime_id ?? "");
+  const [selectedRuntimeId, setRuntimeId] = useState(projectWorkdir?.runtime_id ?? agent.runtime_id ?? agent.workdir?.runtime_id ?? "");
+  const runtimeId = projectWorkdir ? projectWorkdir.runtime_id ?? "" : selectedRuntimeId;
   const [runtimes, setRuntimes] = useState<RegisteredRuntime[]>([]);
   const remote = Boolean(sshHost);
   const [probe, setProbe] = useState("");
@@ -1662,13 +1657,16 @@ function AgentInspector({
   const modelsRequest = useRef(0);
   const loadModels = useCallback(() => {
     const request = ++modelsRequest.current;
+    setModels(null);
+    setModelError("");
     if (!runtimeId && !controllerAccess) { setModels(null); setModelError("Choose a runtime to load its model catalog."); return Promise.resolve(); }
-    return api<CodexSettings>(`/harness/settings?harness=${edited.harness}&agent_id=${encodeURIComponent(agent.id)}${runtimeId ? `&runtime_id=${encodeURIComponent(runtimeId)}` : catalogHost ? `&ssh_host=${encodeURIComponent(catalogHost)}` : ""}`).then(settings => {
+    const context = agent.project_id ? "" : runtimeId ? `&runtime_id=${encodeURIComponent(runtimeId)}` : catalogHost ? `&ssh_host=${encodeURIComponent(catalogHost)}` : "";
+    return api<CodexSettings>(`/harness/settings?harness=${edited.harness}&agent_id=${encodeURIComponent(agent.id)}${context}`).then(settings => {
       if (request === modelsRequest.current) { setModels(settings); setModelError(""); }
     }, (error: unknown) => {
       if (request === modelsRequest.current) setModelError(error instanceof Error ? error.message : String(error));
     });
-  }, [catalogHost, runtimeId, edited.harness, agent.id, controllerAccess]);
+  }, [catalogHost, runtimeId, edited.harness, agent.id, agent.project_id, controllerAccess]);
   useEffect(() => {
     if (section !== "Profile") return;
     let request = modelsRequest.current;
@@ -1845,7 +1843,7 @@ function AgentInspector({
               <option value="">
                 {models
                   ? `Use ${harnessNames[edited.harness]} setting (${models.model})`
-                  : "Loading models…"}
+                  : modelError ? "Model catalog unavailable" : "Loading models…"}
               </option>
               {edited.model &&
                 !models?.models.some((m) => m.slug === edited.model) && (

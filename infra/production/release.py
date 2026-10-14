@@ -30,7 +30,7 @@ RELEASES = ROOT / "releases"
 REPOSITORY = "registry.tugasakhir.space/rizkyyanuark/personal-agentic/platform"
 PROJECT = "personal-agentic-prod"
 VOLUMES = tuple(PROJECT + "_" + name for name in ("platform-data", "matrix-data", "platform-workdir"))
-RUNTIME_WORKDIR = Path("/home/ubuntu/workspace/production")
+LEGACY_RUNTIME_WORKDIR = "/home/ubuntu/workspace/production"
 HOST = "agent.tugasakhir.space"
 BASE = "http://127.0.0.1:18766"
 ACTIVE = ("queued", "starting", "running", "waiting")
@@ -38,31 +38,49 @@ DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 COMMAND_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/root", "LANG": "C.UTF-8"}
+STAGE = "request"
 
 
 class ReleaseError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, category: str = "guard", operation: str | None = None,
+                 returncode: int | None = None, private_stderr: bytes = b"", secondary: Exception | None = None) -> None:
+        super().__init__(message)
+        self.category = category
+        self.operation = operation
+        self.returncode = returncode
+        self.private_stderr = private_stderr
+        self.secondary = secondary
 
 
-def require(condition: bool, message: str) -> None:
+def require(condition: bool, message: str, *, category: str = "guard") -> None:
     if not condition:
-        raise ReleaseError(message)
+        raise ReleaseError(message, category=category)
 
 
-def command(arguments: list[str], timeout: int = 180) -> bytes:
+def command(arguments: list[str], timeout: int = 180, *, operation: str = "command", output: Path | None = None) -> bytes:
     try:
-        result = subprocess.run(arguments, capture_output=True, check=False,
-                                timeout=timeout, env=COMMAND_ENV)
+        if output is None:
+            result = subprocess.run(arguments, capture_output=True, check=False, timeout=timeout, env=COMMAND_ENV)
+        else:
+            descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as destination:
+                result = subprocess.run(arguments, stdout=destination, stderr=subprocess.PIPE,
+                                        check=False, timeout=timeout, env=COMMAND_ENV)
+                destination.flush()
+                os.fsync(destination.fileno())
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise ReleaseError("Production command unavailable or timed out: " + arguments[0]) from error
-    # Docker/Compose stderr may include interpolated configuration. Keep it off CI logs.
-    require(result.returncode == 0, "Production command failed: " + " ".join(arguments[:4]))
-    return result.stdout
+        raise ReleaseError("Production command unavailable or timed out", category="command_unavailable",
+                           operation=operation) from error
+    if result.returncode != 0:
+        raise ReleaseError("Production command failed", category="command_failed", operation=operation,
+                           returncode=result.returncode, private_stderr=result.stderr[-16384:])
+    return result.stdout or b""
 
 
-def docker(*arguments: str, timeout: int = 180) -> bytes:
+def docker(*arguments: str, timeout: int = 180, output: Path | None = None) -> bytes:
+    operation = "compose-" + arguments[9] if arguments[0] == "compose" else "docker-" + "-".join(arguments[:2])
     return command(["/usr/bin/docker", "--host", "unix:///var/run/docker.sock",
-                    "--config", str(ROOT / "registry-auth"), *arguments], timeout)
+                    "--config", str(ROOT / "registry-auth"), *arguments], timeout, operation=operation, output=output)
 
 
 def compose(*arguments: str, timeout: int = 180) -> bytes:
@@ -147,6 +165,46 @@ def volume_paths() -> dict[str, Path]:
         require(path.is_absolute() and path.is_dir() and not path.is_symlink(), "Production volume mountpoint is invalid")
         paths[volume["Name"]] = path.resolve()
     return paths
+
+
+def selected_runtime_key() -> Path:
+    config = json.loads(compose("config", "--format", "json"))
+    mounts = config.get("services", {}).get("platform", {}).get("volumes", [])
+    values = [mount.get("source") for mount in mounts if mount.get("target") == "/run/ae-ssh/id_ed25519"]
+    require(len(values) == 1 and isinstance(values[0], str),
+            "Preflight failed: selected runtime SSH key is ambiguous", category="runtime_key")
+    path = Path(values[0])
+    require(path.is_absolute() and path.is_relative_to(ROOT / "runtime-ssh") and path.resolve() == path,
+            "Preflight failed: selected runtime SSH key is redirected", category="runtime_key")
+    return path
+
+
+def preflight(paths: dict[str, Path], *, root: Path | None = None, identity: Path | None = None, home_bytes: int = 0) -> None:
+    target_root = ROOT if root is None else root
+    for volume in VOLUMES:
+        require(volume in paths, "Preflight failed: required production volume is missing: " + volume, category="backup_volume")
+        path = paths[volume]
+        require(path.is_absolute() and path.is_dir() and not path.is_symlink(),
+                "Preflight failed: volume mountpoint is invalid: " + volume, category="backup_volume")
+    runtime_key = identity if identity is not None else target_root / "runtime-ssh" / "id_ed25519"
+    require(runtime_key.is_file() and not runtime_key.is_symlink() and not runtime_key.parent.is_symlink(),
+            "Preflight failed: runtime SSH key is unavailable", category="runtime_key")
+    key_info = runtime_key.stat()
+    require(key_info.st_uid == 10001 and (key_info.st_mode & 0o7777) in (0o400, 0o600),
+            "Preflight failed: runtime SSH key must belong to UID 10001 with mode 0400 or 0600", category="runtime_key")
+    size = 0
+    def traversal_error(error: OSError) -> None:
+        raise ReleaseError("Preflight failed: backup source is unreadable", category="backup_volume") from error
+    for source in paths.values():
+        for directory, _folders, files in os.walk(source, followlinks=False, onerror=traversal_error):
+            for name in files:
+                path = Path(directory) / name
+                if not path.is_symlink():
+                    size += path.stat().st_size
+    size += key_info.st_size + home_bytes
+    require(shutil.disk_usage(target_root).free >= size + 512 * 1024 * 1024,
+            "Preflight failed: insufficient disk space for production state backup", category="backup_space")
+
 
 
 def databases(paths: dict[str, Path]) -> dict[str, Path]:
@@ -376,7 +434,15 @@ def verify_recovery_backup(transaction: dict[str, object], *, root: Path = ROOT)
     former = transaction.get("previous")
     require(isinstance(manifest, dict) and isinstance(former, dict), "Recovery backup manifest is missing")
     hashes = manifest.get("archives")
-    expected = {volume + ".tar.gz" for volume in VOLUMES} | {"runtime-workdirs.tar.gz"}
+    expected = {volume + ".tar.gz" for volume in VOLUMES}
+    if manifest.get("format") is None:
+        expected.add("runtime-workdirs.tar.gz")
+        require(manifest.get("runtime_workdir") == LEGACY_RUNTIME_WORKDIR,
+                "Recovery legacy runtime archive source is unsupported")
+    else:
+        require(type(manifest.get("format")) is int and manifest["format"] == 2,
+                "Recovery backup format is unsupported")
+        expected.add("platform-home.tar")
     require(isinstance(hashes, dict) and set(hashes) == expected
             and manifest.get("image") == former.get("image")
             and manifest.get("schema") == transaction.get("schema_before"), "Recovery backup manifest does not match the transaction")
@@ -396,6 +462,14 @@ def verify_recovery_backup(transaction: dict[str, object], *, root: Path = ROOT)
     for name in ("production.env", "compose.yaml", "runtime-ssh-id_ed25519"):
         protected(directory / name, private=True)
         require((directory / name).is_file(), "Recovery private backup file is unavailable")
+    if manifest.get("format") == 2:
+        files = manifest.get("files")
+        require(isinstance(files, dict) and set(files) == {"production.env", "compose.yaml", "runtime-ssh-id_ed25519"},
+                "Recovery private file manifest is invalid")
+        for name, digest in files.items():
+            require(isinstance(digest, str) and bool(SHA.fullmatch(digest))
+                    and hashlib.sha256((directory / name).read_bytes()).hexdigest() == digest,
+                    "Recovery private file integrity check failed")
     return verified
 
 
@@ -459,7 +533,7 @@ def recover(incoming: dict[str, object], current_image: str, paths: dict[str, Pa
     archive_hashes = {}
     if transaction is not None:
         require(schema == transaction.get("schema_before"), "Database schema changed since the failed release")
-        archive_hashes = verify_recovery_backup(transaction)
+        archive_hashes = verify_recovery_backup(transaction, root=ROOT)
     proof = smoke(svg)
     active, latest_schema = database_state(paths)
     require(active == 0 and latest_schema == schema, "Production state changed during recovery verification")
@@ -469,24 +543,19 @@ def recover(incoming: dict[str, object], current_image: str, paths: dict[str, Pa
             and read_record(RELEASES / "pending.json") == pending, "Release journal changed during recovery verification")
     if transaction is None:
         return {"action": "recover", "unchanged": True, "image": target, "commit": commit, "smoke": proof}
-    verified = finalize_release(transaction, proof)
+    verified = finalize_release(transaction, proof, directory=RELEASES)
     return {"action": "recover", "release": verified, "backup_archive_hashes": archive_hashes,
             "services_restarted": False, "database_restored": False}
 
 
-def backup(paths: dict[str, Path], image: str, schema: dict[str, str]) -> Path:
+def backup(paths: dict[str, Path], image: str, schema: dict[str, str], *, identity: Path, home_bytes: int) -> Path:
+    preflight(paths, identity=identity, home_bytes=home_bytes)
     directory = ROOT / "backups" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8])
     directory.parent.mkdir(mode=0o700, exist_ok=True)
     protected(directory.parent, private=True)
     directory.mkdir(mode=0o700)
-    require(RUNTIME_WORKDIR.is_dir() and RUNTIME_WORKDIR.resolve() == RUNTIME_WORKDIR,
-            "The fixed production runtime workdir is unavailable or redirected")
-    sources = [*paths.values(), RUNTIME_WORKDIR]
-    size = sum(path.lstat().st_size for root in sources for path in root.rglob("*") if path.is_file() and not path.is_symlink())
-    require(shutil.disk_usage(ROOT).free >= size + 512 * 1024 * 1024, "Insufficient disk space for production state backup")
-    manifest = {"image": image, "schema": schema, "archives": {}}
+    manifest = {"format": 2, "image": image, "schema": schema, "archives": {}}
     archives = [(volume + ".tar.gz", "type=volume,source=" + volume + ",target=/source,readonly") for volume in VOLUMES]
-    archives.append(("runtime-workdirs.tar.gz", "type=bind,source=" + str(RUNTIME_WORKDIR) + ",target=/source,readonly"))
     for archive, source in archives:
         docker("run", "--rm", "--network", "none", "--read-only", "--user", "0:0",
                "--cpus", "0.5", "--memory", "128m", "--memory-swap", "256m", "--pids-limit", "64",
@@ -500,14 +569,22 @@ def backup(paths: dict[str, Path], image: str, schema: dict[str, str]) -> Path:
             for chunk in iter(lambda: content.read(1024 * 1024), b""):
                 digest.update(chunk)
         manifest["archives"][archive] = digest.hexdigest()
+    home_archive = directory / "platform-home.tar"
+    docker("cp", PROJECT + "-platform-1:/home/agent/.", "-", output=home_archive, timeout=600)
+    digest = hashlib.sha256()
+    with home_archive.open("rb") as content:
+        for chunk in iter(lambda: content.read(1024 * 1024), b""):
+            digest.update(chunk)
+    manifest["archives"][home_archive.name] = digest.hexdigest()
     atomic(directory / "production.env", ENV_FILE.read_bytes())
     atomic(directory / "compose.yaml", COMPOSE.read_bytes())
-    runtime_key = ROOT / "runtime-ssh" / "id_ed25519"
+    runtime_key = identity
     require(runtime_key.is_file() and not runtime_key.is_symlink(), "The selected production runtime key is unavailable")
     atomic(directory / "runtime-ssh-id_ed25519", runtime_key.read_bytes())
-    manifest["runtime_workdir"] = str(RUNTIME_WORKDIR)
+    manifest["files"] = {name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
+                         for name in ("production.env", "compose.yaml", "runtime-ssh-id_ed25519")}
     manifest["identity_key"] = "runtime-ssh-id_ed25519"
-    manifest["excluded"] = "Global AGY/provider authentication outside the production workdir"
+    manifest["excluded"] = "External project sources and provider authentication on external runtimes"
     save(directory / "manifest.json", manifest)
     return directory
 
@@ -551,6 +628,8 @@ def input_request() -> dict[str, object]:
 
 
 def main() -> dict[str, object]:
+    global STAGE
+    STAGE = "request"
     incoming = input_request()
     require(os.geteuid() == 0, "Release helper must run through the restricted root command")
     protected(ROOT, private=True)
@@ -566,6 +645,7 @@ def main() -> dict[str, object]:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ReleaseError("Another production release is in progress") from None
+        STAGE = "inventory"
         current_image = image_reference()
         paths = volume_paths()
         active, schema = database_state(paths)
@@ -577,6 +657,7 @@ def main() -> dict[str, object]:
                     "current": current, "previous": previous, "pending": pending, "smoke": smoke(None)}
         require(active == 0, "Production has active, queued or waiting runs, terminal commands, or indexing; release refused")
         if incoming["action"] == "recover":
+            STAGE = "recovery"
             return recover(incoming, current_image, paths, current, previous, pending, schema)
         require(incoming["action"] == "rollback" or pending is None,
                 "A previous release is incomplete; resolve its pending record before another promotion")
@@ -594,6 +675,17 @@ def main() -> dict[str, object]:
             expected_commit = incoming["commit"]
             svg_hash = incoming.get("svg_sha256")
         require(isinstance(target, str) and target.startswith(REPOSITORY + "@") and bool(DIGEST.fullmatch(target.split("@", 1)[1])), "Recorded release image is invalid")
+        STAGE = "preflight"
+        identity = None
+        home_bytes = 0
+        if target != current_image or current is None or pending is not None:
+            identity = selected_runtime_key()
+            preflight(paths, identity=identity)
+            usage = docker("exec", PROJECT + "-platform-1", "du", "-sb", "/home/agent").split(maxsplit=1)
+            require(bool(usage) and usage[0].isdigit(), "Preflight failed: controller home size is unavailable", category="backup_volume")
+            home_bytes = int(usage[0])
+            preflight(paths, identity=identity, home_bytes=home_bytes)
+        STAGE = "image-preparation"
         docker("pull", target, timeout=600)
         revision = inspect_image(target, expected_commit)
         previous_revision = inspect_image(current_image)
@@ -612,29 +704,39 @@ def main() -> dict[str, object]:
                 and read_record(RELEASES / "previous.json") == previous
                 and read_record(RELEASES / "pending.json") == pending,
                 "Production release identity changed during image preparation")
+        STAGE = "preflight"
+        require(identity is not None, "Backup identity is unavailable")
+        preflight(paths, identity=identity, home_bytes=home_bytes)
         try:
+            STAGE = "stop"
             compose("stop", "--timeout", "30", "platform", "matrix")
             active, stopped_schema = database_state(paths)
             require(active == 0, "A run started during the shutdown window; upgrade refused. Inspect interrupted work before retrying")
             require(stopped_schema == schema, "Application schema changed during release preflight")
-            backup_directory = backup(paths, current_image, stopped_schema)
+            STAGE = "backup"
+            backup_directory = backup(paths, current_image, stopped_schema, identity=identity, home_bytes=home_bytes)
         except (ReleaseError, OSError, sqlite3.Error) as error:
             message = str(error) if isinstance(error, ReleaseError) else type(error).__name__
             try:
                 active, source_schema = database_state(paths)
                 source_restart_guard(current, previous, pending, current_image, previous_revision,
-                                     active, schema, source_schema, configured_image=image_reference())
-                compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
+                                     active, schema, source_schema, directory=RELEASES, configured_image=image_reference())
+                compose("start", "matrix", "platform")
                 smoke(str(current["svg_sha256"]))
                 verify_running_candidate(current_image, previous_revision)
                 active, source_schema = database_state(paths)
                 source_restart_guard(current, previous, pending, current_image, previous_revision,
-                                     active, schema, source_schema, configured_image=image_reference())
-            except (ReleaseError, OSError, sqlite3.Error, URLError, TimeoutError, IncompleteRead, json.JSONDecodeError):
+                                     active, schema, source_schema, directory=RELEASES, configured_image=image_reference())
+            except (ReleaseError, OSError, sqlite3.Error, URLError, TimeoutError, IncompleteRead, json.JSONDecodeError) as restart_error:
                 raise ReleaseError("Release failed before image replacement: " + message
-                                   + "; verified source restart was unavailable. Inspect production state and backups before manual recovery") from None
+                                   + "; verified source restart was unavailable. Inspect production state and backups before manual recovery",
+                                   category="source_restart_failed", operation=getattr(error, "operation", None),
+                                   returncode=getattr(error, "returncode", None), private_stderr=getattr(error, "private_stderr", b""),
+                                   secondary=restart_error) from None
             raise ReleaseError("Release aborted before image replacement: " + message
-                               + "; the same verified source was restarted") from None
+                               + "; the same verified source was restarted", category="source_restarted",
+                               operation=getattr(error, "operation", None), returncode=getattr(error, "returncode", None),
+                               private_stderr=getattr(error, "private_stderr", b"")) from None
         initial = target == current_image and current is None and pending is None
         former = None if initial else {"image": current_image, "commit": previous_revision,
                   "svg_sha256": before_smoke["svg_sha256"], "backup": str(backup_directory),
@@ -644,12 +746,14 @@ def main() -> dict[str, object]:
                        "previous": former, "backup": str(backup_directory), "schema_before": stopped_schema,
                        "database_risk": "Image rollback does not reverse database or data migrations"}
         try:
+            STAGE = "activation"
             save(RELEASES / "pending.json", transaction)
             if target != current_image:
                 set_image(target)
             compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
             wait_ready()
             verify_running_candidate(target, revision)
+            STAGE = "verification"
             proof = smoke(svg_hash)
             verify_running_candidate(target, revision)
         except (ReleaseError, OSError, URLError, TimeoutError, IncompleteRead, json.JSONDecodeError) as error:
@@ -659,11 +763,44 @@ def main() -> dict[str, object]:
                 if image_reference() == current_image:
                     compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
                 save(RELEASES / "pending.json", transaction)
-            except (ReleaseError, OSError):
-                raise ReleaseError("Release recovery failed; inspect the pending record and retained backup before restarting services") from None
+            except (ReleaseError, OSError) as recovery_error:
+                raise ReleaseError("Release recovery failed; inspect the pending record and retained backup before restarting services",
+                                   category="candidate_failed", operation=getattr(error, "operation", None),
+                                   returncode=getattr(error, "returncode", None), private_stderr=getattr(error, "private_stderr", b""),
+                                   secondary=recovery_error) from None
             raise ReleaseError("Candidate startup or verification failed: " + transaction["error"]
-                               + "; state backup retained. No automatic database restore or image rollback was attempted") from None
-        return finalize_release(transaction, proof)
+                               + "; state backup retained. No automatic database restore or image rollback was attempted",
+                               category="candidate_failed", operation=getattr(error, "operation", None),
+                               returncode=getattr(error, "returncode", None), private_stderr=getattr(error, "private_stderr", b"")) from None
+        STAGE = "finalization"
+        return finalize_release(transaction, proof, directory=RELEASES)
+
+
+def failure_proof(error: Exception) -> dict[str, object]:
+    message = str(error) if isinstance(error, ReleaseError) else type(error).__name__
+    proof = {"status": "failed", "error": message, "stage": STAGE,
+             "category": error.category if isinstance(error, ReleaseError) else "system_error"}
+    reference = "release-" + uuid.uuid4().hex
+    try:
+        protected(ROOT, private=True)
+        RELEASES.mkdir(mode=0o700, exist_ok=True)
+        protected(RELEASES, private=True)
+        details = {**proof, "reference": reference, "recorded_at": datetime.now(timezone.utc).isoformat()}
+        if isinstance(error, ReleaseError):
+            details.update(operation=error.operation, returncode=error.returncode)
+            if error.private_stderr:
+                details["private_stderr"] = error.private_stderr.decode("utf-8", errors="replace")
+            if error.secondary is not None:
+                secondary = error.secondary
+                details["secondary_failure"] = {"error": str(secondary) if isinstance(secondary, ReleaseError) else type(secondary).__name__,
+                                                "operation": getattr(secondary, "operation", None),
+                                                "returncode": getattr(secondary, "returncode", None),
+                                                "private_stderr": getattr(secondary, "private_stderr", b"").decode("utf-8", errors="replace")}
+        save(RELEASES / (reference + ".json"), details)
+        proof["diagnostic_reference"] = reference
+    except (OSError, ReleaseError):
+        proof["diagnostic_available"] = False
+    return proof
 
 
 if __name__ == "__main__":
@@ -672,6 +809,5 @@ if __name__ == "__main__":
         print(json.dumps(main(), sort_keys=True))
     except (ReleaseError, OSError, ValueError, KeyError, sqlite3.Error, URLError, TimeoutError, IncompleteRead) as error:
         # Never emit Docker output, response bodies, configuration, or credential values.
-        message = str(error) if isinstance(error, ReleaseError) else type(error).__name__
-        print(json.dumps({"status": "failed", "error": message}), file=sys.stderr)
+        print(json.dumps(failure_proof(error)), file=sys.stderr)
         sys.exit(1)

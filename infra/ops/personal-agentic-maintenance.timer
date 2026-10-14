@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily scoped personal-agentic image maintenance
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 Asia/Jakarta
+RandomizedDelaySec=30m
+Persistent=true
+Unit=personal-agentic-maintenance.service
+
+[Install]
+WantedBy=timers.target

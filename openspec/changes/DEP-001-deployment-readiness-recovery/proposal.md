@@ -20,7 +20,7 @@ Preserve the existing image, backup, schema, authentication and application chec
 Make interrupted release-journal finalization replayable without replacing data or services.
 
 Minimum files: `infra/production/release.py`, focused tests in `infra/production/tests`,
-the existing `production_config` CI job, `docs/DEV-PROD-WORKFLOW.md`, and this contract.
+the existing `production_config` CI job, `docs/deployment.md`, and this contract.
 Production code is owned by the coordinator; the test file is assigned to an independent implementer.
 
 Non-goals: automatic image rollback/database restore, schema migration, provider upgrades,

@@ -71,5 +71,5 @@ the predecessor page/global interface; the package's `test:e2e` command invokes
 the current real React suite. Historical architecture and systemd templates are
 archived under `docs/legacy`.
 
-See the root [integration strategy](../../../docs/cockpit-integration-strategy.md)
+See [visual acceptance](visual-acceptance.md) and the root [architecture](../../../ARCHITECTURE.md)
 for scope, decisions, and acceptance gates.

@@ -1,5 +1,8 @@
 # DEP-002 tasks
 
+Historical task record for DEP-002. The source/contract drain policy was superseded by [CI-003](../archive/2026-10-14-CI-003-simple-automatic-releases/proposal.md). The checks below preserve their original scope and do not form the current implementation queue; current phase and release evidence are tracked separately.
+
+
 - [x] DEP2-T1 / R1–R5: audit actual admission, helper, UI and bootstrap paths; record accepted 15-minute policy and create Issue #4/branch. Owner: coordinator.
 - [x] DEP2-T2 / R1–R3: implement shared durable gate, authenticated global protocol, typed errors, public state, all admission/continuation paths and physical store/router checks. Owner: backend implementer; predecessor T1.
 - [x] DEP2-T3 / R4: integrate root helper ownership/wait/seal/resume/recovery and image compatibility; physical HTTP/failure contracts. Owner: release implementer; predecessor T1 and agreed T2 protocol.

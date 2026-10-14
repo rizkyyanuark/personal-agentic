@@ -5,6 +5,7 @@ services:
     image: ${AE_PLATFORM_IMAGE:?Set the tested platform image digest}
     platform: linux/arm64
     restart: unless-stopped
+    init: true
     cpus: 0.5
     mem_limit: 512m
     memswap_limit: 1g

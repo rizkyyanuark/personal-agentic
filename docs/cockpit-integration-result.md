@@ -1,7 +1,7 @@
 # Hasil integrasi kantor 3D
 
 Perubahan terbaru mengembalikan desain virtual-kantor asli dan mempertahankan
-header Live Preview. Lihat [hasil pemulihan desain](cockpit-original-design-result.md).
+header Live Preview.
 Bagian compact di bawah merupakan bukti tahap sebelumnya.
 
 Tanggal: 6 Oktober 2026. Preview aktif:

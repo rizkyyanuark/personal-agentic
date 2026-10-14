@@ -8,7 +8,7 @@ Catat change ID, tautan GitLab Issue, pemilik scope, tanggal, checkout/worktree,
 
 ## Masalah, hasil dan scope
 
-Tuliskan hasil pengguna yang diminta, scope dan non-goal, dependency perubahan lain, minimum file set, serta keputusan pemilik yang sudah berlaku. Keputusan terbuka menjadi blocker eksplisit. Cantumkan batas publikasi/release yang sudah diotorisasi.
+Tuliskan hasil pengguna yang diminta, scope dan non-goal, dependency perubahan lain, minimum file set, serta keputusan pemilik yang sudah berlaku. Tautkan ADR yang relevan; ADR tidak wajib untuk setiap change. Gunakan [panduan ADR](../../docs/decisions/README.md) untuk keputusan penting yang berumur panjang atau memengaruhi beberapa capability, tanpa menyalin requirement/tasks ke dalam ADR. Keputusan terbuka menjadi blocker eksplisit. Cantumkan batas publikasi/release yang sudah diotorisasi.
 
 ## Requirement dan scenario
 
@@ -24,16 +24,16 @@ Setiap tugas mempunyai ID, requirement yang ditangani, predecessor, penanggung j
 
 ## Verifikasi dan bukti
 
-Catat environment/OS/transport, commit atau working-tree identity yang diuji, dependency/config nonsecret, fixture/data uji terisolasi, perintah atau user flow, hasil dan lokasi bukti tersanitasi. Jelaskan mocks serta alasannya bila ada. Jangan menyimpan credentials, database privat, owner key, native session atau backup dalam Git.
+Catat environment/OS/transport, commit atau working-tree identity yang diuji, dependency/config nonsecret, fixture/data uji terisolasi, perintah atau user flow, hasil dan lokasi bukti tersanitasi. Tautkan catatan empiris sesuai [konvensi evidence](../../docs/evidence/README.md), tanpa menyalin output yang sama ke beberapa dokumen. Jelaskan mocks serta alasannya bila ada. Jangan menyimpan credentials, database privat, owner key, native session atau backup dalam Git.
 
 | Pemeriksaan | Requirement/scenario | Environment dan versi | Hasil | Bukti dan batas |
 | --- | --- | --- | --- | --- |
 
-Gunakan `Passed`, `Inspected`, `Not run` atau `Inferred`; hasil lokal tidak otomatis menjadi hasil CI atau proof produksi. Test skip atau mock sukses tidak menggantikan acceptance yang diwajibkan. Verifikasi setelah edit terakhir sesuai risiko; jangan mengulang pemeriksaan mahal tanpa perubahan atau concern baru.
+Gunakan `Passed`, `Inspected`, `Not run` atau `Inferred`; hasil lokal tidak otomatis menjadi hasil CI atau proof produksi. ADR `Accepted` dan kontrak accepted tidak berarti implementasi verified atau deployed. Test skip atau mock sukses tidak menggantikan acceptance yang diwajibkan. Verifikasi setelah edit terakhir sesuai risiko; jangan mengulang pemeriksaan mahal tanpa perubahan atau concern baru.
 
 ## Publikasi dan release
 
-Tautkan commit/MR dan pipeline commit terbaru jika sudah ada. Catat merge, image SHA/digest, smoke, manual production gate, backup/rollback dan production proof yang benar-benar dijalankan; nyatakan pending untuk tahap yang belum dilakukan. Untuk pekerjaan tanpa release, jelaskan batas deliverable.
+Tautkan commit/MR dan pipeline commit terbaru jika sudah ada. Ikuti alur release yang dipilih kontrak dan konfigurasi CI: normal release berjalan otomatis setelah merge ke protected main dan image smoke lulus; recovery/rollback tetap tindakan manual eksplisit. Catat merge, image SHA/digest, smoke, backup, deployment/recovery/rollback dan production proof yang benar-benar dijalankan; nyatakan pending untuk tahap yang belum dilakukan. Untuk pekerjaan tanpa release, jelaskan batas deliverable.
 
 ## Penutupan dan handoff
 

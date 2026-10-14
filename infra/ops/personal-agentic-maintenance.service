@@ -1,0 +1,20 @@
+[Unit]
+Description=Scoped personal-agentic obsolete-image maintenance
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/personal-agentic-maintenance automatic
+Nice=19
+CPUQuota=10%
+MemoryMax=128M
+IOWeight=10
+TimeoutStartSec=180
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/personal-agentic
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX

@@ -1,6 +1,6 @@
 # DEP-002 — deployment drain
 
-Historical contract: the owner requested removal of this feature in [CI-003](../CI-003-simple-automatic-releases/proposal.md). Evidence below describes DEP-002 at its recorded revision, not the current release procedure.
+Historical contract: the owner requested removal of this feature in [CI-003](../archive/2026-10-14-CI-003-simple-automatic-releases/proposal.md). Evidence below describes DEP-002 at its recorded revision, not the current release procedure.
 
 ## Identity, baseline and authorization
 

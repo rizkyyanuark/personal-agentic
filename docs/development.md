@@ -4,7 +4,7 @@ Panduan ini mengatur pengembangan produk personal-agentic, dari kebutuhan penggu
 
 ## Rute baca
 
-Baca [README](../README.md), [PRD](../PRD.md), [arsitektur](../ARCHITECTURE.md), [AGENTS](../AGENTS.md), lalu kontrak perubahan aktif yang ditautkan Issue. Gunakan [verification](../src/VERIFICATION.md) untuk pemeriksaan dan [runbook dev/prod](DEV-PROD-WORKFLOW.md) untuk release. [UPSTREAM](../src/UPSTREAM.md) mencatat provenance CCCC/Paperclip dan perbedaan adapter; sumber tersebut tidak dianggap mewajibkan workflow ini.
+Baca [README](../README.md), [PRD](../PRD.md), [arsitektur](../ARCHITECTURE.md), [AGENTS](../AGENTS.md), [rencana arsitektur](architecture-plan.md), [keputusan arsitektur (ADR)](decisions/README.md), lalu kontrak perubahan aktif di [openspec/changes](../openspec/changes/). Gunakan [panduan pengujian](testing-guide.md), [template laporan uji MR](testing-report-template.md) serta [verification](../src/VERIFICATION.md) untuk pemeriksaan, dan [panduan deployment](deployment.md) untuk rilis. [UPSTREAM](../src/UPSTREAM.md) mencatat provenance CCCC/Paperclip dan perbedaan adapter; sumber tersebut tidak dianggap mewajibkan workflow ini.
 
 ## Sumber kebenaran
 
@@ -12,12 +12,17 @@ Baca [README](../README.md), [PRD](../PRD.md), [arsitektur](../ARCHITECTURE.md),
 | --- | --- |
 | Tujuan dan kebutuhan produk | PRD; proposal perubahan untuk delta yang sedang dikerjakan |
 | Kondisi kode dan batas modul | Kode/config serta ARCHITECTURE yang merujuk source |
+| Keputusan penting, alasan, alternatif dan konsekuensi | ADR dalam `docs/decisions` |
 | Prioritas, dependensi perubahan, dan fase pekerjaan | GitLab Issue |
-| Scope, requirement/scenario, tugas dan penerimaan | Kontrak dalam `openspec/changes` |
-| Bukti perintah dan user flow pada versi tertentu | Verification change dan artifact CI yang tersanitasi |
+| Scope, requirement/scenario, desain, tugas dan penerimaan | Kontrak dalam `openspec/changes` |
+| Bukti perintah dan user flow pada versi tertentu | Verification change, `docs/evidence` dan artifact CI yang tersanitasi |
 | Hasil CI, source yang dipublish, image dan release aktif | MR/pipeline, commit Git, registry digest, manifest deployment |
 
 Indeks hanya berisi link; fase Issue tidak disalin ke banyak dokumen. Checklist tugas menyimpan penerimaan subtask, bukan status pipeline atau release. Bila kondisi kode bertentangan dengan tulisan, periksa bukti, lalu perbarui kontrak; jangan mengklaim target sebagai kemampuan yang sudah berjalan.
+
+ADR menjelaskan mengapa suatu pendekatan dipilih; change menjabarkan apa yang diubah beserta desain, tugas dan penerimaannya. Satu ADR dapat mendasari beberapa change. Buat ADR untuk keputusan penting yang berumur panjang atau memengaruhi beberapa capability; satu ADR per change tidak diwajibkan. Tautkan keputusan dan bukti yang relevan dari kontrak, tanpa menyalin isinya. Konvensi keputusan ada di [panduan ADR](decisions/README.md), dan konvensi bukti ada di [panduan evidence](evidence/README.md).
+
+ADR `Accepted` berarti arah keputusan disepakati. `Contract accepted` berarti scope dan acceptance pekerjaan diterima. Keduanya belum membuktikan implementasi terverifikasi atau sudah deployed; hasil tersebut memerlukan bukti pada versi dan environment yang disebutkan.
 
 ## Urutan dan gate
 
@@ -27,7 +32,7 @@ Indeks hanya berisi link; fase Issue tidak disalin ke banyak dokumen. Checklist 
 | Contract accepted | Scope/non-goal, skenario penerimaan, dependensi, minimum file set, risiko dan keputusan penting jelas |
 | Implement | Perubahan tersambung ke entrypoint nyata, auth, persistence, runtime dan UI yang relevan |
 | Local proof | Pemeriksaan sesuai risiko dan jalur produk nyata selesai; diff ditinjau; batas bukti terlihat |
-| Commit/push/Draft MR | Source dan file baru masuk commit; secret/state tidak ikut; publikasi berada dalam kewenangan yang telah dipilih pemilik |
+| Commit/push/Draft MR | Source dan file baru masuk commit; secret/state tidak ikut; sertakan laporan uji dari [testing-report-template.md](testing-report-template.md) pada deskripsi MR; publikasi berada dalam kewenangan pemilik |
 | CI/review | Pipeline commit terbaru lulus; reviewer menilai kontrak, perilaku dan bukti; revisi diverifikasi secara relevan |
 | Merge | Maintainer menilai hasil review dan CI sebelum merge ke protected main |
 | Main image + smoke | Image ARM64 dari SHA main dipublish; digest tercatat; smoke pada data terisolasi lulus |

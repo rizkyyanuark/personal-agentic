@@ -100,7 +100,7 @@ Read [architecture](docs/architecture.md) before changing data boundaries and
 [visual acceptance](docs/visual-acceptance.md) for scene behavior. The imported
 AI Lab PRD, ADRs, reports, and legacy browser scripts preserve the visual
 project's history. Their ledger, public-access, systemd, and port-8095 assumptions
-are superseded by the [integration strategy](../../docs/cockpit-integration-strategy.md).
+are superseded by the native Rust backend integration.
 
 The test-only legacy ledger and HTTP fixtures retain privacy/boundary assertions
 from the imported project. Production boundary coverage now lives in Rust's

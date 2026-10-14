@@ -31,4 +31,4 @@ The Draft MR's pipeline provides verification on the committed source. Productio
 
 ## Limits
 
-This change's production rollout, native Windows execution, registered-runtime capture and manual Knowledge indexing have not been exercised. Linked images are not captured. Windows descriptor/race parity and host-wide CI capacity are not established by the local checks. Follow the existing [verification guide](../../../src/VERIFICATION.md) and [release runbook](../../../docs/DEV-PROD-WORKFLOW.md) for the relevant gates.
+This change's production rollout, native Windows execution, registered-runtime capture and manual Knowledge indexing have not been exercised. Linked images are not captured. Windows descriptor/race parity and host-wide CI capacity are not established by the local checks. Follow the existing [verification guide](../../../src/VERIFICATION.md) and [release runbook](../../../docs/deployment.md) for the relevant gates.
