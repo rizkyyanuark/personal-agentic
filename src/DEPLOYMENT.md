@@ -14,8 +14,7 @@ selected private key to the platform container as a read-only bind mount. From
 local configuration, not Git. Configure the workstation with container key path
 `/run/ae-ssh/mini-project-key.pem`, and verify its host-key fingerprints through
 an already trusted connection before accepting them in Workstations. Provider
-authentication remains on the remote host. See the
-[pilot guide](../docs/antigravity-ssh-cockpit-pilot.md) for scope and readiness.
+authentication remains on the remote host.
 
 
 Native installers build the checked-out source using the committed Cargo/npm lockfiles.

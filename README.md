@@ -38,8 +38,7 @@ through chat or Actions and never starts work on its own.
 
 The React UI and Three.js scene are private npm workspaces under `src/frontend`
 and `src/cockpit`. Install web dependencies with `npm ci` from `src`; Docker builds
-one frontend bundle served by Rust on the same origin. See the
-[integration strategy](docs/cockpit-integration-strategy.md).
+one frontend bundle served by Rust on the same origin. See [the cockpit workspace](src/cockpit/README.md).
 
 ## Development contracts
 
@@ -47,7 +46,7 @@ Use [the AI-assisted development workflow](docs/development.md), [the architectu
 
 ## Development and releases
 
-See [the dev/prod workflow](docs/DEV-PROD-WORKFLOW.md) for the GitLab release
+See [the deployment runbook](docs/deployment.md) for the GitLab release
 path, GitHub downstream copy, independent production state and release
 requirements. CI uses the existing ARM64 workspace runners, with bounded
 resources and one shared manager limited to one personal-agentic job at a time.
@@ -59,8 +58,8 @@ The pipeline checks registry authentication, builds and smoke-tests an ARM64
 image, then automatically deploys the tested digest after a merge to protected
 `main`. Busy production work makes deployment fail clearly for later retry.
 Deployment drain has been removed. Backups, authenticated smoke, fixed release
-identity and restricted SSH remain. ARM64 MR CI and the matching installed helper
-passed; the new production image still requires review, merge and the main pipeline.
+identity and restricted SSH remain. Main release `ec70e328` passed pipeline #61
+and deployed on 13 October 2026; the runbook records that release snapshot.
 
 ## License
 

@@ -1,6 +1,6 @@
 # Arsitektur personal-agentic
 
-Peta ini membedakan kondisi source, target produk dan bukti environment. [PRD](PRD.md) menyimpan kebutuhan; [development](docs/development.md) mengatur perubahan; [verification](src/VERIFICATION.md) dan [runbook release](docs/DEV-PROD-WORKFLOW.md) menentukan cara membuktikan hasil. Snapshot di bawah diperiksa 11 Oktober 2026 terhadap baseline main `7008877`; status environment harus diperiksa lagi sebelum operasi.
+Peta ini membedakan kondisi source, target produk dan bukti environment. [PRD](PRD.md) menyimpan kebutuhan; [development](docs/development.md) mengatur perubahan; [verification](src/VERIFICATION.md) dan [runbook release](docs/deployment.md) menentukan cara membuktikan hasil. Snapshot di bawah diperiksa 11 Oktober 2026 terhadap baseline main `7008877`; status environment harus diperiksa lagi sebelum operasi.
 
 ## Jalur utama
 

@@ -75,8 +75,7 @@ see [Agent terminal and skills](#agent-terminal-and-skills) for its scope. Image
 attachments return an explicit unsupported error. Do not copy
 an ephemeral platform token into a workstation's global or project native config.
 
-For Docker key mounting, use [the selected-key override](compose.ssh.example.yaml)
-and the [SSH pilot guide](../docs/antigravity-ssh-cockpit-pilot.md). Private keys and
+For Docker key mounting, use [the selected-key override](compose.ssh.example.yaml). Private keys and
 provider login state do not belong in images or the repository.
 
 ## Custom Codex catalogs

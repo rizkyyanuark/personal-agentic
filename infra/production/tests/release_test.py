@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import socket
 import sqlite3
 import struct
@@ -72,7 +73,7 @@ def http_fixture(actions: list[tuple[str, object]]):
                     for byte in body:
                         self.wfile.write(bytes([byte]))
                         self.wfile.flush()
-                        time.sleep(0.01)
+                        time.sleep(0.03)
                 else:
                     self.wfile.write(body)
                     self.wfile.flush()
@@ -120,7 +121,7 @@ class ReadinessTests(unittest.TestCase):
             with self.subTest(action=action[0]), http_fixture([action]) as (base, receipts):
                 started = time.monotonic()
                 with self.assertRaises(release.ReleaseError) as captured:
-                    release.wait_ready(timeout=0.08, interval=0.01, base=base)
+                    release.wait_ready(timeout=0.2, interval=0.01, base=base)
                 self.assertLess(time.monotonic() - started, 0.35)
                 self.assertEqual(str(captured.exception),
                                  "Production controller did not become ready within the startup budget")
@@ -130,8 +131,8 @@ class ReadinessTests(unittest.TestCase):
         with http_fixture([("slow", 0.5)]) as (base, receipts):
             started = time.monotonic()
             with self.assertRaises(release.ReleaseError):
-                release.wait_ready(timeout=0.08, interval=0.01, base=base)
-            self.assertLess(time.monotonic() - started, 0.3)
+                release.wait_ready(timeout=0.2, interval=0.01, base=base)
+            self.assertLess(time.monotonic() - started, 0.4)
             self.assertEqual(len(receipts), 1)
 
     def test_auth_request_transport_failure_is_not_replayed(self) -> None:
@@ -145,8 +146,8 @@ class ReadinessTests(unittest.TestCase):
         with http_fixture([("drip", {"status": "ok"})]) as (base, receipts):
             started = time.monotonic()
             with self.assertRaises(release.ReleaseError):
-                release.wait_ready(timeout=0.08, interval=0.01, base=base)
-            self.assertLess(time.monotonic() - started, 0.3)
+                release.wait_ready(timeout=0.2, interval=0.01, base=base)
+            self.assertLess(time.monotonic() - started, 0.4)
             self.assertEqual(len(receipts), 1)
 
     def test_deadline_clears_timer_and_restores_previous_handler(self) -> None:
@@ -161,9 +162,9 @@ class ReadinessTests(unittest.TestCase):
                 with self.subTest(action=action[0]), http_fixture([action]) as (base, _receipts):
                     if action[0] == "slow":
                         with self.assertRaises(release.ReleaseError):
-                            release.wait_ready(timeout=0.08, interval=0.01, base=base)
+                            release.wait_ready(timeout=0.2, interval=0.01, base=base)
                     else:
-                        release.wait_ready(timeout=0.08, interval=0.01, base=base)
+                        release.wait_ready(timeout=0.2, interval=0.01, base=base)
                     self.assertEqual(signal.getsignal(signal.SIGALRM), existing_handler)
                     self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0, 0))
         finally:
@@ -207,6 +208,10 @@ class ReleaseFixtures(unittest.TestCase):
         self.backup.mkdir(mode=0o700)
         self.directory = self.root / "releases"
         self.directory.mkdir(mode=0o700)
+        runtime_ssh = self.root / "runtime-ssh"
+        runtime_ssh.mkdir(mode=0o700)
+        (runtime_ssh / "id_ed25519").write_text("isolated fixture key\n")
+        os.chmod(runtime_ssh / "id_ed25519", 0o600)
         self.old_image = release.REPOSITORY + "@sha256:" + "1" * 64
         self.image = release.REPOSITORY + "@sha256:" + "2" * 64
         self.svg = "3" * 64
@@ -244,18 +249,17 @@ class ReleaseFixtures(unittest.TestCase):
                         "backup": str(self.backup), "schema_before": schema,
                         "database_risk": "Image rollback does not reverse database or data migrations",
                         "status": "failed", "error": "ConnectionResetError"}
-        self.manifest = {"image": self.old_image, "schema": schema, "archives": {},
-                         "runtime_workdir": str(release.RUNTIME_WORKDIR),
+        self.manifest = {"format": 2, "image": self.old_image, "schema": schema, "archives": {},
                          "identity_key": "runtime-ssh-id_ed25519",
                          "excluded": "Global AGY/provider authentication outside the production workdir"}
         sources = [(volume + ".tar.gz", path) for volume, path in self.paths.items()]
-        runtime = self.root / "fixture-runtime"
-        runtime.mkdir(mode=0o700)
-        (runtime / "PROJECT.md").write_text("Retained production workspace fixture\n")
-        sources.append(("runtime-workdirs.tar.gz", runtime))
+        home = self.root / "fixture-home"
+        home.mkdir(mode=0o700)
+        (home / "config.toml").write_text('model = "fixture-model"\n')
+        sources.append(("platform-home.tar", home))
         for name, path in sources:
             archive = self.backup / name
-            with tarfile.open(archive, "w:gz") as output:
+            with tarfile.open(archive, "w" if name.endswith(".tar") else "w:gz") as output:
                 output.add(path, arcname=".")
             os.chmod(archive, 0o600)
             self.manifest["archives"][name] = hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -263,6 +267,8 @@ class ReleaseFixtures(unittest.TestCase):
                            ("compose.yaml", (SOURCE.parent / "compose.yaml").read_text()),
                            ("runtime-ssh-id_ed25519", "isolated fixture, never used for authentication\n")):
             release.atomic(self.backup / name, data.encode())
+        self.manifest["files"] = {name: hashlib.sha256((self.backup / name).read_bytes()).hexdigest()
+                                  for name in ("production.env", "compose.yaml", "runtime-ssh-id_ed25519")}
         self.save_manifest()
 
     def save_manifest(self) -> None:
@@ -444,13 +450,128 @@ class SourceRestartTests(ReleaseFixtures):
 
 
 class BackupAndDatabaseTests(ReleaseFixtures):
-    def test_exact_four_real_archives_and_sqlite_schema_are_verified(self) -> None:
+    def test_legacy_four_archives_remain_supported_and_all_hashes_are_checked(self) -> None:
+        self.manifest.pop("format")
+        self.manifest.pop("files")
+        self.manifest["archives"].pop("platform-home.tar")
+        self.manifest["runtime_workdir"] = release.LEGACY_RUNTIME_WORKDIR
+        archive = self.backup / "runtime-workdirs.tar.gz"
+        with tarfile.open(archive, "w:gz") as output:
+            output.add(self.paths[release.VOLUMES[2]], arcname=".")
+        os.chmod(archive, 0o600)
+        self.manifest["archives"][archive.name] = hashlib.sha256(archive.read_bytes()).hexdigest()
+        self.save_manifest()
+        self.assertEqual(len(release.verify_recovery_backup(self.pending, root=self.root)), 4)
+        archive.write_bytes(b"corrupted legacy archive")
+        with self.assertRaisesRegex(release.ReleaseError, "integrity"):
+            release.verify_recovery_backup(self.pending, root=self.root)
+
+    def test_new_format_rejects_unknown_version_and_modified_private_configuration(self) -> None:
+        self.manifest["format"] = 3
+        self.save_manifest()
+        with self.assertRaisesRegex(release.ReleaseError, "format is unsupported"):
+            release.verify_recovery_backup(self.pending, root=self.root)
+        self.manifest["format"] = 2
+        self.save_manifest()
+        (self.backup / "production.env").write_text("changed configuration\n")
+        with self.assertRaisesRegex(release.ReleaseError, "private file integrity"):
+            release.verify_recovery_backup(self.pending, root=self.root)
+
+    def test_exact_managed_state_archives_and_sqlite_schema_are_verified(self) -> None:
         before = self.snapshot()
         self.assertEqual(release.verify_recovery_backup(self.pending, root=self.root), self.manifest["archives"])
-        self.assertEqual(len(self.manifest["archives"]), 4)
+        self.assertEqual(len(self.manifest["archives"]), len(release.VOLUMES) + 1)
         with tarfile.open(self.backup / (release.VOLUMES[0] + ".tar.gz")) as archive:
             self.assertTrue(any(name.endswith("app.sqlite3") for name in archive.getnames()))
         self.assertEqual(self.snapshot(), before)
+
+    def test_preflight_refuses_insufficient_disk_space_or_missing_key(self) -> None:
+        release.preflight(self.paths, root=self.root)
+        from collections import namedtuple
+        Usage = namedtuple("Usage", ["total", "used", "free"])
+        with patch("shutil.disk_usage", return_value=Usage(1000, 900, 100)):
+            with self.assertRaisesRegex(release.ReleaseError, "Preflight failed: insufficient disk space"):
+                release.preflight(self.paths, root=self.root)
+        key = self.root / "runtime-ssh" / "id_ed25519"
+        key.unlink()
+        with self.assertRaisesRegex(release.ReleaseError, "Preflight failed: runtime SSH key is unavailable"):
+            release.preflight(self.paths, root=self.root)
+
+
+class OrchestrationPreflightTests(ReleaseFixtures):
+    @contextmanager
+    def installation(self, incoming: dict[str, object], image: str):
+        environment = self.root / "production.env"
+        configuration = self.root / "compose.yaml"
+        release.atomic(environment, ("AE_PLATFORM_IMAGE=" + image + "\nAE_SSH_KEY_FILE=" + str(self.root / "runtime-ssh" / "id_ed25519") + "\n").encode())
+        release.atomic(configuration, (SOURCE.parent / "compose.yaml").read_bytes())
+        registry = self.root / "registry-auth"
+        registry.mkdir(mode=0o700)
+        release.atomic(registry / "config.json", b"{}\n")
+        release.atomic(self.root / "release.lock", b"")
+        with patch.multiple(release, ROOT=self.root, ENV_FILE=environment, COMPOSE=configuration, RELEASES=self.directory), \
+             patch.object(sys, "argv", [str(SOURCE)]), \
+             patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(incoming).encode()))):
+            yield
+
+    def docker_inventory(self, *arguments: str, timeout: int = 180) -> bytes:
+        if arguments[0] == "compose" and arguments[9:] == ("config", "--format", "json"):
+            return json.dumps({"services": {"platform": {"volumes": [{"target": "/run/ae-ssh/id_ed25519",
+                     "source": str(self.root / "runtime-ssh" / "id_ed25519")} ]}}}).encode()
+        if arguments == ("volume", "inspect", *release.VOLUMES):
+            return json.dumps([{"Name": name, "Driver": "local", "Mountpoint": str(path)}
+                               for name, path in self.paths.items()]).encode()
+        if arguments == ("image", "inspect", self.image):
+            return json.dumps([{"Id": "candidate", "Architecture": "arm64", "Os": "linux",
+                                "RepoDigests": [self.image], "Config": {"Labels": {"org.opencontainers.image.revision": "b" * 40}}}]).encode()
+        if arguments == ("inspect", release.PROJECT + "-platform-1", release.PROJECT + "-matrix-1"):
+            return json.dumps([{"Image": "candidate", "State": {"Running": True, "OOMKilled": False},
+                                "Config": {"Image": self.image, "Labels": {"org.opencontainers.image.revision": "b" * 40}}},
+                               {"State": {"Running": True, "OOMKilled": False}}]).encode()
+        self.fail("Unexpected external Docker operation: " + str(arguments))
+
+    def test_missing_key_refuses_real_main_before_pull_stop_or_replacement(self) -> None:
+        release.save(self.directory / "current.json", self.current)
+        (self.root / "runtime-ssh" / "id_ed25519").unlink()
+        with self.installation({**self.incoming, "action": "promote"}, self.old_image), \
+             patch.object(release, "docker", self.docker_inventory):
+            with self.assertRaisesRegex(release.ReleaseError, "runtime SSH key"):
+                release.main()
+            self.assertEqual(release.image_reference(), self.old_image)
+        self.assertFalse((self.directory / "pending.json").exists())
+
+    def test_recover_existing_real_backup_needs_no_new_backup_capacity_or_key(self) -> None:
+        self.write_ledger()
+        (self.root / "runtime-ssh" / "id_ed25519").unlink()
+        # Docker and authenticated HTTP are external boundaries. SQLite, journal,
+        # tar archives, hashes, and recovery orchestration are real.
+        with self.installation(self.incoming, self.image), \
+             patch.object(release, "docker", self.docker_inventory), \
+             patch.object(release, "smoke", return_value=self.proof), \
+             patch.object(shutil, "disk_usage", side_effect=AssertionError("Recovery requested new backup capacity")):
+            result = release.main()
+        self.assertFalse(result["services_restarted"])
+        self.assertFalse(result["database_restored"])
+        self.assertEqual(len(result["backup_archive_hashes"]), 4)
+        self.assertEqual(release.read_record(self.directory / "current.json")["status"], "verified")
+        self.assertFalse((self.directory / "pending.json").exists())
+
+    def test_failure_reference_retains_sensitive_command_details_only_privately(self) -> None:
+        error = release.ReleaseError("Production command failed", category="command_failed",
+                                     operation="docker-run", returncode=17, private_stderr=b"SENSITIVE fixture",
+                                     secondary=release.ReleaseError("Restart failed", operation="compose-up", returncode=23,
+                                                                    private_stderr=b"PRIVATE restart fixture"))
+        with patch.multiple(release, ROOT=self.root, RELEASES=self.directory, STAGE="backup"):
+            proof = release.failure_proof(error)
+        self.assertNotIn("SENSITIVE", json.dumps(proof))
+        record = self.directory / (proof["diagnostic_reference"] + ".json")
+        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        private = json.loads(record.read_text())
+        self.assertEqual((private["stage"], private["operation"], private["returncode"]), ("backup", "docker-run", 17))
+        self.assertEqual(private["private_stderr"], "SENSITIVE fixture")
+        self.assertEqual(private["secondary_failure"]["returncode"], 23)
+        self.assertEqual(private["secondary_failure"]["operation"], "compose-up")
+        self.assertNotIn("PRIVATE", json.dumps(proof))
 
     def test_modified_or_missing_archive_is_refused(self) -> None:
         archive = self.backup / (release.VOLUMES[0] + ".tar.gz")

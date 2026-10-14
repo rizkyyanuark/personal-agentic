@@ -38,8 +38,28 @@ def helper_failure(stderr: bytes) -> str:
         return "Production release command failed; inspect the private server release journal"
     if not isinstance(failure, dict) or failure.get("status") != "failed" or not isinstance(failure.get("error"), str):
         return "Production release command failed; inspect the private server release journal"
+    stages = {"request", "inventory", "preflight", "image-preparation", "stop", "backup",
+              "activation", "verification", "finalization", "recovery"}
+    categories = {"backup_space": "Insufficient capacity for a new state backup; free disk space before retrying",
+                  "backup_volume": "A required backup source is missing, redirected or unreadable",
+                  "runtime_key": "The runtime SSH key is missing or its permissions are invalid",
+                  "command_failed": "A production command failed; inspect its private diagnostic record",
+                  "command_unavailable": "A production command was unavailable or timed out",
+                  "source_restarted": "Release aborted before image replacement; the verified source was restarted",
+                  "source_restart_failed": "Release failed before image replacement; manual source recovery is required",
+                  "candidate_failed": "Candidate startup or verification failed; retained backup and manual recovery are required",
+                  "system_error": "Production encountered a system error; inspect its private diagnostic record"}
+    stage = failure.get("stage")
+    category = failure.get("category")
+    context = " (stage: " + stage + ")" if isinstance(stage, str) and stage in stages else ""
+    reference = failure.get("diagnostic_reference")
+    if isinstance(reference, str) and re.fullmatch(r"release-[0-9a-f]{32}", reference):
+        context += "; diagnostic: " + reference
+    if isinstance(stage, str) and stage in stages and isinstance(category, str) and category in categories:
+        return categories[category] + context
     messages = (
         ("Production has active, queued or waiting runs", "Production has active or queued work; deployment refused before shutdown. Retry after it finishes"),
+        ("Preflight failed", "Release preflight check failed; deployment refused before shutdown. Inspect disk space and volume permissions"),
         ("Another production release is in progress", "Another production release is in progress; deployment refused"),
         ("A previous release is incomplete", "A previous release is incomplete; manual recovery is required"),
         ("Production state changed", "Production state changed during preflight; deployment refused"),
@@ -49,8 +69,8 @@ def helper_failure(stderr: bytes) -> str:
     )
     for prefix, message in messages:
         if failure["error"].startswith(prefix):
-            return message
-    return "Production helper refused release; inspect the private server release journal"
+            return message + context
+    return "Production helper refused release; inspect the private server release journal" + context
 
 
 def verify_proof(proof: object, payload: Mapping[str, str]) -> dict[str, object]:

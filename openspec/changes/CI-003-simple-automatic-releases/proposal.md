@@ -7,8 +7,13 @@ initially requested builds outside the workspace, then chose the existing ARM64
 workspace runners after the GitLab-host feasibility audit found insufficient RAM.
 The GitLab-host migration and capacity increase are superseded. Use existing
 registrations #3 and #4 with bounded resources and one shared personal-agentic
-manager, not new GitLab-host runners. Matching production helper installation and
-status acceptance are complete; merge and the main image/release pipeline remain.
+manager, not new GitLab-host runners.
+
+The pre-merge proof below is a historical record for its stated source revisions
+and environments, not the current phase or release identity. Current follow-up
+acceptance is recorded in [tasks](tasks.md) and [verification](verification.md);
+GitLab Issue #5 owns the work phase. Design choices are recorded in
+[ADR 0001](../../../docs/decisions/0001-personal-agentic-architecture-contract.md).
 
 Checkout: `C:/Users/rizky/.codex/worktrees/cea5/personal-agentic`.
 Branch: `codex/ci-simplify-auto-deploy`; clean base:
@@ -84,7 +89,7 @@ Generated state, owner keys, test databases, screenshots and build logs stay in
 ignored scratch/test volumes; sanitized outcomes belong here. Local app proof,
 ARM64 MR acceptance and installed-helper smoke do not establish the main image
 smoke, merge or a new production release. See the
-[current runbook](../../../docs/DEV-PROD-WORKFLOW.md) for activation and recovery.
+[current runbook](../../../docs/deployment.md) for activation and recovery.
 
 Final local backend image: `sha256:08ebaa266abd1619d36ce1b8835794847446938255fba1c082b034d06a01fbce`.
 Packaged app: `sha256:9b0c87550993db8cebb0445105c6acce919ff89c890e11c6a2a6d5bbf2eb31a5`.
