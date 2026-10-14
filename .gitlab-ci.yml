@@ -65,6 +65,7 @@ ssh_bridge:
   script:
     - python src/backend/tests/antigravity_skills.py
     - python src/backend/tests/run_documents.py
+    - python -B src/backend/tests/process_ownership.py
 
 production_config:
   stage: verify
@@ -72,6 +73,8 @@ production_config:
   script:
     - python -B infra/production/tests/release_test.py
     - python -B infra/ci/tests/deploy_test.py
+    - python -B infra/ops/tests/maintenance_test.py
+    - python -B infra/ops/tests/measure_test.py
     - bash -n infra/production/bootstrap.sh infra/ci/build-backend.sh infra/ci/smoke-image.sh
     - sh -n infra/production/deploy-command.sh infra/ci/buildkit-runc.sh infra/ci/publish-image.sh
   
