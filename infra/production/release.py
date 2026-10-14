@@ -174,7 +174,7 @@ def selected_runtime_key() -> Path:
     require(len(values) == 1 and isinstance(values[0], str),
             "Preflight failed: selected runtime SSH key is ambiguous", category="runtime_key")
     path = Path(values[0])
-    require(path.is_absolute() and path.parent == ROOT / "runtime-ssh" and path.resolve() == path,
+    require(path.is_absolute() and path.is_relative_to(ROOT / "runtime-ssh") and path.resolve() == path,
             "Preflight failed: selected runtime SSH key is redirected", category="runtime_key")
     return path
 
@@ -189,7 +189,9 @@ def preflight(paths: dict[str, Path], *, root: Path | None = None, identity: Pat
     runtime_key = identity if identity is not None else target_root / "runtime-ssh" / "id_ed25519"
     require(runtime_key.is_file() and not runtime_key.is_symlink() and not runtime_key.parent.is_symlink(),
             "Preflight failed: runtime SSH key is unavailable", category="runtime_key")
-    require(not runtime_key.stat().st_mode & 0o077, "Preflight failed: runtime SSH key permissions are too broad", category="runtime_key")
+    key_info = runtime_key.stat()
+    require(key_info.st_uid == 10001 and (key_info.st_mode & 0o7777) in (0o400, 0o600),
+            "Preflight failed: runtime SSH key must belong to UID 10001 with mode 0400 or 0600", category="runtime_key")
     size = 0
     def traversal_error(error: OSError) -> None:
         raise ReleaseError("Preflight failed: backup source is unreadable", category="backup_volume") from error
@@ -199,7 +201,7 @@ def preflight(paths: dict[str, Path], *, root: Path | None = None, identity: Pat
                 path = Path(directory) / name
                 if not path.is_symlink():
                     size += path.stat().st_size
-    size += runtime_key.stat().st_size + home_bytes
+    size += key_info.st_size + home_bytes
     require(shutil.disk_usage(target_root).free >= size + 512 * 1024 * 1024,
             "Preflight failed: insufficient disk space for production state backup", category="backup_space")
 

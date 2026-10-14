@@ -18,9 +18,10 @@ dijalankan; [verification](verification.md) memisahkan hasil lokal dan operasion
   command diagnostics termasuk kedua penyebab bila recovery sekunder gagal.
   Guard refusal juga mempertahankan context yang diizinkan. Secret fixture
   tidak masuk public proof atau pesan client.
-- [x] T-CI003-4 / R2,R3: Linux helper 43 dan client 11 test; isolated Docker backup
+- [x] T-CI003-4 / R2,R3: Linux helper final 46 dan client 11 test; isolated Docker backup
   memakai image ARM64 nyata, org/SQLite aplikasi nyata, actual Compose quoted-key
-  resolution, stopped home copy, private archive validation dan cleanup.
+  resolution termasuk key nested, owner/mode bootstrap, stopped home copy,
+  private archive validation dan cleanup.
 
 Bukti dan identitas source: [ev-011](../../../docs/evidence/ev-011-ci-003-managed-state-backup.md).
 Koreksi atas patch sebelumnya tetap tersimpan pada [ev-006](../../../docs/evidence/ev-006-current-contract-review.md)

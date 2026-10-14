@@ -60,8 +60,8 @@ def main() -> None:
             connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
             connection.execute("INSERT INTO schema_version VALUES (1)")
         (paths[volumes[2]] / "source-sentinel.txt").write_text("Internal platform workdir fixture\n")
-        key = root / "runtime-ssh" / "selected-key"
-        key.parent.mkdir(mode=0o700)
+        key = root / "runtime-ssh" / "keys" / "selected-key"
+        key.parent.mkdir(parents=True, mode=0o700)
         key.write_text("Disposable key fixture; never used for authentication\n")
         key.chmod(0o400)
         os.chown(key, 10001, 10001)
@@ -103,6 +103,7 @@ def main() -> None:
         transaction = {"backup": str(directory), "previous": {"image": args.image}, "schema_before": schema}
         hashes = release.verify_recovery_backup(transaction, root=root)
         assert len(hashes) == 4 and manifest["format"] == 2
+        assert (directory / "runtime-ssh-id_ed25519").read_bytes() == key.read_bytes()
         with tarfile.open(directory / "platform-home.tar") as archive:
             member = next(item for item in archive.getmembers() if item.name.endswith(".codex/config.toml"))
             assert archive.extractfile(member).read() == b'model = "fixture-model"\n'
@@ -114,7 +115,8 @@ def main() -> None:
         print(json.dumps({"status": "passed", "app_health": 200, "authenticated_state": 200,
                           "archives_verified": 4, "controller_home_config_verified": True,
                           "internal_workdir_verified": True, "private_archive_mode": "0600",
-                          "quoted_selected_key_verified": True, "real_app_sqlite_schema_unchanged": True,
+                          "quoted_selected_key_verified": True, "nested_selected_key_verified": True,
+                          "runtime_key_owner": 10001, "runtime_key_mode": "0400", "real_app_sqlite_schema_unchanged": True,
                           "matrix_data": "real SQLite and media fixture, no Synapse execution claim",
                           "helper_sha256": hashlib.sha256((Path(__file__).parents[1] / "release.py").read_bytes()).hexdigest(),
                           "mocks": 0}))

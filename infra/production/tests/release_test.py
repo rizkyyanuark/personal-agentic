@@ -212,6 +212,7 @@ class ReleaseFixtures(unittest.TestCase):
         runtime_ssh.mkdir(mode=0o700)
         (runtime_ssh / "id_ed25519").write_text("isolated fixture key\n")
         os.chmod(runtime_ssh / "id_ed25519", 0o600)
+        os.chown(runtime_ssh / "id_ed25519", 10001, 10001)
         self.old_image = release.REPOSITORY + "@sha256:" + "1" * 64
         self.image = release.REPOSITORY + "@sha256:" + "2" * 64
         self.svg = "3" * 64
@@ -497,6 +498,40 @@ class BackupAndDatabaseTests(ReleaseFixtures):
         with self.assertRaisesRegex(release.ReleaseError, "Preflight failed: runtime SSH key is unavailable"):
             release.preflight(self.paths, root=self.root)
 
+    def test_preflight_accepts_only_bootstrap_key_owner_and_private_modes(self) -> None:
+        key = self.root / "runtime-ssh" / "id_ed25519"
+        for mode in (0o400, 0o600):
+            key.chmod(mode)
+            release.preflight(self.paths, root=self.root)
+        for owner, mode in ((0, 0o400), (10001, 0), (10001, 0o100), (10001, 0o700),
+                            (10001, 0o640), (10001, 0o4400)):
+            os.chown(key, owner, owner)
+            key.chmod(mode)
+            with self.subTest(owner=owner, mode=oct(mode)), self.assertRaisesRegex(release.ReleaseError, "UID 10001"):
+                release.preflight(self.paths, root=self.root)
+
+    def test_selected_key_accepts_nested_file_but_refuses_redirected_path(self) -> None:
+        key = self.root / "runtime-ssh" / "keys" / "selected-key"
+        key.parent.mkdir(mode=0o700)
+        key.write_text("isolated nested fixture key\n")
+        key.chmod(0o400)
+        os.chown(key, 10001, 10001)
+        alias = key.with_name("alias")
+        alias.symlink_to(key)
+        redirected_parent = self.root / "runtime-ssh" / "redirected"
+        redirected_parent.symlink_to(key.parent, target_is_directory=True)
+        for selected in (key, alias, redirected_parent / key.name, self.root / "other-key"):
+            config = {"services": {"platform": {"volumes": [{"target": "/run/ae-ssh/id_ed25519",
+                       "source": str(selected)}]}}}
+            with self.subTest(selected=str(selected)), patch.object(release, "ROOT", self.root), \
+                 patch.object(release, "compose", return_value=json.dumps(config).encode()):
+                if selected == key:
+                    self.assertEqual(release.selected_runtime_key(), key)
+                    release.preflight(self.paths, root=self.root, identity=key)
+                else:
+                    with self.assertRaisesRegex(release.ReleaseError, "redirected"):
+                        release.selected_runtime_key()
+
 
 class OrchestrationPreflightTests(ReleaseFixtures):
     @contextmanager
@@ -506,7 +541,7 @@ class OrchestrationPreflightTests(ReleaseFixtures):
         release.atomic(environment, ("AE_PLATFORM_IMAGE=" + image + "\nAE_SSH_KEY_FILE=" + str(self.root / "runtime-ssh" / "id_ed25519") + "\n").encode())
         release.atomic(configuration, (SOURCE.parent / "compose.yaml").read_bytes())
         registry = self.root / "registry-auth"
-        registry.mkdir(mode=0o700)
+        registry.mkdir(mode=0o700, exist_ok=True)
         release.atomic(registry / "config.json", b"{}\n")
         release.atomic(self.root / "release.lock", b"")
         with patch.multiple(release, ROOT=self.root, ENV_FILE=environment, COMPOSE=configuration, RELEASES=self.directory), \
@@ -539,6 +574,20 @@ class OrchestrationPreflightTests(ReleaseFixtures):
                 release.main()
             self.assertEqual(release.image_reference(), self.old_image)
         self.assertFalse((self.directory / "pending.json").exists())
+
+    def test_invalid_key_owner_or_mode_refuses_main_before_pull_stop_or_replacement(self) -> None:
+        release.save(self.directory / "current.json", self.current)
+        key = self.root / "runtime-ssh" / "id_ed25519"
+        for owner, mode in ((0, 0o400), (10001, 0)):
+            os.chown(key, owner, owner)
+            key.chmod(mode)
+            with self.subTest(owner=owner, mode=oct(mode)), \
+                 self.installation({**self.incoming, "action": "promote"}, self.old_image), \
+                 patch.object(release, "docker", self.docker_inventory):
+                with self.assertRaisesRegex(release.ReleaseError, "UID 10001"):
+                    release.main()
+                self.assertEqual(release.image_reference(), self.old_image)
+            self.assertFalse((self.directory / "pending.json").exists())
 
     def test_recover_existing_real_backup_needs_no_new_backup_capacity_or_key(self) -> None:
         self.write_ledger()

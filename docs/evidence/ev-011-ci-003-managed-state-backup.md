@@ -102,3 +102,33 @@ DB restore atau restart service dalam pemasangan ini.
 Main image source follow-up masih memerlukan MR/main CI terpisah. Installed
 helper adalah hasil operasional yang terbukti, bukan proof bahwa frontend baru
 telah deployed.
+
+## Final bootstrap alignment — 14 Oktober 2026
+
+Review menemukan perbedaan nyata dengan bootstrap: selector helper hanya menerima
+key langsung di `runtime-ssh`, sementara bootstrap mengizinkan subfolder; preflight
+juga belum mewajibkan UID10001 dan mode0400/0600. Helper kini menerima descendant
+canonical tanpa symlink/redirect serta memeriksa owner/mode yang sama dengan bootstrap.
+Linux helper final lulus **46 tests/12.008s**. Regresi filesystem dan entrypoint
+menolak owner root, mode000 dan mode lain yang tidak didukung sebelum pull/stop
+atau penggantian journal. Client tetap source yang sudah lulus 11 tes.
+
+| Final file | SHA-256 |
+| --- | --- |
+| release.py | d80be0d44bd75537ecf6d713308260d061f61f369db3468099d7a71b718b230b |
+| release_test.py | e921a95ef06d3d279a4ba20600706b44c657da4b734771402b715a7b3724c1df |
+| docker_backup_smoke.py | 77e4a3bb1d320ce636ed2e9c0d657271bb1981ee75c267e86e670d3109b2d161 |
+
+Actual Docker smoke diulang pada hash ini: health/state200, empat archive verified,
+home config/internal workdir ditemukan, quoted nested selected key cocok dengan
+salinan backup, UID10001/mode0400 dan archive0600. Actual application SQLite schema
+tetap sama; fixture container/tiga volume dibersihkan, existing IDs unchanged.
+Tidak ada build/pull/provider turn atau shutdown produksi.
+
+Exact helper final dipasang atomik root:root0755 setelah backup source5854e168 ke
+`/opt/personal-agentic/helper-backups/personal-agentic-release-20261014T074216Z-5854e1689348`.
+Actual installed status: health/UI/authenticated state/cockpit200, anonymous,
+invalid login dan revoked logout401; active0/pending null. Empat archive produksi
+legacy serta actual selected-key/capacity lolos. Container IDs/start times,
+restart counts dan journal bytes tetap sama. Hasil43-test/hash5854 di atas
+adalah bukti revisi terdahulu; hash final ini merupakan sumber MR.
