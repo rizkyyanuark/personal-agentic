@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Circle, LoaderCircle } from "lucide-react";
 import { api } from "./api";
 import type { Run } from "./bindings/Run";
-import type { CodexSettings } from "./bindings/CodexSettings";
+import { harnessNames } from "./runtimeCatalog";
 import { isActiveRun } from "./runStatus";
 
 export function ChatActivity({ runs, questions = [], onOpen }: { runs: Run[]; questions?: string[]; onOpen: (run: Run) => void }) {
@@ -21,7 +21,7 @@ export function ChatActivity({ runs, questions = [], onOpen }: { runs: Run[]; qu
   </button>;
 }
 
-export function MessageModelBadge({ runId, run, catalog }: { runId: string; run?: Run; catalog: CodexSettings | null }) {
+export function MessageModelBadge({ runId, run }: { runId: string; run?: Run }) {
   const [loaded, setLoaded] = useState<Run | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -40,8 +40,8 @@ export function MessageModelBadge({ runId, run, catalog }: { runId: string; run?
   const modelArg = (modelIndex >= 0 ? source.arguments[modelIndex + 1] : "") || source.profile.model;
   const [model, variant] = source.profile.harness === "opencode" ? modelArg.split("#") : [modelArg, undefined];
   const effort = variant || source.arguments.find((arg) => arg.startsWith("model_reasoning_effort="))?.split("=").slice(1).join("=").replaceAll('"', "") || source.profile.reasoning;
-  const displayName = source.model_display_name || catalog?.models.find((option) => option.slug === model)?.display_name || model;
-  return <span className="model-badge" title={`${source.profile.harness === "opencode" ? "OpenCode" : "Codex"} · Recorded for this reply: ${model || "model not recorded"} / ${effort || (source.profile.harness === "opencode" ? "model default" : "reasoning not recorded")}`}>
-    {displayName || "Model not recorded"}<span aria-hidden="true"> / </span><span className="reasoning-name">{effort || (source.profile.harness === "opencode" ? "default" : "not recorded")}</span>
+  const displayName = source.model_display_name || model;
+  return <span className="model-badge" title={`${harnessNames[source.profile.harness]} · Recorded for this reply: ${model || "model not recorded"} / ${effort || (source.profile.harness === "codex" ? "reasoning not recorded" : "model default")}`}>
+    {displayName || "Model not recorded"}<span aria-hidden="true"> / </span><span className="reasoning-name">{effort || (source.profile.harness === "codex" ? "not recorded" : "default")}</span>
   </span>;
 }

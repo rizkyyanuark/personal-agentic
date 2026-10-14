@@ -1,54 +1,45 @@
-# Proposal: CAT-001 — Runtime-Aware Model Catalog & Multi-Harness
+# Proposal: CAT-001 — Katalog model sesuai runtime
 
-Tanggal: 14 Oktober 2026 (Asia/Jakarta).  
-ADR Rujukan: [0001-personal-agentic-architecture-contract](../../../docs/decisions/0001-personal-agentic-architecture-contract.md).  
-Bukti Audit: [`docs/evidence/ev-004-architecture-proposal-review.md`](../../../docs/evidence/ev-004-architecture-proposal-review.md).
+Issue: [GitLab #6](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/6).
 
----
+Tanggal: 14 Oktober 2026 (Asia/Jakarta). Keputusan: [ADR 0001](../../../docs/decisions/0001-personal-agentic-architecture-contract.md). Dasar inspeksi: [ev-006](../../../docs/evidence/ev-006-current-contract-review.md).
 
-## 1. Identitas dan Kondisi Awal
+## Masalah dan hasil
 
-- **Change ID**: `CAT-001-runtime-model-catalog`
-- **Tautan Arsitektur**: [architecture-plan.md](../../../docs/architecture-plan.md)
-- **Komponen Terdampak**:
-  - `src/frontend/src/App.tsx`
-  - `src/frontend/src/components/NewAgentDialog.tsx`
-  - `src/frontend/src/runtimeCatalog.ts`
-  - `src/backend/src/api.rs`
+Dashboard sebelumnya memanggil `/codex/settings` setelah login melalui error handler global. Consumer tunggalnya adalah fallback nama pada badge reply. Kegagalan cache controller menjadi banner dashboard walaupun pengguna bekerja melalui harness atau workstation lain. Profile sudah memakai `/harness/settings`; dialog pembuatan agen hanya memiliki model dari capabilities registered worker, sehingga katalog lokal/SSH belum dimuat.
 
-Kondisi awal:
-- Dashboard frontend di `src/frontend/src/App.tsx:292` secara global memanggil `/codex/settings` tanpa konteks runtime/host.
-- Jika controller lokal tidak memiliki instalasi Codex, pemanggilan ini memicu banner error merah `models_cache.json` di dashboard, padahal pengguna mungkin menggunakan runtime remote SSH atau harness Antigravity yang valid.
-- Usulan sebelumnya untuk mem-bind-mount seluruh direktori host `.codex` ke kontainer platform ditolak karena mengekspos file kredensial sensitif (`auth.json`).
+Pengguna tetap memilih beberapa harness per workstation. Katalog dan kegagalannya mengikuti konteks yang dipilih. Badge reply menggunakan identitas model yang direkam saat run, dengan ID tersimpan sebagai fallback; sebuah katalog controller hari ini tidak mengganti identitas riwayat lintas workstation.
 
----
+## Scope dan batas
 
-## 2. Masalah, Hasil, dan Scope
+- Hapus pemanggilan controller Codex global yang tidak diperlukan.
+- Gunakan `/harness/settings` untuk pembuatan agen lokal, SSH, dan registered worker, dengan konteks project efektif bila diwariskan.
+- Pertahankan resolver/auth server existing. Controller/SSH tetap hanya untuk bootstrap owner; tenant memakai registered runtime miliknya sendiri. Tidak menambah mount kredensial.
+- Tampilkan loading/error/Refresh pada pemilihan model; jangan memakai katalog konteks sebelumnya atau mengabaikan error konteks aktif.
+- Pertahankan saved harness/model/reasoning, model unavailable, native session, dan recorded reply identity. Discovery tidak menjalankan prompt atau membuat session.
 
-### Hasil Pengguna yang Ditargetkan
-1. Ketersediaan katalog model mengikuti *effective runtime* (lokal, SSH, atau registered worker) dan harness yang aktif.
-2. Tidak ada banner error palsu di UI ketika runtime non-Codex dipilih.
-3. Kredensial host terlindungi dan tidak dibocorkan ke kontainer platform.
+Tidak mengubah adapter/provider, memilih satu harness global, memindahkan kredensial, membuat fallback model otomatis, atau menjanjikan autentikasi/quota dari metadata katalog. Pemeriksaan koneksi tetap melalui alur existing. Endpoint pembuatan menerima runtime/host, belum path project; discovery provider OpenCode yang bergantung konfigurasi folder belum tercakup dan tidak diklaim terverifikasi. Profile yang sudah memiliki agen tetap memakai resolver `agent_id` untuk workdir efektif.
 
-### Scope
-- Audit dan perbaikan pemanggilan katalog model global di `src/frontend/src/App.tsx`.
-- Pemanfaatan endpoint `/harness/settings` yang sudah mendukung parameter harness, agent, dan host context.
-- Penanganan fallback yang bersih di frontend: ketiadaan cache model lokal tidak boleh merusak alur runtime lain yang valid.
+Minimum source: `src/frontend/src/App.tsx`, `src/frontend/src/NewAgentDialog.tsx`, `src/frontend/src/ChatActivity.tsx`. RuntimeSelect/HarnessSelect, backend resolver, auth dan catalog parser dipakai ulang. Bukti dan test berada bersama kontrak ini serta `src/frontend/tests/runtime-catalog.mjs`.
 
-### Non-Goal
-- Memaksa seluruh agen menggunakan satu harness default.
-- Mem-mount direktori `.codex` host ke kontainer.
+## Requirement dan skenario
 
----
+### REQ-CAT-001-1 — Error mengikuti konteks pilihan
 
-## 3. Requirement dan Skenario Penerimaan
+GIVEN controller tidak memiliki cache Codex, WHEN dashboard dibuka, THEN dashboard tidak mengambil katalog Codex global atau menampilkan error cache yang tidak terkait. WHEN pengguna memilih Codex pada controller tersebut, THEN dialog/Profile menampilkan kegagalan sebenarnya dan model lama tidak dapat dipakai untuk membuat agen. Refresh dan pemilihan harness/workstation lain memuat ulang katalog konteks itu.
 
-### REQ-CAT-001-1: Resolusi Katalog Sesuai Runtime Aktif
-- **GIVEN** Pengguna memilih runtime SSH atau registered worker.
-- **WHEN** Daftar model dimuat pada modal pembuatan agen atau profile.
-- **THEN** Katalog model diambil dari context runtime tersebut, bukan dari controller lokal.
+### REQ-CAT-001-2 — Katalog mengikuti runtime efektif
 
-### REQ-CAT-001-2: Isolasi Kredensial Autentikasi
-- **GIVEN** Kontainer platform berjalan di server produksi.
-- **WHEN** File `.codex` diperiksa di dalam kontainer.
-- **THEN** Tidak ada akses baca langsung ke token atau `auth.json` milik host.
+GIVEN Local tanpa `ssh_host`, saved SSH workstation, registered worker online, atau workdir project, WHEN dialog/Profile dimuat, THEN `/harness/settings` menerima harness dan runtime/host efektif. Registered runtime offline/revoked tidak dapat membuat agen memakai capabilities yang tersimpan. Data yang datang terlambat dari pilihan lama tidak mengganti pilihan baru.
+
+### REQ-CAT-001-3 — Akses dan kredensial tetap terbatas
+
+GIVEN anonymous atau tenant, WHEN katalog diminta, THEN autentikasi dan batas controller/registered runtime existing tetap berlaku. Metadata diambil melalui adapter; seluruh `.codex` host tidak di-mount. Missing cache/config/CLI tetap error dari backend yang sebenarnya, bukan katalog buatan.
+
+### REQ-CAT-001-4 — Identitas dan state tetap
+
+GIVEN saved model tidak tersedia, WHEN Profile dibuka atau refresh gagal, THEN model/reasoning tetap tersimpan dan model unavailable terlihat tanpa substitusi otomatis. GIVEN reply beberapa harness/runtime, WHEN katalog saat ini berubah atau hilang, THEN badge memakai recorded name/ID dan harness run. Discovery atau perubahan form yang belum disimpan tidak membuat/mengubah native session atau saved profile.
+
+## Penerimaan dan release
+
+Lint dan TypeScript/build mendukung bukti browser/API pada service nyata dengan organization dan data terisolasi. Uji latency hanya menunda response HTTP sebenarnya, tidak membuat payload sukses. Catat tiap transport/auth case sebagai Passed, Inspected, Failed atau Not run; fixture historical/catalog metadata tidak membuktikan eksekusi provider. [Verification](verification.md) menyimpan hasil versi ini. Merge, image dan production proof dicatat terpisah oleh koordinator; tidak dianggap selesai hanya karena build lokal lulus.
