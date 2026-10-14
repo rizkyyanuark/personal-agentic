@@ -1,6 +1,7 @@
 # Proposal: AGT-001 — concurrency and process ownership audit
 
 Change ID: `AGT-001-subagent-concurrency-and-process-guard`.
+Canonical issue: [GitLab #8](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/8).
 Decision: [ADR 0003](../../../docs/decisions/0003-subagent-concurrency-and-process-guard.md).
 Evidence: [AGT-001 process audit](../../../docs/evidence/ev-007-agt-001-process-ownership-audit.md).
 
@@ -8,7 +9,9 @@ Evidence: [AGT-001 process audit](../../../docs/evidence/ev-007-agt-001-process-
 
 The initial proposal assumed process ownership and delegation controls were absent.
 The production code already implements them. This change verifies those controls
-and fixes only a reproduced defect. Main and side chats keep their independent
+and fixes only a reproduced defect. A subsequent real API audit reproduced
+persistent adopted-child zombies when the container runs the application as PID 1.
+The fix adds Docker init to the production platform service. Main and side chats keep their independent
 sessions and can run concurrently. Concurrent writers use explicitly selected
 separate worktrees when needed; the platform does not create worktrees automatically.
 
@@ -64,6 +67,18 @@ cross-chat recipients cannot relay another cross-chat invocation. The limit of
 three assignments is breadth per coordinator result, not a three-level depth cap.
 Explicit authorized action-board invocations follow their existing permissions
 and are not silently reclassified as cross-chat handoffs.
+
+### REQ-AGT-001-4: reap adopted children in the platform container
+
+Given the platform runs inside its production Docker service, when a local command
+with a child is stopped, then the direct leader and adopted child are reaped and
+an unrelated command continues. Enable `init: true` on the platform service so
+Docker's PID 1 forwards signals and reaps adopted descendants. The requirement is
+run-scoped; it does not require the entire host to have zero zombies. The real API
+regression requires the captured child identity to be gone, rather than allowing
+an indefinitely retained `Z` state. This changes container configuration only.
+
+Reference: [Docker Compose init](https://docs.docker.com/reference/compose-file/services/#init).
 
 ## Scope and non-goals
 

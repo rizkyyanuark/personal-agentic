@@ -14,9 +14,15 @@
 - [ ] T3-4: run `routing_validates_targets_and_rolls_back_partial_handoffs` against
   actual persisted queue/session state; inspect separate one-hop cross-chat and
   summary/review guards without claiming a general three-level recursion limit.
-- [ ] T3-5: consolidate candidate-app verification and any available native Windows,
+- [x] T3-5: consolidate candidate-app verification and any available native Windows,
   actual SSH and registered-worker execution. Record unavailable paths honestly;
-  fix production code only if a reproducible ownership/routing defect is found.
+  Actual local Terminal API Stop/auth/ownership and independent process preservation passed.
+  Browser agent Stop, native Windows and registered-worker execution remain explicitly
+  unexecuted paths, rather than inferred parity.
+- [x] T3-6: reproduce retained adopted-child zombies under application PID 1,
+  add `init: true` only to the platform Compose service, and verify reaping through
+  the actual API on the same immutable image with Docker init. Render the changed
+  production Compose using real Docker Compose; clean only the owned tmpfs fixture.
 
 Commands from the repository root:
 
@@ -31,3 +37,15 @@ The bridge regression requires Linux `/proc`, Python 3.11+ and Git. It makes no
 provider request and performs no production-host operation. Its discovery-only
 Codex fixture exits with failure if invoked. The process mechanism, bridge
 entrypoint, real shell, child processes, signals and receipts are not mocked.
+
+Candidate-only native API regression, with a private owner key file and a valid
+local catalog already configured:
+
+```sh
+python3 -B src/backend/tests/terminal_process_ownership.py --url http://127.0.0.1:18770 --owner-file /private/candidate-owner.key --workdir /workdir/catalog-acceptance --model agt-fixture-primary --reasoning medium --require-reaped-child
+```
+
+This script creates paused audit profiles, runs only explicit local shell commands,
+checks HTTP authentication and run ownership, stops its commands and archives its
+profiles. It never invokes an agent/provider or an SSH runtime. Use an isolated
+Linux candidate, not a shared production organization.
