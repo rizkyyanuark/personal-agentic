@@ -20,8 +20,8 @@ Date: 14 October 2026 (Asia/Jakarta).
 | REQ-AGT-001-4 fixed container | Same immutable image with Docker init: leader 55 and child 58 gone; control 65 sleeping and streaming | Passed: Stop 1.500 s |
 | Production Compose configuration | Real `docker compose config --format json`: platform init=true; Matrix unchanged | Passed |
 | Native Windows owner and registered-worker path | Production spawn/resource/runtime/fleet source | Inspected; transport execution not run |
-| REQ-AGT-001-2 main/side and same-session serialization | Existing SQLite integration test identified | Not run: consolidated backend CI pending |
-| REQ-AGT-001-3 coordinator rollback/limits | Existing SQLite integration test identified | Not run: consolidated backend CI pending |
+| REQ-AGT-001-2 main/side and same-session serialization | Actual pipeline61/job255 trace; unchanged Rust tree | Passed on ec70 baseline; latest MR CI remains a separate gate |
+| REQ-AGT-001-3 coordinator rollback/limits | Actual pipeline61/job255 trace; unchanged Rust tree | Passed on ec70 baseline; latest MR CI remains a separate gate |
 | One-hop cross-chat, summary/review guards | Production tool and coordinator code | Inspected |
 | Browser/HTTP agent-run Stop | Different endpoint from the exercised Terminal API | Not run: no agent/provider turn executed |
 | Actual SSH runtime/native Windows/registered worker execution | Different transport/OS from local Unix regression | Not run: no claim of transport parity |

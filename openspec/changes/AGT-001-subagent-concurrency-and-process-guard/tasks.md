@@ -9,11 +9,13 @@
   processes for cancel, timeout, stdin EOF, heartbeat stall and a completed leader
   leaving a child. Check exact PID/PGID/start-time identities and preserve an
   unrelated process group. Use an isolated disposable HOME/workdir.
-- [ ] T3-3: run `side_chats_isolate_sessions_context_queues_and_reset` against the
+- [x] T3-3: run `side_chats_isolate_sessions_context_queues_and_reset` against the
   real SQLite-backed API submission path. Preserve main/side parallelism and same-session serialization.
-- [ ] T3-4: run `routing_validates_targets_and_rolls_back_partial_handoffs` against
+- [x] T3-4: run `routing_validates_targets_and_rolls_back_partial_handoffs` against
   actual persisted queue/session state; inspect separate one-hop cross-chat and
   summary/review guards without claiming a general three-level recursion limit.
+  Both tests Passed in actual pipeline61/job255, whose Rust source tree is byte
+  identical to this change. The integrated MR still runs the full backend gate.
 - [x] T3-5: consolidate candidate-app verification and any available native Windows,
   actual SSH and registered-worker execution. Record unavailable paths honestly;
   Actual local Terminal API Stop/auth/ownership and independent process preservation passed.

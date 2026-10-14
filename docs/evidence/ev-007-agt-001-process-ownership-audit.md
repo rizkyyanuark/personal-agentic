@@ -182,3 +182,16 @@ requires the normal reviewed container recreation/deployment. Consolidated backe
 CI still needs to record the two real SQLite queue/routing regression outputs.
 Agent-run browser Stop, native Windows and registered-worker execution remain
 separate unexecuted paths, not inferred success from this Linux Terminal proof.
+## Corroborated SQLite acceptance — 14 October 2026
+
+Read the actual backend job255 trace of pipeline61 on ec70e328:
+side_chats_isolate_sessions_context_queues_and_reset and
+routing_validates_targets_and_rolls_back_partial_handoffs both `ok`;
+145 tests passed, 0 failed, 0 ignored in8.07s. No test-system mock replaces the
+SQLite store; provider execution is outside those queue tests.
+
+`git rev-parse HEAD:src/backend/src ec70e328:src/backend/src` returned the same
+tree twice: `8040149be0f51a92355bab770982e2839a69a726`. This change modifies only
+container init and Python/browser proof, not Rust/Cargo/schema behavior. This
+accepts those unchanged controls on their exact source identity; the integrated
+MR still runs the latest branch's full backend CI separately.
