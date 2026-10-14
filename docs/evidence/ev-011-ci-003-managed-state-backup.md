@@ -80,6 +80,25 @@ persistent. Kapasitas memakai logical source size +512 MiB; state dapat bertamba
 setelah pengukuran dan error backup tetap harus ditangani. Main/drain race serta
 jeda stop/backup/restart tetap merupakan keputusan CI-003.
 
-Installed helper dan main image release berikutnya belum dibuktikan oleh hasil
-lokal ini. Hasil operasional berikut ditambahkan dengan identitas source dan
-journal/image yang diperiksa; bukan mengubah proof historis menjadi hasil baru.
+## Installed-source proof — 14 Oktober 2026
+
+Source yang diuji pada commit `d31ed47` dipasang atomik di bawah release lock:
+root:root0755, SHA-256 5854e16893487a764917ba8e47a807be03170027623024b80e056f08267ba96e.
+Source lama 8b4d9b... disimpan root-private sebelum penggantian. Actual installed
+status menghasilkan health200, anonymous401, invalid-login401, owner-login200,
+state200, cockpit200, UI200 dan logout-revocation401; SVG hash tetap sama.
+Active operations0, pending null, current SHA ec70e328. Container IDs/start times,
+restart counts dan current/previous/pending journal bytes tetap sama.
+
+Actual installed CLI `recover` dengan digest/SHA/SVG current mengembalikan
+`unchanged: true`; auth/state/cockpit/UI smoke tetap Passed. Tidak ada promotion
+atau automatic restore dalam jalur ini.
+
+Validator exact installed text menerima keempat arsip backup produksi legacy
+yang direferensikan current record. Selected Compose key serta kapasitas backup
+actual Passed. Tidak ada arsip produksi yang dibuat/dihapus, image yang diganti,
+DB restore atau restart service dalam pemasangan ini.
+
+Main image source follow-up masih memerlukan MR/main CI terpisah. Installed
+helper adalah hasil operasional yang terbukti, bukan proof bahwa frontend baru
+telah deployed.

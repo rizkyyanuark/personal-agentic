@@ -2,7 +2,7 @@
 
 Issue: [GitLab #5](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/5) | [Proposal](proposal.md) | [Tasks](tasks.md).
 
-Pemeriksaan terbaru berada pada [ev-011](../../../docs/evidence/ev-011-ci-003-managed-state-backup.md): helper43/client11 tests dan actual stopped-container backup Passed. Installed helper, CI dan main activation mempunyai gate terpisah. Fase pekerjaan berada pada Issue.
+Pemeriksaan terbaru berada pada [ev-011](../../../docs/evidence/ev-011-ci-003-managed-state-backup.md): helper43/client11 tests, actual stopped-container backup serta installed helper/legacy-production-backup validation Passed. CI dan main activation mempunyai gate terpisah. Fase pekerjaan berada pada Issue.
 
 ## Review historis sebelum perbaikan
 
