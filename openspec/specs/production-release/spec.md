@@ -70,10 +70,23 @@ outside the controller backup boundary.
 Activation SHALL verify running image identity, health, owner authentication,
 application state, cockpit, UI, source asset and logout revocation. Failure SHALL
 retain diagnostic context privately while CI receives a bounded safe category,
-stage and diagnostic reference. A pre-replacement failure SHALL restart the source
-only when its verified image, schema, state and journals are unchanged. Recovery
+stage and diagnostic reference. A pre-replacement failure SHALL resume existing
+source containers with `compose start` only when its verified image, schema, state
+and journals are unchanged, preserving their writable home without reconciling
+pending Compose changes. Successful activation SHALL apply the image/configuration
+with `compose up` after backup completes. Recovery
 SHALL verify the running candidate; image rollback SHALL require explicit database
 risk acknowledgment and compatible recorded schema.
+
+#### Scenario: Stopped-state backup fails before image replacement
+
+- **WHEN** backup fails and the verified source guards still hold
+- **THEN** the helper starts existing source containers, verifies them and retains any incomplete private backup without recreating containers
+
+#### Scenario: An existing source container cannot start
+
+- **WHEN** a container is missing or its start fails during source resume
+- **THEN** the helper reports source-restart failure and retains both diagnostics for operator recovery without creating a replacement
 
 #### Scenario: Candidate verification fails
 

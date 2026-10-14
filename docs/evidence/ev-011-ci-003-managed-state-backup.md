@@ -132,3 +132,87 @@ invalid login dan revoked logout401; active0/pending null. Empat archive produks
 legacy serta actual selected-key/capacity lolos. Container IDs/start times,
 restart counts dan journal bytes tetap sama. Hasil43-test/hash5854 di atas
 adalah bukti revisi terdahulu; hash final ini merupakan sumber MR.
+
+## Source resume setelah backup gagal: 14 Oktober 2026
+
+Review lanjutan menemukan bahwa fallback sebelum image diganti memakai
+`compose up -d --no-build --pull never`. Perubahan Compose yang belum diterapkan,
+seperti `init: false` menjadi `true`, membuat perintah itu menciptakan ulang
+container meskipun image sama. Writable home dapat hilang ketika backup home
+justru belum selesai. Ini merupakan defect pada source yang diuji sebelumnya,
+bukan asumsi dari jumlah proses atau health container.
+
+Fallback kini memakai `compose start matrix platform` untuk melanjutkan container
+yang sudah ada. Guard verified image, schema, active work dan journal tetap
+diperiksa sebelum dan sesudahnya; smoke serta running-image verification tetap
+dijalankan. Aktivasi normal setelah backup berhasil tetap memakai `compose up`
+untuk menerapkan image/configuration baru. Container yang tidak ada menghasilkan
+`source_restart_failed` dan diagnostic kegagalan backup beserta start, tanpa
+menciptakan penggantinya.
+
+Identitas revisi source resume:
+
+| File | SHA-256 |
+| --- | --- |
+| release.py | 6e2dbe681ec46db8271c107d4ef2b996cae55ee2aa26b52d31871f9d633ac22f |
+| release_test.py | 99381e4dea5a8bd6bbf064ef930680ba3ab378b8703588d272529b7b0807bcca |
+| Isolated Compose mechanism script | 7a6cec387361b8398d91d51ee96241741d7396bb3a3e9b568c173e02b88620a0 |
+
+Actual Linux ARM64 Docker proof memakai image digest 84cae564 yang sudah ada,
+entrypoint shell dengan writable-home sentinel, network none, batas 0.05 CPU,
+RAM 32 MiB dan RAM+swap 64 MiB. Ini proof mekanisme Compose, bukan agent/provider
+execution. Perubahan fixture `init: false` menjadi `true` memberikan hasil:
+
+| Pemeriksaan | Hasil nyata |
+| --- | --- |
+| `compose stop`, perubahan init, `compose start` | Passed: container ID sama; writable-home sentinel tetap ada; init lama tetap berlaku |
+| `compose stop`, `compose up -d --no-build --pull never` | Passed reproduction: image sama, container ID berubah, init baru aktif dan sentinel hilang |
+| `compose start` tanpa container service | Passed refusal: exit 1, `service "platform" has no container to start`; tidak ada container baru |
+| Cleanup dan produksi | Passed: exact fixture dibersihkan; production container IDs/start times/restart counts dan existing volumes tetap sama |
+| Linux helper suite | Passed: 47 tests/9.603s pada source resume di atas |
+
+Regresi menjalankan actual `main()` dan `backup()` dengan SQLite, private journal,
+directory dan tiga tar archive nyata. Boundary Docker tar menulis archive dari
+source fixture; boundary Docker cp meninggalkan partial home archive lalu gagal.
+Kasus start berhasil dan start gagal memeriksa prior config/journal bytes tetap,
+private partial archive tetap 0600 tanpa manifest sukses, `up` tidak dipanggil,
+serta kedua diagnostic tetap tersedia pada kegagalan sekunder. Hanya transport
+Docker/HTTP eksternal yang diganti dalam suite; mekanisme Compose di tabel memakai
+daemon nyata tanpa mocks.
+
+Proof JSON privat berada pada
+`org/.state/completion-20261014/compose_source_restart_proof.json`; hasil tersanitasi
+dan source hashes dicatat di sini. Perintah suite:
+`python3 -B infra/production/tests/release_test.py`. Fixture Docker memakai
+`compose stop`, `compose start`, `compose up -d --no-build --pull never`, inspect
+identitas dan pemeriksaan sentinel. Tidak ada image pull/build, provider turn,
+shutdown produksi atau penghapusan volume produksi.
+
+Perbedaan perilaku ini sesuai dokumentasi Docker untuk
+[up](https://docs.docker.com/reference/cli/docker/compose/up/) dan
+[start](https://docs.docker.com/reference/cli/docker/compose/start/).
+Hasil 46 tests dan hash d80be0d4 sebelumnya tetap menjadi bukti revisi alignment.
+Pemasangan helper 6e2dbe68 dan CI/aktivasi main terbaru dicatat terpisah; proof
+fixture dan suite ini tidak menyatakan revisi tersebut telah deployed.
+
+## Installed source resume — 14 Oktober 2026, 12:48 UTC
+
+Exact helper `6e2dbe681ec46db8271c107d4ef2b996cae55ee2aa26b52d31871f9d633ac22f`
+dipasang atomik di bawah release lock sebagai root:root0755. Source d80be0d4
+disimpan terlebih dahulu dengan mode0600 di
+`/opt/personal-agentic/helper-backups/personal-agentic-release-20261014T124836Z-d80be0d44bd7`.
+
+Actual installed `status` menghasilkan health/UI/owner-login/authenticated
+state/cockpit200 serta anonymous/invalid-login/logout-revocation401. Active
+operations0, pending null dan current commit tetap ec70e328. Empat archive
+produksi legacy, selected runtime key dan kapasitas backup actual lolos.
+Installed `recover` untuk digest/SHA/SVG current menghasilkan `unchanged: true`
+dan smoke yang sama. Container IDs/start times/restart counts serta journal
+bytes tetap sama; helper installation tidak menghentikan service.
+
+JSON privat `installed-source-resume.json` dan `recovered-source-resume.json`
+disimpan dalam `org/.state/completion-20261014`. Upload source sementara yang
+sudah tidak dipakai dibersihkan setelah pemeriksaan bind mount. Bukti installed
+status/recover ini melengkapi reproduction Docker dan47-test suite di atas;
+kegagalan backup tidak sengaja dipicu pada produksi. Final MR CI, main image
+smoke dan verifikasi deployment aplikasi baru tetap gate terpisah.

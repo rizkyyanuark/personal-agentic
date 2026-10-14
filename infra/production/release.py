@@ -721,7 +721,7 @@ def main() -> dict[str, object]:
                 active, source_schema = database_state(paths)
                 source_restart_guard(current, previous, pending, current_image, previous_revision,
                                      active, schema, source_schema, directory=RELEASES, configured_image=image_reference())
-                compose("up", "-d", "--no-build", "--pull", "never", "matrix", "platform")
+                compose("start", "matrix", "platform")
                 smoke(str(current["svg_sha256"]))
                 verify_running_candidate(current_image, previous_revision)
                 active, source_schema = database_state(paths)

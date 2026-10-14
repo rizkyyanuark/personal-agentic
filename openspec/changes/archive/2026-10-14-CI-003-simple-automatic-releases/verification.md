@@ -2,7 +2,25 @@
 
 Issue: [GitLab #5](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/5) | [Proposal](proposal.md) | [Tasks](tasks.md).
 
-Pemeriksaan terbaru berada pada [ev-011](../../../../docs/evidence/ev-011-ci-003-managed-state-backup.md): helper46/client11 tests, actual stopped-container backup serta installed helper/legacy-production-backup validation Passed. CI dan main activation mempunyai gate terpisah. Fase pekerjaan berada pada Issue.
+Penerimaan per revisi berada pada [ev-011](../../../../docs/evidence/ev-011-ci-003-managed-state-backup.md): alignment helper 46/client 11 tests, actual stopped-container backup serta installed helper/legacy-production-backup validation Passed. Follow-up source resume di bawah memakai helper 47 tests. CI dan main activation mempunyai gate terpisah. Fase pekerjaan berada pada Issue.
+
+## Source resume: 14 Oktober 2026
+
+Helper SHA-256 `6e2dbe681ec46db8271c107d4ef2b996cae55ee2aa26b52d31871f9d633ac22f`
+memperbaiki fallback stop/backup yang gagal sebelum image diganti: `compose start`
+melanjutkan container existing; aktivasi normal setelah backup berhasil tetap
+`compose up`. Actual Docker fixture dengan image 84cae564, RAM 32 MiB/0.05 CPU
+membuktikan start mempertahankan container ID/writable home ketika konfigurasi
+init berubah. Up mereproduksi recreation dan kehilangan sentinel pada image yang
+sama. Service tanpa container menolak start dengan exit 1 tanpa membuat pengganti.
+Fixture dibersihkan; production IDs/start times/restarts dan existing volumes tetap.
+
+Actual main/backup regression memakai SQLite dan private tar archives nyata,
+dengan Docker/HTTP eksternal sebagai boundary. Start success/failure mempertahankan
+prior config/journal, incomplete private backup dan diagnostic; tidak memakai up.
+Linux suite Passed 47 tests/9.603s. Hasil 46 tests dan hash d80be0d4 tetap menjadi bukti revisi
+alignment, bukan ditulis ulang sebagai proof revisi source resume. Installed-helper
+terbaru dan final MR/main CI masih hasil terpisah; lihat ev-011 untuk identitas/batas.
 
 ## Review historis sebelum perbaikan
 

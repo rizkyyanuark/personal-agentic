@@ -16,8 +16,9 @@ di [src/DEPLOYMENT](../src/DEPLOYMENT.md), sedangkan pemeriksaan aplikasi ada di
 4. Helper memegang `release.lock`, memeriksa identitas release dan pekerjaan
    aktif, mempersiapkan image, serta memeriksa source dan kapasitas backup sebelum
    menghentikan service.
-5. Platform dan Matrix berhenti selama backup. Setelah backup, helper
-   mengaktifkan image dan memeriksa health, login, state, cockpit, aset, UI dan
+5. Platform dan Matrix berhenti selama backup. Setelah backup berhasil, helper
+   memakai `compose up` untuk mengaktifkan image/configuration, lalu memeriksa
+   health, login, state, cockpit, aset, UI dan
    revocation setelah logout. Jurnal `current/previous/pending` menyimpan hasil.
 
 Stop/backup/restart mempunyai jeda layanan. Drain sengaja dihapus; pekerjaan
@@ -63,9 +64,15 @@ maksimal 16 KiB stderr per kegagalan command. Detail tersebut dapat berisi
 konfigurasi privat; jangan menyalinnya ke issue atau CI log. Kegagalan pemulihan
 sekunder juga dicatat. Reference tidak memberikan akses file.
 
-Kegagalan sebelum image diganti hanya memulai ulang source jika image, schema,
-jurnal dan state tetap sama serta source sebelumnya verified. Kandidat yang
-gagal mempertahankan pending record dan backup. Tidak ada automatic DB restore.
+Jika stop/backup gagal sebelum image diganti, helper memakai
+`compose start matrix platform` hanya bila source sebelumnya verified dan image,
+schema, active work serta jurnal tetap sesuai guard. Perintah ini melanjutkan
+container yang sudah ada dan mempertahankan writable home; perubahan Compose
+pending diterapkan oleh aktivasi normal setelah backup berhasil. Container yang
+hilang atau gagal start menolak source resume dan memerlukan recovery operator;
+kedua diagnostic disimpan privat. Kandidat yang gagal mempertahankan pending
+record dan backup. Tidak ada automatic DB restore. Reproduction dan batas proof
+ada pada [ev-011](evidence/ev-011-ci-003-managed-state-backup.md).
 
 Status nyata, termasuk smoke login/logout:
 

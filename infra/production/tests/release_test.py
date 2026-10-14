@@ -605,6 +605,97 @@ class OrchestrationPreflightTests(ReleaseFixtures):
         self.assertEqual(release.read_record(self.directory / "current.json")["status"], "verified")
         self.assertFalse((self.directory / "pending.json").exists())
 
+    def test_failed_backup_resumes_only_existing_source_or_reports_start_failure(self) -> None:
+        release.save(self.directory / "current.json", self.current)
+        release.save(self.directory / "previous.json", self.previous)
+        compose_calls = []
+
+        def boundary(*arguments: str, timeout: int = 180, output: Path | None = None) -> bytes:
+            if arguments[0] == "compose":
+                operation = arguments[9:]
+                compose_calls.append(operation)
+                if operation == ("stop", "--timeout", "30", "platform", "matrix"):
+                    return b""
+                if operation == ("start", "matrix", "platform"):
+                    if restart_failure is not None:
+                        raise restart_failure
+                    return b""
+                if operation and operation[0] == "up":
+                    self.fail("Backup failure reconciled Compose configuration before writable home was backed up")
+            if arguments == ("pull", self.image):
+                return b""
+            if arguments == ("exec", release.PROJECT + "-platform-1", "du", "-sb", "/home/agent"):
+                return b"100 /home/agent\n"
+            if arguments[0] == "run":
+                mounts = [arguments[index + 1] for index, value in enumerate(arguments) if value == "--mount"]
+                self.assertEqual(len(mounts), 2)
+                volume = mounts[0].split("source=", 1)[1].split(",", 1)[0]
+                directory = Path(mounts[1].split("source=", 1)[1].split(",", 1)[0])
+                self.assertEqual(directory.parent, self.backups)
+                archive = arguments[arguments.index("-czf") + 1].removeprefix("/backup/")
+                with tarfile.open(directory / archive, "w:gz") as destination:
+                    destination.add(self.paths[volume], arcname=".")
+                return b""
+            if arguments == ("cp", release.PROJECT + "-platform-1:/home/agent/.", "-"):
+                self.assertIsNotNone(output)
+                release.atomic(output, b"partial stopped-container home archive fixture")
+                raise failure
+            if arguments[:2] == ("image", "inspect") and arguments[2] in (self.old_image, self.image):
+                revision = "a" * 40 if arguments[2] == self.old_image else "b" * 40
+                image_id = "source" if arguments[2] == self.old_image else "candidate"
+                return json.dumps([{"Id": image_id, "Architecture": "arm64", "Os": "linux", "RepoDigests": [arguments[2]],
+                                    "Config": {"Labels": {"org.opencontainers.image.revision": revision}}}]).encode()
+            if arguments == ("inspect", release.PROJECT + "-platform-1", release.PROJECT + "-matrix-1"):
+                return json.dumps([{"Image": "source", "State": {"Running": True, "OOMKilled": False},
+                                    "Config": {"Image": self.old_image,
+                                               "Labels": {"org.opencontainers.image.revision": "a" * 40}}},
+                                   {"State": {"Running": True, "OOMKilled": False}}]).encode()
+            return self.docker_inventory(*arguments, timeout=timeout)
+
+        failure = release.ReleaseError("Backup source unavailable", category="command_failed", operation="docker-cp",
+                                       returncode=17, private_stderr=b"private backup fixture")
+        # Docker and live HTTP are external boundaries. Actual backup writes real
+        # tar archives; only Docker cp fails, retaining incomplete private output.
+        missing_container = release.ReleaseError("Production command failed", category="command_failed",
+                                                operation="compose-start", returncode=1,
+                                                private_stderr=b"private missing container fixture")
+        for restart_failure in (None, missing_container):
+            compose_calls.clear()
+            with self.subTest(start_fails=restart_failure is not None), \
+                 self.installation({**self.incoming, "action": "promote"}, self.old_image), \
+                 patch.object(release, "docker", boundary), \
+                 patch.object(release, "smoke", return_value=self.proof):
+                before = self.snapshot()
+                backup_directories = set(self.backups.iterdir())
+                with self.assertRaises(release.ReleaseError) as caught:
+                    release.main()
+                self.assertEqual(caught.exception.category, "source_restarted" if restart_failure is None else "source_restart_failed")
+                self.assertEqual(caught.exception.private_stderr, failure.private_stderr)
+                self.assertEqual(caught.exception.secondary, restart_failure)
+                if restart_failure is not None:
+                    self.assertEqual(caught.exception.secondary.returncode, 1)
+                    self.assertEqual(caught.exception.secondary.private_stderr, missing_container.private_stderr)
+                    self.assertNotIn("private missing", str(caught.exception))
+                after = self.snapshot()
+                for name, content in before.items():
+                    self.assertEqual(after[name], content)
+                incomplete = set(self.backups.iterdir()) - backup_directories
+                self.assertEqual(len(incomplete), 1)
+                directory = incomplete.pop()
+                self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+                self.assertFalse((directory / "manifest.json").exists())
+                self.assertEqual({path.name for path in directory.iterdir()},
+                                 {volume + ".tar.gz" for volume in release.VOLUMES} | {"platform-home.tar"})
+                for volume in release.VOLUMES:
+                    archive = directory / (volume + ".tar.gz")
+                    self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
+                    with tarfile.open(archive) as actual:
+                        self.assertTrue(actual.getmembers())
+                self.assertEqual((directory / "platform-home.tar").stat().st_mode & 0o777, 0o600)
+                self.assertEqual(release.image_reference(), self.old_image)
+            self.assertIn(("start", "matrix", "platform"), compose_calls)
+            self.assertFalse((self.directory / "pending.json").exists())
+
     def test_failure_reference_retains_sensitive_command_details_only_privately(self) -> None:
         error = release.ReleaseError("Production command failed", category="command_failed",
                                      operation="docker-run", returncode=17, private_stderr=b"SENSITIVE fixture",

@@ -150,3 +150,57 @@ enabled schedule were verified. Disable using the operator README if required.
 - Real dependencies used: Git, Python stdlib/WSL, real Linux private filesystem/flock/proc counters, Docker29 daemon/OCI store, actual process, loopback and production HTTP, installed systemd.
 - Mocks used, with justification: none for production mechanisms. Explicit owned OCI/release-root/age and loopback HTTP contract fixtures were used to avoid deleting a real release or provoking a real outage.
 - Remaining risks: simultaneous-project/peak-build capacity is unverified here; sampling cannot exclude all future job starts; Docker atomic non-force protection and release/reference guards remain; no cache/volume/chat deletion; filesystem delta is not guaranteed attributable reclamation.
+
+## Follow-up: MR pipeline 63 backend workload window
+
+14 October 2026, **11:28:31 to 12:49:43 UTC** (18:28 to 19:49 WIB).
+The operator sampled the shared production host while integration MR
+[pipeline #63](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/pipelines/63)
+performed cold Rust compilation. Final GitLab metadata records backend
+[job #263](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/jobs/263)
+starting at **11:31:39.276 UTC** and succeeding at **12:49:41.859 UTC**, with a
+duration of **4,682.58 seconds**. The sampler's last response was at
+**12:49:43.737 UTC**, so this observation covers the entire backend job, including
+completion. These final timestamps correct the earlier provisional API snapshot
+that described the backend as still running at the observation's end.
+
+All four jobs in pipeline #63 succeeded for source
+`e4d31c9b4d483bd61f178ffda24bdc02a5bcb687`. GitLab reported final pipeline success
+with `updated_at=2026-10-14T12:51:08.278Z`. The later `ssh_bridge` job began at
+12:49:44.363 UTC and `production_config` ended at 12:51:06.752 UTC, after sampling
+ended. Those outcomes are GitLab CI evidence; this resource observation covers
+the named backend workload window rather than the remaining jobs or the whole
+pipeline. It does not establish concurrent-project capacity or guarantee that
+every instantaneous peak was captured.
+
+| Metric | Observed |
+| --- | --- |
+| Samples / observation duration | 970 / 4,872.69 seconds |
+| Production health failures / maximum latency | 0 / 660.16 ms |
+| Minimum available RAM | 195,436 KiB |
+| Maximum used swap | 4,661,904 KiB |
+| Swap in / out | 7,258,414 / 8,375,979 pages |
+| Host CPU busy / I/O wait over the window | 35.06% / 31.50% |
+| Minimum disk available | 29,785,329,664 bytes |
+| Minimum free inodes | 9,289,716 |
+| Kernel OOM delta / container restart deltas | 0 / none |
+| Production container IDs | Unchanged |
+
+All sampled health requests succeeded, but the high swap use, swap traffic and
+I/O wait show host resource pressure during this compilation window. Preserve
+the current job limits and personal-agentic concurrency of one. These results
+do not justify increasing concurrency or claiming spare capacity for overlapping
+projects. Observe the proposed overlapping workloads together before increasing
+job concurrency.
+
+The operator stopped the sampler and removed its exact owned public upload
+files. The private raw observation is retained as
+`org/.state/completion-20261014/mr-resource-final.json`, SHA256
+`e17db0d17a4b93977e56674babab8dc5c6a71dd856860c6aa065eae5f962daed`.
+That original file retains its provisional pipeline snapshot. The reconciled
+copy, `org/.state/completion-20261014/mr-resource-reconciled.json`, SHA256
+`e61840f9051e3360f84d859355704a31a25766cf1d6c50a3cd6a587b6bdb0721`, preserves
+the same measurements and adds final GitLab job/status timestamps used above.
+Both summaries report `health_failures=0`, `oom_kills_delta=0`, `restarts=[]` and
+`production_container_ids_unchanged=true`; the dated window above keeps this
+evidence separate from the earlier background acceptance.
