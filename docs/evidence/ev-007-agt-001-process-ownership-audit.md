@@ -195,3 +195,15 @@ tree twice: `8040149be0f51a92355bab770982e2839a69a726`. This change modifies onl
 container init and Python/browser proof, not Rust/Cargo/schema behavior. This
 accepts those unchanged controls on their exact source identity; the integrated
 MR still runs the latest branch's full backend CI separately.
+
+## Installed Compose — 14 October 2026
+
+The source Compose was installed under the release lock after checking that the
+installed bytes matched ec70 and that rendered service configuration differed
+only by platform `init: true`. The former file was backed up root-private at
+`/opt/personal-agentic/compose-backups/compose-20261014T073820Z.yaml`.
+Installed SHA-256:
+`62893f871785b8be68adc80d7834ad1f3e87af9833502cb9f86e60989ee67247`.
+Container IDs, start times, restart counts and release journal bytes stayed
+unchanged. This proves installed configuration; the existing platform container
+still needs the normal deployment recreation to run with Docker init.

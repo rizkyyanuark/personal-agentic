@@ -19,6 +19,7 @@ Date: 14 October 2026 (Asia/Jakarta).
 | REQ-AGT-001-4 baseline container reaping | Captured child 652/start_ticks 207217284 remained Z under PPID 1; no Docker init | Failed: reproduced container configuration defect |
 | REQ-AGT-001-4 fixed container | Same immutable image with Docker init: leader 55 and child 58 gone; control 65 sleeping and streaming | Passed: Stop 1.500 s |
 | Production Compose configuration | Real `docker compose config --format json`: platform init=true; Matrix unchanged | Passed |
+| Installed production Compose | Exact source hash verified; only platform init changed under release lock; private backup and unchanged running containers/journals | Passed; effect awaits container recreation |
 | Native Windows owner and registered-worker path | Production spawn/resource/runtime/fleet source | Inspected; transport execution not run |
 | REQ-AGT-001-2 main/side and same-session serialization | Actual pipeline61/job255 trace; unchanged Rust tree | Passed on ec70 baseline; latest MR CI remains a separate gate |
 | REQ-AGT-001-3 coordinator rollback/limits | Actual pipeline61/job255 trace; unchanged Rust tree | Passed on ec70 baseline; latest MR CI remains a separate gate |
