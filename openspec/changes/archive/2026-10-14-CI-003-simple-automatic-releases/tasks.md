@@ -1,7 +1,7 @@
 # Tasks: CI-003 follow-up — preflight, state dan diagnosis
 
 Issue: [GitLab #5](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/5).
-Kontrak: [proposal](proposal.md); arah desain: [ADR 0001](../../../docs/decisions/0001-personal-agentic-architecture-contract.md).
+Kontrak: [proposal](proposal.md); arah desain: [ADR 0001](../../../../docs/decisions/0001-personal-agentic-architecture-contract.md).
 Fase release/merge berada pada Issue. Checklist ini menerima skenario yang benar-benar
 dijalankan; [verification](verification.md) memisahkan hasil lokal dan operasional.
 
@@ -23,9 +23,9 @@ dijalankan; [verification](verification.md) memisahkan hasil lokal dan operasion
   resolution termasuk key nested, owner/mode bootstrap, stopped home copy,
   private archive validation dan cleanup.
 
-Bukti dan identitas source: [ev-011](../../../docs/evidence/ev-011-ci-003-managed-state-backup.md).
-Koreksi atas patch sebelumnya tetap tersimpan pada [ev-006](../../../docs/evidence/ev-006-current-contract-review.md)
-dan [laporan awal](../../../docs/evidence/ev-010-ci-003-initial-preflight-report.md).
+Bukti dan identitas source: [ev-011](../../../../docs/evidence/ev-011-ci-003-managed-state-backup.md).
+Koreksi atas patch sebelumnya tetap tersimpan pada [ev-006](../../../../docs/evidence/ev-006-current-contract-review.md)
+dan [laporan awal](../../../../docs/evidence/ev-010-ci-003-initial-preflight-report.md).
 Installed-helper, main image dan deployment berikutnya dilacak terpisah dari
 penerimaan lokal ini; tidak menggunakan keberhasilan pipeline 61 sebagai proof
 patch follow-up.

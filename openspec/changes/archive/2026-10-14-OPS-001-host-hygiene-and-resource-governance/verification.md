@@ -1,6 +1,6 @@
 # Verification: OPS-001
 
-[Proposal](proposal.md) · [Tasks](tasks.md) · [Ev-009](../../../docs/evidence/ev-009-ops-001-maintenance-verification.md)
+[Proposal](proposal.md) · [Tasks](tasks.md) · [Ev-009](../../../../docs/evidence/ev-009-ops-001-maintenance-verification.md)
 
 Source/base: dedicated `codex/host-resource-governance` checkout, base
 `ec70e3287682fdc3c6a86df03054a38fe6e92817`, exact helper/sampler hashes in ev-009.

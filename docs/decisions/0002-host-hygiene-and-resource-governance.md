@@ -29,7 +29,7 @@ Cleanup membutuhkan inventaris, kandidat spesifik, dan referensi yang dilindungi
 
 ## Rujukan
 
-- [OPS-001: maintenance dan penggunaan resource host](../../openspec/changes/OPS-001-host-hygiene-and-resource-governance/proposal.md).
+- [OPS-001: maintenance dan penggunaan resource host](../../openspec/changes/archive/2026-10-14-OPS-001-host-hygiene-and-resource-governance/proposal.md).
 - [Compose production](../../infra/production/compose.yaml) dan [panduan runner](../../infra/gitlab-runner/README.md) sebagai source konfigurasi yang perlu diperiksa saat implementasi.
 - [Review awal ev-004](../evidence/ev-004-architecture-proposal-review.md) dan [review lanjutan ev-006](../evidence/ev-006-current-contract-review.md).
 

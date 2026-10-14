@@ -41,7 +41,7 @@ Laporan awal mencatat kelulusan 38 test helper dan 10 test client. Review 14 Okt
 - **Statistik pemeriksaan pada laporan awal:** Pass: `3`, Fail: `0`, Blocked: `0`, Not run: `0`
 - **Keterbatasan Pengujian:** Pengujian dijalankan di WSL2 root boundary meniru struktur host production Linux ARM64 dengan isolasi mock external Docker daemon boundary, sementara socket HTTP, private file permission (0o700/0o600), locking file (`fcntl.flock`), dan SQLite transactions diuji secara langsung (riil).
 - **Data Uji & Cleanup:** Semua temporary directory dan fixture database dibuat via `tempfile.TemporaryDirectory` dan dibersihkan otomatis via `addCleanup()`.
-- **Kesimpulan setelah review 14 Oktober:** penerimaan follow-up belum lengkap; regresi legacy recovery dan batas bukti dicatat pada [verification CI-003](../../openspec/changes/CI-003-simple-automatic-releases/verification.md). Rekomendasi Approved pada laporan awal dikoreksi dengan review ini.
+- **Kesimpulan setelah review 14 Oktober:** penerimaan follow-up belum lengkap; regresi legacy recovery dan batas bukti dicatat pada [verification CI-003](../../openspec/changes/archive/2026-10-14-CI-003-simple-automatic-releases/verification.md). Rekomendasi Approved pada laporan awal dikoreksi dengan review ini.
 
 
 ## Catatan review dokumentasi — 14 Oktober 2026

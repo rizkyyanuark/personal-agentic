@@ -19,4 +19,4 @@ Pertahankan Draft sampai scope dan bukti lokal siap ditinjau. Readiness untuk me
 
 ## Release dan handoff
 
-Jelaskan kebutuhan migrasi/config/release serta rollback. Jangan menandai produksi selesai dari local proof atau merge. Image/smoke main dan manual production gate mengikuti `docs/deployment.md`; pekerjaan tanpa release menyatakan batasnya. Catat next action atau blocker yang tersisa.
+Jelaskan kebutuhan migrasi/config/release serta rollback. Jangan menandai produksi selesai dari local proof atau merge. Image/smoke main dan deployment otomatis mengikuti `docs/deployment.md`; pekerjaan tanpa release menyatakan batasnya. Catat next action atau blocker yang tersisa.

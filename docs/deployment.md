@@ -96,5 +96,5 @@ Main `ec70e3287682fdc3c6a86df03054a38fe6e92817` telah aktif melalui pipeline
 deploy job 261 verified pada 13 Oktober 2026. Inventaris 14 Oktober menemukan
 digest `sha256:84cae56460603822e5eee645c634fcc64f7c125ca108b6259f5f800aa2c4cf9e`,
 dua service running, OOM false dan restart count nol. Ini snapshot;
-[verification CI-003](../openspec/changes/CI-003-simple-automatic-releases/verification.md)
+[verification CI-003](../openspec/changes/archive/2026-10-14-CI-003-simple-automatic-releases/verification.md)
 mencatat bukti follow-up secara terpisah.

@@ -26,7 +26,7 @@ AGT-001 merupakan audit dan regresi, dengan implementasi hanya jika ada defect y
 
 ## Rujukan
 
-- [AGT-001: audit keselamatan proses dan konkurensi](../../openspec/changes/AGT-001-subagent-concurrency-and-process-guard/proposal.md).
+- [AGT-001: audit keselamatan proses dan konkurensi](../../openspec/changes/archive/2026-10-14-AGT-001-subagent-concurrency-and-process-guard/proposal.md).
 - [Remote bridge](../../src/backend/src/remote_bridge.py), [runtime](../../src/backend/src/runtime.rs), [process ownership](../../src/backend/src/process_tree/spawn.rs), dan [coordination](../../src/backend/src/coordination.rs) sebagai source yang diinspeksi.
 - [PRD](../../PRD.md), [review awal ev-004](../evidence/ev-004-architecture-proposal-review.md), dan [review lanjutan ev-006](../evidence/ev-006-current-contract-review.md).
 

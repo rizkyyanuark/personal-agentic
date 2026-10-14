@@ -1,6 +1,6 @@
 # ev-008 — Katalog model sesuai runtime
 
-Tanggal: 14 Oktober 2026 (Asia/Jakarta). Change: [CAT-001](../../openspec/changes/CAT-001-runtime-model-catalog/proposal.md), [Issue #6](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/6). Acceptance kandidat ini bukan catatan deployment produksi.
+Tanggal: 14 Oktober 2026 (Asia/Jakarta). Change: [CAT-001](../../openspec/changes/archive/2026-10-14-CAT-001-runtime-model-catalog/proposal.md), [Issue #6](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/6). Acceptance kandidat ini bukan catatan deployment produksi.
 
 ## Source dan lingkungan
 
@@ -56,3 +56,10 @@ Belum diuji: positive signed-in registered catalog, native Local Codex/OpenCode 
 ## Cleanup
 
 Smoke menghapus profil miliknya, mengarsipkan project disposable, serta menghapus tenant dan merevoke runtime offline miliknya. Native worker acceptance PID804 dihentikan hanya setelah UID10001 dan command marker state milik test diverifikasi. API kemudian memastikan offline, catalog400 dan revoked; `worker-cleanup.json` juga mencatat nativeSessions0. Cleanup container dilakukan koordinator setelah semua agen selesai. Tunnel dimiliki process test dan diakhiri pada `finally`; tidak ada persistent tunnel tambahan. Kandidat berisi semua historical/catalog fixture dan temporary SSH key/network attachment, sehingga penghapusan container oleh koordinator menghapus state/credential sementara secara utuh. Source key runtime produksi tidak dihapus.
+
+Koordinator kemudian menghapus exact candidate setelah immutable image, bind frontend
+read-only dan ketiga tmpfs UID10001 diverifikasi. Temporary SSH key/config/known_hosts,
+data fixture dan sambungan network terhapus bersama container. Owner-key fixture lokal
+juga dihapus; JSON/screenshot tersimpan ignored pada checkout integrasi. Actual production
+container IDs/start times/restarts dan volume names unchanged; installed-helper smoke
+health/UI/state/cockpit200, anonymous/invalid-login/revoked-logout401, active0/pending null.

@@ -46,13 +46,13 @@ OpenSpec menyarankan satu unit kerja logis per change dan memperbolehkan memperb
 
 ### R3 — P1: cakupan runtime dihapus sebelum inventaris terbukti
 
-[CI-003 tasks](../../openspec/changes/CI-003-simple-automatic-releases/tasks.md), baris 19–23, menyebut path dummy dan menggunakan grep nol hasil sebagai bukti inventaris. [ADR 0001](../decisions/0001-personal-agentic-architecture-contract.md), baris 20 dan 36, justru meminta inventaris serta kompatibilitas sebelum mengubah backup.
+[CI-003 tasks](../../openspec/changes/archive/2026-10-14-CI-003-simple-automatic-releases/tasks.md), baris 19–23, menyebut path dummy dan menggunakan grep nol hasil sebagai bukti inventaris. [ADR 0001](../decisions/0001-personal-agentic-architecture-contract.md), baris 20 dan 36, justru meminta inventaris serta kompatibilitas sebelum mengubah backup.
 
 **Koreksi:** tandai inventaris Not run sampai ada mapping state/path/owner dan kebutuhan restore. Pastikan metadata attachment, native session/file state, volume internal, config/key yang dibutuhkan tetap tercakup. Mengecualikan source proyek eksternal sesuai pilihan pemilik tidak otomatis membuktikan seluruh isi path lama boleh diabaikan.
 
 ### R4 — P2: Completed/Passed/Approved melampaui proof
 
-[CI-003 verification](../../openspec/changes/CI-003-simple-automatic-releases/verification.md), baris 19, menyatakan stop tidak dipanggil saat preflight gagal. Test baru hanya memanggil fungsi preflight secara langsung, tanpa menjalankan main atau mencatat urutan boundary Compose.
+[CI-003 verification](../../openspec/changes/archive/2026-10-14-CI-003-simple-automatic-releases/verification.md), baris 19, menyatakan stop tidak dipanggil saat preflight gagal. Test baru hanya memanggil fungsi preflight secara langsung, tanpa menjalankan main atau mencatat urutan boundary Compose.
 
 [Laporan awal yang sebelumnya bernama docs/report.md](ev-010-ci-003-initial-preflight-report.md) menggunakan SHA HEAD sebagai identitas patch yang diuji, menyatakan tidak ada bug dan Approved, sementara patch masih dirty dan legacy recovery kini gagal dalam reproduction.
 
@@ -72,7 +72,7 @@ OpenSpec menyarankan satu unit kerja logis per change dan memperbolehkan memperb
 
 ### R7 — P1: OPS masih memilih prune global sebelum inventory
 
-[OPS tasks](../../openspec/changes/OPS-001-host-hygiene-and-resource-governance/tasks.md), baris 18–19, menjalankan builder/image prune seluruh daemon. Belum ada kandidat/owner allowlist, perlindungan image current/previous/pending, atau check konflik build/deploy. Image tanpa tag atau tanpa referensi container bisa masih diperlukan sebagai release sebelumnya.
+[OPS tasks](../../openspec/changes/archive/2026-10-14-OPS-001-host-hygiene-and-resource-governance/tasks.md), baris 18–19, menjalankan builder/image prune seluruh daemon. Belum ada kandidat/owner allowlist, perlindungan image current/previous/pending, atau check konflik build/deploy. Image tanpa tag atau tanpa referensi container bisa masih diperlukan sebagai release sebelumnya.
 
 Cache CI juga tersebar: /cache/cargo dan target pada .gitlab-ci.yml, rootless BuildKit job, serta registry cache pada publish-image.sh. Host builder prune belum dibuktikan menargetkan store yang relevan.
 
@@ -80,7 +80,7 @@ Cache CI juga tersebar: /cache/cargo dan target pada .gitlab-ci.yml, rootless Bu
 
 ### R8 — P2: CAT perlu membedakan consumer existing dan memperluas acceptance
 
-[CAT proposal](../../openspec/changes/CAT-001-runtime-model-catalog/proposal.md) dan tasks menunjuk components/NewAgentDialog.tsx yang tidak ada. Path nyata adalah [NewAgentDialog.tsx](../../src/frontend/src/NewAgentDialog.tsx).
+[CAT proposal](../../openspec/changes/archive/2026-10-14-CAT-001-runtime-model-catalog/proposal.md) dan tasks menunjuk components/NewAgentDialog.tsx yang tidak ada. Path nyata adalah [NewAgentDialog.tsx](../../src/frontend/src/NewAgentDialog.tsx).
 
 Global catalog pada [App.tsx](../../src/frontend/src/App.tsx), baris 292, hanya menjadi fallback MessageModelBadge (baris 883). Profile sudah memakai /harness/settings (baris 1666). Nama model reply tersimpan di run dan diprioritaskan oleh [ChatActivity.tsx](../../src/frontend/src/ChatActivity.tsx), baris 39–45. Satu katalog runtime aktif global tidak cocok untuk history berbagai runtime.
 
@@ -93,7 +93,7 @@ Global catalog pada [App.tsx](../../src/frontend/src/App.tsx), baris 292, hanya 
 
 ### R9 — P2: AGT proof belum mengikuti ownership proses
 
-[AGT tasks](../../openspec/changes/AGT-001-subagent-concurrency-and-process-guard/tasks.md), baris 21–22, memakai grep agy/global zombie count. Ini bisa melewatkan child bernama python/sleep/git dan mengenai run lain.
+[AGT tasks](../../openspec/changes/archive/2026-10-14-AGT-001-subagent-concurrency-and-process-guard/tasks.md), baris 21–22, memakai grep agy/global zombie count. Ini bisa melewatkan child bernama python/sleep/git dan mengenai run lain.
 
 **Koreksi:** lacak run ID + PID/PGID/Job Object, descendants, waktu dan durable status; buktikan unrelated run tetap hidup. Bedakan zombie exited dari orphan hidup dan daemon sengaja detach. Uji stop, timeout, heartbeat EOF/stall, parent exit, waiting-for-owner, main/side parallel, summary/review/cross-chat serta action invocation sesuai transport yang digunakan. Watchdog heartbeat SSH sekitar 15 detik; jangan menjanjikan semua disconnect selesai dalam 10 detik.
 
@@ -138,4 +138,3 @@ Pemeriksaan dokumen: 39 dokumen/193 local links, nol missing targets. Validitas 
 ## NEXT
 
 Prioritaskan kompatibilitas legacy recovery dan operation-specific preflight. Lengkapi acceptance/diagnosis serta koreksi status laporan/runbook sebelum menganggap CI-003 completed atau mempromosikan helper. CAT/OPS dapat dipersiapkan independen; AGT tetap backlog audit.
-

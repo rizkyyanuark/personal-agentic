@@ -1,9 +1,9 @@
 # Evidence EV-005: CI-003 Release Preflight & Diagnostics Verification
 
-**Issue**: [GitLab #5](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/5)  
-**Dokumen Terkait**: [openspec/changes/CI-003-simple-automatic-releases/proposal.md](../../openspec/changes/CI-003-simple-automatic-releases/proposal.md), [verification.md](../../openspec/changes/CI-003-simple-automatic-releases/verification.md), [tasks.md](../../openspec/changes/CI-003-simple-automatic-releases/tasks.md)  
-**Tanggal Eksekusi**: 2026-10-14 02:57:08 UTC+7  
-**Penguji**: Antigravity Assistant & Developer  
+**Issue**: [GitLab #5](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/5)
+**Dokumen Terkait**: [openspec/changes/CI-003-simple-automatic-releases/proposal.md](../../openspec/changes/archive/2026-10-14-CI-003-simple-automatic-releases/proposal.md), [verification.md](../../openspec/changes/archive/2026-10-14-CI-003-simple-automatic-releases/verification.md), [tasks.md](../../openspec/changes/archive/2026-10-14-CI-003-simple-automatic-releases/tasks.md)
+**Tanggal Eksekusi**: 2026-10-14 02:57:08 UTC+7
+**Penguji**: Antigravity Assistant & Developer
 
 ---
 

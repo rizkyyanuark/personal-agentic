@@ -1,7 +1,7 @@
 # Verification: AGT-001 — concurrency and process ownership audit
 
 [Proposal](proposal.md) | [Tasks](tasks.md) |
-[Detailed evidence](../../../docs/evidence/ev-007-agt-001-process-ownership-audit.md).
+[Detailed evidence](../../../../docs/evidence/ev-007-agt-001-process-ownership-audit.md).
 
 Base backend commit: `ec70e3287682fdc3c6a86df03054a38fe6e92817`.
 Date: 14 October 2026 (Asia/Jakarta).

@@ -29,8 +29,8 @@ Release dan katalog dapat dikerjakan sebagai change terpisah dengan keputusan ar
 
 ## Rujukan
 
-- [CI-003: release otomatis dan follow-up preflight/recovery](../../openspec/changes/CI-003-simple-automatic-releases/proposal.md).
-- [CAT-001: katalog model sesuai runtime](../../openspec/changes/CAT-001-runtime-model-catalog/proposal.md).
+- [CI-003: release otomatis dan follow-up preflight/recovery](../../openspec/changes/archive/2026-10-14-CI-003-simple-automatic-releases/proposal.md).
+- [CAT-001: katalog model sesuai runtime](../../openspec/changes/archive/2026-10-14-CAT-001-runtime-model-catalog/proposal.md).
 - [PRD](../../PRD.md), [review awal ev-004](../evidence/ev-004-architecture-proposal-review.md), dan [review lanjutan ev-006](../evidence/ev-006-current-contract-review.md).
 
 Fase pekerjaan, owner implementasi, MR, dan tindak lanjut dikelola pada Issue yang ditautkan dari kontrak. Hasil pemeriksaan tetap berada dalam verification/evidence.

@@ -4,7 +4,7 @@ Date: 14 October 2026 (Asia/Jakarta).
 Source base: `ec70e3287682fdc3c6a86df03054a38fe6e92817`.
 Checkout: `C:\Users\rizky\.codex\worktrees\agent-process-audit\personal-agentic`.
 Branch: `codex/agent-process-audit`.
-Contract: [AGT-001](../../openspec/changes/AGT-001-subagent-concurrency-and-process-guard/proposal.md).
+Contract: [AGT-001](../../openspec/changes/archive/2026-10-14-AGT-001-subagent-concurrency-and-process-guard/proposal.md).
 
 ## Conclusion
 

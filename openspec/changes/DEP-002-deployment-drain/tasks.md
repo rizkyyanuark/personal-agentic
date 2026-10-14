@@ -1,6 +1,6 @@
 # DEP-002 tasks
 
-Historical task record for DEP-002. The source/contract drain policy was superseded by [CI-003](../CI-003-simple-automatic-releases/proposal.md). The checks below preserve their original scope and do not form the current implementation queue; current phase and release evidence are tracked separately.
+Historical task record for DEP-002. The source/contract drain policy was superseded by [CI-003](../archive/2026-10-14-CI-003-simple-automatic-releases/proposal.md). The checks below preserve their original scope and do not form the current implementation queue; current phase and release evidence are tracked separately.
 
 
 - [x] DEP2-T1 / R1–R5: audit actual admission, helper, UI and bootstrap paths; record accepted 15-minute policy and create Issue #4/branch. Owner: coordinator.

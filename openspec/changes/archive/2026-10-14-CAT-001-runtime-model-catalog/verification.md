@@ -1,6 +1,6 @@
 # Verification: CAT-001
 
-Tanggal: 14 Oktober 2026. [Proposal](proposal.md) | [Tasks](tasks.md) | [Bukti ev-008](../../../docs/evidence/ev-008-runtime-model-catalog-verification.md).
+Tanggal: 14 Oktober 2026. [Proposal](proposal.md) | [Tasks](tasks.md) | [Bukti ev-008](../../../../docs/evidence/ev-008-runtime-model-catalog-verification.md).
 
 Status: acceptance kandidat nyata lulus; CI, merge dan rilis produksi dikelola koordinator. Backend immutable `ec70e3287682fdc3c6a86df03054a38fe6e92817`, frontend hasil perubahan ini. Hash bundle dan provenance fixture ada pada ev-008.
 

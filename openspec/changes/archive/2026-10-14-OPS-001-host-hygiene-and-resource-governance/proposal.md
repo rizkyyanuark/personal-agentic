@@ -2,7 +2,7 @@
 
 Tracking: [GitLab Issue #7](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/7).
 
-Owner decision: [ADR 0002](../../../docs/decisions/0002-host-hygiene-and-resource-governance.md).
+Owner decision: [ADR 0002](../../../../docs/decisions/0002-host-hygiene-and-resource-governance.md).
 The accepted direction permits automatic cleanup only of proven-safe owned
 cache/images; volumes and chat history remain manual. This change replaces the
 draft's unscoped daemon prune commands after the source/evidence review.
@@ -85,7 +85,7 @@ source/test acceptance; the timer can be disabled without changing product data.
 
 ## Acceptance and references
 
-[Tasks](tasks.md), [verification](verification.md) and [operator path](../../../infra/ops/README.md)
+[Tasks](tasks.md), [verification](verification.md) and [operator path](../../../../infra/ops/README.md)
 record implementation and real proof. Evidence distinguishes inspected source,
 actual daemon fixtures, read-only production plans, workload scope and installation.
 The physical Docker smoke uses explicit tiny OCI fixtures and actual transport;

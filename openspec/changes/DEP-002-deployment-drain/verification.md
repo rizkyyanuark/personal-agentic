@@ -1,6 +1,6 @@
 # DEP-002 verification
 
-Historical evidence at the revisions below. [CI-003](../CI-003-simple-automatic-releases/proposal.md) removes drain by owner request; these commands and manual-release notes are not current operating instructions.
+Historical evidence at the revisions below. [CI-003](../archive/2026-10-14-CI-003-simple-automatic-releases/proposal.md) removes drain by owner request; these commands and manual-release notes are not current operating instructions.
 
 Baseline `18f4dfb4b3b07451cbca5520de6c389fe9a2ed34`, branch `codex/deployment-drain`.
 Evidence recorded on 12 October 2026. Source, candidate acceptance, CI and installed

@@ -2,11 +2,11 @@
 
 Issue: [GitLab #5](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/5) | [Proposal](proposal.md) | [Tasks](tasks.md).
 
-Pemeriksaan terbaru berada pada [ev-011](../../../docs/evidence/ev-011-ci-003-managed-state-backup.md): helper43/client11 tests, actual stopped-container backup serta installed helper/legacy-production-backup validation Passed. CI dan main activation mempunyai gate terpisah. Fase pekerjaan berada pada Issue.
+Pemeriksaan terbaru berada pada [ev-011](../../../../docs/evidence/ev-011-ci-003-managed-state-backup.md): helper46/client11 tests, actual stopped-container backup serta installed helper/legacy-production-backup validation Passed. CI dan main activation mempunyai gate terpisah. Fase pekerjaan berada pada Issue.
 
 ## Review historis sebelum perbaikan
 
-Tabel berikut berlaku pada patch awal, bukan source follow-up terbaru. [ev-006](../../../docs/evidence/ev-006-current-contract-review.md) merekam regresi yang kemudian diperbaiki; [laporan awal](../../../docs/evidence/ev-010-ci-003-initial-preflight-report.md) tetap disimpan.
+Tabel berikut berlaku pada patch awal, bukan source follow-up terbaru. [ev-006](../../../../docs/evidence/ev-006-current-contract-review.md) merekam regresi yang kemudian diperbaiki; [laporan awal](../../../../docs/evidence/ev-010-ci-003-initial-preflight-report.md) tetap disimpan.
 
 ## Hasil per pemeriksaan
 

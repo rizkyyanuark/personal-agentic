@@ -9,12 +9,12 @@ Folder change adalah kontrak perubahan, bukan pengganti GitLab Issue. [ADR](../d
 ## Pekerjaan terkait
 
 - [ARF-001: artefak run Antigravity](changes/ARF-001-antigravity-run-artifacts/proposal.md), [Issue 1](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/1).
-- [CAT-001: katalog model sesuai runtime](changes/CAT-001-runtime-model-catalog/proposal.md), [Issue 6](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/6).
-- [CI-003: CI sederhana dan deployment otomatis](changes/CI-003-simple-automatic-releases/proposal.md), [Issue 5](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/5).
+- [CAT-001: katalog model sesuai runtime](changes/archive/2026-10-14-CAT-001-runtime-model-catalog/proposal.md), [Issue 6](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/6).
+- [CI-003: CI sederhana dan deployment otomatis](changes/archive/2026-10-14-CI-003-simple-automatic-releases/proposal.md), [Issue 5](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/5).
 - [DEP-001: deployment readiness dan recovery](changes/DEP-001-deployment-readiness-recovery/proposal.md), [Issue 3](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/3).
 - [DEP-002: deployment drain](changes/DEP-002-deployment-drain/proposal.md), [Issue 4](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/4).
-- [OPS-001: maintenance host dan resource governance](changes/OPS-001-host-hygiene-and-resource-governance/proposal.md), [Issue 7](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/7).
-- [AGT-001: audit konkurensi subagent dan ownership proses](changes/AGT-001-subagent-concurrency-and-process-guard/proposal.md), [Issue 8](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/8).
+- [OPS-001: maintenance host dan resource governance](changes/archive/2026-10-14-OPS-001-host-hygiene-and-resource-governance/proposal.md), [Issue 7](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/7).
+- [AGT-001: audit konkurensi subagent dan ownership proses](changes/archive/2026-10-14-AGT-001-subagent-concurrency-and-process-guard/proposal.md), [Issue 8](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/8).
 - [Issue 2: kontrak development](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/2).
 
 Issue menyimpan fase dan tindak lanjut aktual; link tidak menyatakan implementasi atau release telah selesai.
@@ -34,3 +34,11 @@ Requirement memiliki ID dan scenario; tasks menyebut dependency serta bukti pene
 Kontrak baru tetap dalam change sampai penerimaan terbukti. Setelah implementasi dan acceptance, perbarui capability spec dalam `specs` sesuai perilaku yang telah dibuktikan, lalu arsipkan change dengan tanggal dan slug. Merge/deployment yang masih pending tetap tercatat pada Issue/MR dan release evidence.
 
 Tidak ada capability spec baru yang dinyatakan verified hanya karena struktur dokumentasi ini dibuat. Perubahan yang sudah diimplementasikan sebelum dokumen ini menggunakan bukti aktual dan menyatakan sejarahnya secara jujur.
+
+Baseline retrospektif 14 Oktober 2026 dari acceptance implementasi tersedia untuk
+[production release](specs/production-release/spec.md),
+[runtime model catalog](specs/runtime-model-catalog/spec.md),
+[host maintenance](specs/host-maintenance/spec.md), dan
+[process ownership](specs/process-ownership/spec.md).
+Arsip change menyimpan kontrak dan hasil acceptance source; hasil CI integrasi,
+merge dan aktivasi image produksi tetap merupakan gate terpisah pada Issue/MR.

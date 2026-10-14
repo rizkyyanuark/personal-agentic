@@ -1,7 +1,7 @@
 # Ev-009: OPS-001 scoped maintenance and host activation
 
 14 October 2026, Asia/Jakarta. Contract:
-[OPS-001](../../openspec/changes/OPS-001-host-hygiene-and-resource-governance/proposal.md).
+[OPS-001](../../openspec/changes/archive/2026-10-14-OPS-001-host-hygiene-and-resource-governance/proposal.md).
 Result: implementation, physical Docker acceptance, named-window measurement and
 reviewed host activation verified. Publication/merge/application-image deployment
 remain separate from this maintenance result.

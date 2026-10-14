@@ -2,7 +2,7 @@
 
 Issue: [GitLab #6](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/6).
 
-Tanggal: 14 Oktober 2026 (Asia/Jakarta). Keputusan: [ADR 0001](../../../docs/decisions/0001-personal-agentic-architecture-contract.md). Dasar inspeksi: [ev-006](../../../docs/evidence/ev-006-current-contract-review.md).
+Tanggal: 14 Oktober 2026 (Asia/Jakarta). Keputusan: [ADR 0001](../../../../docs/decisions/0001-personal-agentic-architecture-contract.md). Dasar inspeksi: [ev-006](../../../../docs/evidence/ev-006-current-contract-review.md).
 
 ## Masalah dan hasil
 

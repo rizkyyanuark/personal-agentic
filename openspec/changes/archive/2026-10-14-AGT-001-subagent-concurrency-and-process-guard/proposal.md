@@ -2,8 +2,8 @@
 
 Change ID: `AGT-001-subagent-concurrency-and-process-guard`.
 Canonical issue: [GitLab #8](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/8).
-Decision: [ADR 0003](../../../docs/decisions/0003-subagent-concurrency-and-process-guard.md).
-Evidence: [AGT-001 process audit](../../../docs/evidence/ev-007-agt-001-process-ownership-audit.md).
+Decision: [ADR 0003](../../../../docs/decisions/0003-subagent-concurrency-and-process-guard.md).
+Evidence: [AGT-001 process audit](../../../../docs/evidence/ev-007-agt-001-process-ownership-audit.md).
 
 ## Problem and intended result
 
