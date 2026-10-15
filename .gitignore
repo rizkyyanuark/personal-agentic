@@ -31,3 +31,7 @@ __pycache__/
 Thumbs.db
 scratch/
 /src/ci-artifacts/
+
+# AI Agent instructions and local OpenSpec workspace
+.agents/
+openspec/
