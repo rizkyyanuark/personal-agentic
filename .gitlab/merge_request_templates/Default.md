@@ -1,22 +1,25 @@
-## Masalah dan hasil perubahan
+## Ringkasan Perubahan
 
-Jelaskan trigger pengguna, perilaku sebelum/sesudah, scope dan risiko material. Tautkan Issue serta kontrak perubahan bila diperlukan. Deskripsi mengikuti implementasi akhir.
+<!-- Tuliskan 1-2 kalimat ringkas mengenai apa yang berubah dan apa manfaatnya bagi pengguna atau sistem. Hindari kata hiasan tanpa bukti seperti seamless, robust, atau cutting-edge. -->
 
-## Verifikasi
+## Kategori Perubahan
 
-Catat commit/environment yang diuji, command dan user flow nyata, output relevan serta proof tersanitasi. Nyatakan dependency nyata, mocks dengan alasan bila ada, dan pemeriksaan yang belum dijalankan. Pipeline terbaru dan review melengkapi local proof.
+- [ ] `feat`: Penambahan fungsionalitas atau fitur baru
+- [ ] `fix`: Perbaikan bug atau kesalahan logika
+- [ ] `chore`: Pemeliharaan, dependensi, atau konfigurasi repositori
+- [ ] `refactor`: Perapihan struktur kode tanpa mengubah perilaku luar
+- [ ] `docs`: Pembaruan dokumentasi atau panduan kerja
 
-## Review
+## Bukti Pengujian Nyata
 
-Pertahankan Draft sampai scope dan bukti lokal siap ditinjau. Readiness untuk merge memerlukan review dan hasil CI commit terbaru; pemeriksaan berikut diisi dari bukti, bukan dicentang otomatis.
+Semua perubahan wajib melalui pengujian nyata sebelum merge disetujui. Lengkapi tabel berikut dengan perintah aktual yang dijalankan dan hasil konkretnya:
 
-- [ ] Scope dan acceptance sesuai hasil pengguna.
-- [ ] Diff, file baru dan kontrak/UI/API/auth/persistence yang relevan ditinjau.
-- [ ] Perubahan izin/akses menguji penolakan lintas workspace/group dan akses yang telah dicabut ketika relevan.
-- [ ] Bukti perilaku tersedia; failure/boundary yang relevan diperiksa.
-- [ ] Secret, runtime state, backup dan generated output tidak ikut source.
-- [ ] Dokumen/rute baca sesuai perubahan akhir; risiko dan keterbatasan jelas.
+| No | Cakupan / Skenario | Perintah yang Dijalankan | Hasil (Exit Code / Status) | Bukti / Catatan Singkat |
+|---|---|---|---|---|
+| 1 | Uji fungsional / unit | `npm test` atau `cargo test` | Pass (exit code 0) | Seluruh test suite lulus |
+| 2 | Verifikasi integrasi | `curl` endpoint atau CLI run | HTTP 200 / output valid | Bukti payload terverifikasi |
 
-## Release dan handoff
+## Dampak Produksi dan Rencana Rollback
 
-Jelaskan kebutuhan migrasi/config/release serta rollback. Jangan menandai produksi selesai dari local proof atau merge. Image/smoke main dan deployment otomatis mengikuti `docs/deployment.md`; pekerjaan tanpa release menyatakan batasnya. Catat next action atau blocker yang tersisa.
+- **Dampak sistem**: Apakah perubahan ini membutuhkan migrasi data, variabel lingkungan (`.env`) baru, atau restart container?
+- **Rencana rollback**: Jika verifikasi pasca rilis gagal, tindakan konkret apa yang harus dilakukan (contoh: revert commit, gunakan image sebelumnya)?
