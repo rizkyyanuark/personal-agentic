@@ -7,8 +7,9 @@ import { Label } from "@/components/ui/label";
 import { api, post } from "./api";
 import type { Workstation } from "./bindings/Workstation";
 import type { Connection } from "./bindings/Connection";
+import { applicationEnvironmentHelp, applicationEnvironmentLabel, workstationLabel } from "./workstationLabels";
 
-const empty: Workstation = { id: "", name: "", hostname: "", host_ip: "", port: 22, username: "", auth: "key", ssh_alias: "", ssh_key_path: "", secret_saved: false };
+const empty: Workstation = { id: "", name: "", location: "unspecified", hostname: "", host_ip: "", port: 22, username: "", auth: "key", ssh_alias: "", ssh_key_path: "", secret_saved: false };
 export function UserSettings({ role, user, controllerAccess, workstations, onRefresh }: { role: string; user: string; controllerAccess: boolean; workstations: Workstation[]; onRefresh: () => Promise<void> }) {
   const [section, setSection] = useState("runtimes");
   const [draft, setDraft] = useState<Workstation | null>(null);
@@ -21,7 +22,7 @@ export function UserSettings({ role, user, controllerAccess, workstations, onRef
   const [remove, setRemove] = useState(false);
   const [saved, setSaved] = useState(true);
   const [fingerprints, setFingerprints] = useState<string[]>([]);
-  function edit(host: Workstation) { setFingerprints([]); setDraft({ ...host }); setSecret(""); setClearSecret(false); setRemove(false); setError(""); setMessage(""); setSaved(true); }
+  function edit(host: Workstation) { setFingerprints([]); setDraft({ ...host, location: host.location ?? "unspecified" }); setSecret(""); setClearSecret(false); setRemove(false); setError(""); setMessage(""); setSaved(true); }
   function change(patch: Partial<Workstation>) { setFingerprints([]); setDraft(draft ? { ...draft, ...patch } : null); setSaved(false); setMessage(""); }
   async function perform(work: () => Promise<void>) {
     setBusy(true); setError(""); setMessage("");
@@ -35,8 +36,8 @@ export function UserSettings({ role, user, controllerAccess, workstations, onRef
     {section==="runtimes"||!controllerAccess?<RuntimeSettings/>:<div className="legacy-workstations">
     <header><div><h2>SSH workstations</h2><p>Save workstations once, then choose them in an agent or project.</p></div><Button onClick={() => edit(empty)}><Plus size={16}/>Add workstation</Button></header>
     <div className="workstation-settings-layout"><nav aria-label="Saved workstations">
-      <div className="workstation-local"><Monitor size={18}/><span><strong>Local</strong><small>This machine</small></span></div>
-      {workstations.map(host => <button key={host.id} className={draft?.id === host.id ? "selected" : ""} onClick={() => edit(host)}><Server size={18}/><span><strong>{host.name}</strong><small>{host.username}@{host.host_ip || host.hostname}:{host.port}</small></span></button>)}
+      <div className="workstation-local"><Monitor size={18}/><span><strong>{applicationEnvironmentLabel}</strong><small>{applicationEnvironmentHelp}</small></span></div>
+      {workstations.map(host => <button key={host.id} className={draft?.id === host.id ? "selected" : ""} onClick={() => edit(host)}><Server size={18}/><span><strong>{workstationLabel(host)}</strong><small>{host.username}@{host.host_ip || host.hostname}:{host.port}</small></span></button>)}
       <form className="form-stack workstation-import" onSubmit={e => { e.preventDefault(); void perform(async () => { const host = await post<Workstation>("/workstations/import", { alias: alias.trim() }); await onRefresh(); edit(host); setAlias(""); setMessage("SSH settings imported."); }); }}>
         <Label htmlFor="import-ssh-alias">Import existing SSH alias</Label><Input id="import-ssh-alias" value={alias} onChange={e => setAlias(e.target.value)} placeholder="e.g. linux-example"/><Button type="submit" variant="outline" disabled={busy || !alias.trim()}>Import alias</Button>
       </form>
@@ -48,11 +49,13 @@ export function UserSettings({ role, user, controllerAccess, workstations, onRef
       <h2>{draft.id ? draft.name : "New workstation"}</h2>
       <fieldset disabled={busy} className="form-stack">
         <Label htmlFor="host-name">Display name</Label><Input id="host-name" required maxLength={100} value={draft.name} onChange={e => change({ name: e.target.value })}/>
+        <Label htmlFor="host-location">Location</Label><select id="host-location" value={draft.location} aria-describedby="host-location-help" onChange={e => change({ location: e.target.value as Workstation["location"] })}><option value="unspecified">Unspecified · Saved SSH</option><option value="local_host">Local · Application host</option><option value="remote">Remote · Another machine</option></select>
+        <p id="host-location-help" className="hint">Local means the host instance running personal-agentic. Location is a label you set; it does not verify host identity or change SSH access.</p>
         <div className="settings-fields"><div><Label htmlFor="host-hostname">Hostname</Label><Input id="host-hostname" required value={draft.hostname} placeholder="workstation.example.com" onChange={e => change({ hostname: e.target.value })}/></div><div><Label htmlFor="host-ip">Host IP (optional)</Label><Input id="host-ip" value={draft.host_ip} placeholder="Use instead of DNS" onChange={e => change({ host_ip: e.target.value })}/></div></div>
         <div className="settings-fields"><div><Label htmlFor="host-port">SSH port</Label><Input id="host-port" type="number" min={1} max={65535} required value={draft.port} onChange={e => change({ port: Number(e.target.value) })}/></div><div><Label htmlFor="host-user">Username</Label><Input id="host-user" required autoComplete="off" value={draft.username} onChange={e => change({ username: e.target.value })}/></div></div>
         <Label htmlFor="host-auth">Authentication</Label><select id="host-auth" value={draft.auth} onChange={e => { change({ auth: e.target.value }); setSecret(""); setClearSecret(true); }}><option value="key">SSH key</option><option value="password">Password</option><option value="ssh_config">Existing SSH config / agent</option></select>
         {draft.auth === "ssh_config" && <><Label htmlFor="host-alias">SSH config alias</Label><Input id="host-alias" required value={draft.ssh_alias} onChange={e => change({ ssh_alias: e.target.value })}/><p className="hint">Keeps this alias's existing keys, host-key identity and jump-host settings.</p></>}
-        {draft.auth === "key" && <><Label htmlFor="host-key">SSH private-key path</Label><Input id="host-key" required value={draft.ssh_key_path} onChange={e => change({ ssh_key_path: e.target.value })} placeholder="Absolute key-file path on this machine"/></>}
+        {draft.auth === "key" && <><Label htmlFor="host-key">SSH private-key path</Label><Input id="host-key" required value={draft.ssh_key_path} onChange={e => change({ ssh_key_path: e.target.value })} placeholder="Absolute key-file path accessible to the service"/></>}
         {draft.auth !== "ssh_config" && <><Label htmlFor="host-secret">{draft.auth === "password" ? "Password" : "Key passphrase (optional)"}</Label><Input id="host-secret" type="password" autoComplete="new-password" value={secret} required={draft.auth === "password" && (!draft.secret_saved || clearSecret)} placeholder={draft.secret_saved ? "Saved · leave blank to keep" : ""} onChange={e => { setSecret(e.target.value); setSaved(false); }}/><p className="hint">Encrypted for the Windows account running the platform. Never included in agent profiles or exports.</p>{draft.secret_saved && draft.auth === "key" && <label className="settings-checkbox"><input type="checkbox" checked={clearSecret} onChange={e => { setClearSecret(e.target.checked); setSaved(false); }}/>Remove saved passphrase</label>}</>}
       </fieldset>
       <div className="settings-actions"><Button type="submit" disabled={busy}>{busy ? "Working…" : "Save workstation"}</Button>{draft.id && <Button type="button" variant="outline" disabled={busy || !saved} onClick={() => void perform(async () => {

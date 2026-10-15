@@ -104,7 +104,7 @@ Your answer continues the same platform run and native session; it does not crea
 
 Codex `exec` is non-interactive: this integration uses its supported MCP tool calls for clarification, rather than the TUI/app-server input protocol. Each new run is instructed to use `ask_user` instead of terminal stdin or ending with a question. Permission settings are unchanged; these cards do not grant additional command or filesystem permissions. Plain questions in older completed replies can still be answered with Reply or an `@agent` message.
 
-## Remote workstation agents
+## SSH workstation agents
 
 Open **User settings** by clicking your name above the account bar, or `/settings/workstations`. Save a display name, hostname, optional IP override, SSH port, username and either an existing SSH config alias, a private-key path, or a password. **Import existing SSH alias** reuses advanced OpenSSH settings, including jump hosts and host-key identity. Previously attached aliases are imported automatically without changing agent profiles or session IDs.
 
@@ -112,7 +112,11 @@ Passwords and optional private-key passphrases are encrypted with Windows DPAPI 
 
 For a new key/password connection, **Review host keys**, compare fingerprints with the workstation, then **Trust these host keys**. The service rescans and rejects keys that changed since review; accepted keys are stored only in this organization's state. **Test connection** verifies SSH, Python, the remote home directory and native Codex login. Wrong credentials, untrusted keys and unavailable hosts show errors. Changing a connection's destination retires its old sessions; changing its display name retains them. Changes are blocked during active work, and removal is blocked while agents/projects reference the workstation.
 
-In **Organization → agent → Workdir**, choose **Local · This machine** or a saved workstation under **Remote · Saved SSH settings**, then browse and attach the folder. The same dropdown is used when creating/editing a project. The workstation needs Linux/macOS, Python 3.11+, Git, and a signed-in Codex CLI with a file-based native login and model catalog. Local workdirs continue to work as before.
+In **User settings → Runtime → SSH workstations**, set each saved connection's **Location** explicitly. **Local** means the host instance running personal-agentic; **Remote** means another machine. Existing records and imported aliases start unclassified under **Saved SSH**. These are location labels, and all saved connections still use SSH. Changing location does not change the connection, workdir or native session; saving still requires the workstation to be idle.
+
+In **Organization → agent → Workdir**, choose a saved SSH workstation from those groups, or **Application environment** for direct execution in the service's environment. On Docker that environment is the application container; on a native installation it is the native application environment. It does not mean the browser's machine. The same dropdown is used during agent creation and project setup. Existing direct workdirs and SSH selections keep their targets. An older client that saves without location can reset the display classification to unspecified while retaining the connection.
+
+The SSH workstation needs Linux/macOS, Python 3.11+ and Git. Agent catalog discovery follows the selected harness and its native configuration; the existing **Test connection** action checks Codex readiness and its file-based login/catalog. Marking a host Local does not establish SSH trust or install a CLI. It also does not copy host credentials into the application container.
 
 Organization cards and settings show **Online**, **Offline**, **Needs attention**, or **Checking**, with the workstation name and checked time. Checks run approximately every 30 seconds; checks older than 90 seconds are stale. Online verifies SSH, the saved workdir, Codex login and workdir environment; a model request can still fail independently. Pausing an agent still controls whether it can receive work. Model/effort dropdowns come from that workstation's Codex catalog, and runs retain the resolved display name and arguments.
 

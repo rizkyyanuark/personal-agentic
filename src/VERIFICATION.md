@@ -15,6 +15,53 @@ The browser smoke tests in `frontend/tests/native-smoke.mjs` exercise the runnin
 
 Some phases require a signed-in provider CLI or a configured SSH workstation and may use provider quota. Keep test organizations and evidence outside the repository; never commit credentials, private addresses, runtime state, screenshots, or production run records.
 
+## Workstation location
+
+Use a disposable candidate with separate data, application home, and workdir on a
+loopback-only port. Provide one real SSH workstation named Workspace, initially
+stored without `location`, a trusted SSH alias to the same test account, and an
+existing readable workdir. The account must expose an actual Antigravity catalog;
+these checks do not submit an inference prompt. Existing production profiles,
+sessions, credentials, or configuration must not be edited for this smoke.
+
+From `src`, set private `AE_TEST_URL`, `AE_TEST_OWNER_KEY_FILE`,
+`AE_TEST_WORKSTATION_ID`, `AE_TEST_SSH_ALIAS`, `AE_TEST_WORKDIR`,
+`AE_TEST_PROOF_DIR`, and `AE_TEST_DISPOSABLE=true`, then run:
+
+Run the client where its disposable owner key is already available. On Linux,
+set `AE_TEST_BROWSER_EXECUTABLE` to the installed Chromium executable; otherwise
+the client uses the existing Windows Edge channel. A browser test container may
+mount only the disposable owner-key file read-only, without copying credentials
+off the candidate host.
+
+```sh
+node frontend/tests/workstation-location.mjs initial
+# Restart only the disposable candidate, preserving its own volumes/home.
+node frontend/tests/workstation-location.mjs restart
+```
+
+The initial phase verifies the real editor/API save, legacy and invalid inputs,
+Local/Remote/Saved SSH groups, application-environment separation, three selector
+entrypoints, a real SSH catalog/probe, project inheritance, historical alias,
+unavailable target, and failed-catalog refusal. It records desktop/mobile and CSS
+zoom screenshots and checks that no provider task was added. The restart phase
+checks the same saved ID, location, agent/project state and catalog after a real
+service restart. Screenshots and the private restart manifest stay outside Git.
+
+Local is an owner-declared host location, not verification of machine identity or
+host-key trust. Application environment means the container on Docker, and the
+application's native environment otherwise. Legacy records and imported aliases
+default to `unspecified`; an old client saving without the field can reset a
+classification to that value without changing the connection. Owners classify
+existing Workspace records explicitly through User settings -> SSH workstations.
+
+`cargo test --workspace --locked workstations::` also exercises actual routers,
+SQLite persistence/reopen, invalid location, unchanged profiles and SSH arguments,
+metadata-only session retention, destination-change session retirement, active
+run/terminal guards and denied controller access. Session/opaque-secret fixtures
+in those regressions establish persistence and authorization; they do not prove
+provider login, native resume, or a completed agent task.
+
 ## Production release checks
 
 Run the helper and CI deploy-client tests on Linux:

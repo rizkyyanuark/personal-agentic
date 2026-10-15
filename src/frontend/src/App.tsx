@@ -68,6 +68,7 @@ import { RuntimeSelect, HarnessSelect } from "./RuntimeSettings";
 import { availableHarnesses, harnessNames, type RegisteredRuntime } from "./runtimeCatalog";
 import { NewAgentDialog } from "./NewAgentDialog";
 import { WorkstationSelect } from "./WorkstationSelect";
+import { applicationEnvironmentLabel, sshWorkstationLabel } from "./workstationLabels";
 import { UserSettings } from "./UserSettings";
 import type { Workstation } from "./bindings/Workstation";
 import { GroupDialog } from "./GroupDialog";
@@ -800,7 +801,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                     </div>
                     <h2>{group?.project?group.name:"Your team starts here."}</h2>
                     <p>
-                      {group?.project ? `Project workspace: ${group.project.workdir.ssh_host ? (data?.workstations?.find(h => h.id === group.project?.workdir.ssh_host)?.name ?? group.project.workdir.ssh_host) + ": " : ""}${group.project.workdir.path}` : "A shared space to give direction, work together, and see what gets done."}
+                      {group?.project ? `Project workspace: ${group.project.workdir.ssh_host ? sshWorkstationLabel(group.project.workdir.ssh_host, data?.workstations ?? []) + ": " : group.project.workdir.runtime_id ? "" : applicationEnvironmentLabel + ": "}${group.project.workdir.path}` : "A shared space to give direction, work together, and see what gets done."}
                     </p>
                     <div className="intro-chips">
                       <span>
@@ -1755,9 +1756,9 @@ function AgentInspector({
         ))}
       </nav>
       <div className="inspector-body">
-        <p className="project-kind">{agent.project_id ? "Project-specific agent" : agent.workdir?.ssh_host ? "Remote organization agent" : "Organization agent"}</p>
+        <p className="project-kind">{agent.project_id ? "Project-specific agent" : "Organization agent"}</p>
         {projectWorkdir && <p className="hint">Runs, terminal and skills use this project's workdir: <code>{projectWorkdir.path}</code>. <a href={`/projects/${agent.project_id}/structure`}>Open project structure</a></p>}
-        {effectiveAgent.workdir?.ssh_host && <WorkstationStatus host={workstations.find(h => h.id === effectiveAgent.workdir?.ssh_host)?.name ?? effectiveAgent.workdir.ssh_host} connection={connection} />}
+        {effectiveAgent.workdir?.ssh_host && <WorkstationStatus host={sshWorkstationLabel(effectiveAgent.workdir.ssh_host, workstations)} connection={connection} />}
         {section === "Profile" && (
           <div className="form-stack">
             <Label htmlFor="profile-name">Display name</Label>
