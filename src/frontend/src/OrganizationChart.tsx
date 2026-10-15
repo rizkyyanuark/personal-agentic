@@ -28,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar } from "./Avatar";
 import { WorkstationStatus } from "./WorkstationStatus";
+import { applicationEnvironmentLabel, sshWorkstationLabel } from "./workstationLabels";
 import type { Workstation } from "./bindings/Workstation";
 import type { Connection } from "./bindings/Connection";
 import type { Agent } from "./bindings/Agent";
@@ -317,11 +318,11 @@ export function OrganizationChart({
   const renderedNodes = layout.nodes.map((node) => {
     const card = savedLayout[node.id];
     const workdir = node.data.agent?.workdir;
-    const hostName = workstations.find(host => host.id === workdir?.ssh_host)?.name;
+    const hostName = workdir?.ssh_host ? sshWorkstationLabel(workdir.ssh_host, workstations) : undefined;
     const runtimeId = workdir?.runtime_id ?? node.data.agent?.runtime_id;
     const runtimeName = runtimeId
       ? runtimes?.find(runtime => runtime.id === runtimeId)?.name ?? (runtimeError || runtimes ? "Runtime unavailable" : "Loading…")
-      : !workdir ? "Not assigned" : workdir.ssh_host ? hostName ?? workdir.ssh_host : "Local";
+      : !workdir ? "Not assigned" : workdir.ssh_host ? hostName : applicationEnvironmentLabel;
     return {
       ...node,
       ...(card

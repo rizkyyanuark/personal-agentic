@@ -18,11 +18,25 @@ use std::{
 };
 use ts_rs::TS;
 
+/// Owner-declared location for display; never selects transport or grants access.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum WorkstationLocation {
+    LocalHost,
+    Remote,
+    #[default]
+    Unspecified,
+}
+
 #[derive(Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Workstation {
     pub id: String,
     pub name: String,
+    /// Legacy records, payloads and imported aliases remain unclassified.
+    #[serde(default)]
+    pub location: WorkstationLocation,
     pub hostname: String,
     pub host_ip: String,
     pub port: u16,
@@ -114,6 +128,7 @@ fn imported(alias: &str) -> Result<Workstation> {
     Ok(Workstation {
         id: alias.into(),
         name: alias.into(),
+        location: WorkstationLocation::Unspecified,
         hostname: values.get("hostname").unwrap_or(&alias).to_string(),
         host_ip: String::new(),
         port: values.get("port").unwrap_or(&"22").parse()?,
@@ -587,6 +602,10 @@ fn protect(_: &[u8], _: bool) -> Result<Vec<u8>> {
         "Saved passwords/passphrases require the Windows deployment; use an SSH key or agent on this host"
     )
 }
+
+#[cfg(test)]
+#[path = "workstation_location_tests.rs"]
+mod location_tests;
 
 #[cfg(test)]
 mod tests {
