@@ -8,11 +8,11 @@ Folder change adalah kontrak perubahan, bukan pengganti GitLab Issue. [ADR](../d
 
 ## Pekerjaan terkait
 
-- [ARF-001: artefak run Antigravity](changes/ARF-001-antigravity-run-artifacts/proposal.md), [Issue 1](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/1).
+- [ARF-001: artefak run Antigravity](changes/archive/2026-10-13-ARF-001-antigravity-run-artifacts/proposal.md), [Issue 1](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/1).
 - [CAT-001: katalog model sesuai runtime](changes/archive/2026-10-14-CAT-001-runtime-model-catalog/proposal.md), [Issue 6](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/6).
 - [CI-003: CI sederhana dan deployment otomatis](changes/archive/2026-10-14-CI-003-simple-automatic-releases/proposal.md), [Issue 5](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/5).
-- [DEP-001: deployment readiness dan recovery](changes/DEP-001-deployment-readiness-recovery/proposal.md), [Issue 3](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/3).
-- [DEP-002: deployment drain](changes/DEP-002-deployment-drain/proposal.md), [Issue 4](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/4).
+- [DEP-001: deployment readiness dan recovery](changes/archive/2026-10-13-DEP-001-deployment-readiness-recovery/proposal.md), [Issue 3](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/3).
+- [DEP-002: deployment drain](changes/archive/2026-10-13-DEP-002-deployment-drain/proposal.md), [Issue 4](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/4).
 - [OPS-001: maintenance host dan resource governance](changes/archive/2026-10-14-OPS-001-host-hygiene-and-resource-governance/proposal.md), [Issue 7](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/7).
 - [AGT-001: audit konkurensi subagent dan ownership proses](changes/archive/2026-10-14-AGT-001-subagent-concurrency-and-process-guard/proposal.md), [Issue 8](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/8).
 - [Issue 2: kontrak development](https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic/-/work_items/2).

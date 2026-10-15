@@ -30,7 +30,7 @@ Use the existing Artifact persistence and preview to save explicitly linked Mark
 - Historical imports save the version read at import; they cannot attest to bytes at the old run's completion.
 - Linked images and auxiliary files remain separate references.
 - Existing artifact JSON gains optional provenance and classification fields; old records remain readable without a database migration.
-- [Pinned CCCC and Paperclip precedents](../../../src/UPSTREAM.md) support validated scope, durable stored deliverables and run provenance. The exact Antigravity brain/session adapter is this application's extension.
+- [Pinned CCCC and Paperclip precedents](../../../../src/UPSTREAM.md) support validated scope, durable stored deliverables and run provenance. The exact Antigravity brain/session adapter is this application's extension.
 
 ## Implementation and release
 
