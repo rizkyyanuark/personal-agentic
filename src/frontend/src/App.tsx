@@ -4,6 +4,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -79,6 +80,7 @@ import { QuestionCard } from "./QuestionCard";
 import type { QuestionRequest } from "./bindings/QuestionRequest";
 import { ScheduledTasks } from "./ScheduledTasks";
 import { api, post, put, requestId, ApiFailure } from "./api";
+import { useActionFeedback, ActionStatus, PendingIcon, type ActionResult } from "./ActionFeedback";
 import type { Agent } from "./bindings/Agent";
 import type { Harness } from "./bindings/Harness";
 import type { Group } from "./bindings/Group";
@@ -148,6 +150,8 @@ function chatMessagesPath(groupId: string, side: string | null, before?: string)
 }
 export default function App({role = "owner", controllerAccess = true, user = "owner", workspaceName = "My workspace", workspaceId = "default", workspaceSettings}: {role?: string; controllerAccess?: boolean; user?: string; workspaceName?: string; workspaceId?: string; workspaceSettings?: ReactNode}) {
   const [data, setData] = useState<StateView | null>(null);
+  const activeApp = useRef(true);
+  useLayoutEffect(() => { activeApp.current = true; return () => { activeApp.current = false; }; }, []);
   const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [navigationOpen, setNavigationOpen] = useState(true);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
@@ -174,6 +178,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
         (route.runId && !selectedRun)));
   const tab = routeError ? "NotFound" : route.view;
   function go(patch: Partial<Route>, replace = false) {
+    if (!activeApp.current) return;
     setMobileNavigationOpen(false);
     setFilePreview(null);
     previewTrigger.current = null;
@@ -202,7 +207,10 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
   const [error, setError] = useState("");
   const [deletedAgentsOpen, setDeletedAgentsOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const [enrollmentToken, setEnrollmentToken] = useState("");
   const [draft, setDraft] = useState("");
+  const currentDraft = useRef(draft);
+  useLayoutEffect(() => { currentDraft.current = draft; }, [draft]);
   const [attachments, setAttachments] = useState<string[]>([]);
   const [reply, setReply] = useState<Message | null>(null);
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
@@ -242,6 +250,8 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
   const [searchMedia, setSearchMedia] = useState("documents");
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const sendFeedback = useActionFeedback(`chat-send:${groupId}:${sideChatId ?? "main"}`, `${tab}:${groupId}:${sideChatId}`);
+  const uploadFeedback = useActionFeedback(`upload:${groupId}`, `${tab}:${groupId}:${sideChatId}`);
   const [connected, setConnected] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -251,10 +261,10 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
   const pendingMessage = useRef<{ fingerprint: string; id: string } | null>(
     null,
   );
-  const groupRef = useRef({ groupId, sideChatId });
-  useEffect(() => {
-    groupRef.current = { groupId, sideChatId };
-  }, [groupId, sideChatId]);
+  const groupRef = useRef({ groupId, sideChatId, tab });
+  useLayoutEffect(() => {
+    groupRef.current = { groupId, sideChatId, tab };
+  }, [groupId, sideChatId, tab]);
 
   const perform = useCallback(
     (work: () => Promise<void>, clearError = true) =>
@@ -270,6 +280,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
     const response = await api<StateView>("/state");
     // Deleted groups remain recoverable in storage but are not exposed in platform navigation.
     const snapshot = { ...response, groups: response.groups.filter((g) => !g.deleted_at) };
+    if (snapshot.cursor < cursor.current) return;
     setData(snapshot);
     cursor.current = snapshot.cursor;
     const { groupId: id, sideChatId: side } = groupRef.current;
@@ -320,7 +331,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
   }, [authenticated, data, routeError, route, groupId, selectedAgent]);
   useEffect(() => {
     if (!authenticated) return;
-    if (role !== "owner") { const poll = setInterval(() => {void refresh().then(()=>setConnected(true), (e: unknown)=>{setConnected(false);setError(e instanceof Error?e.message:String(e));});}, 2000); return () => clearInterval(poll); }
+    if (role !== "owner") { const poll = setInterval(() => {void refresh().then(()=>setConnected(true), ()=>setConnected(false));}, 2000); return () => clearInterval(poll); }
     let timer: ReturnType<typeof setTimeout> | null = null;
     const source = new EventSource(`/api/events?after=${cursor.current}`);
     source.onopen = () => setConnected(true);
@@ -329,7 +340,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
       if (!timer)
         timer = setTimeout(() => {
           timer = null;
-          void perform(refresh, false);
+          void refresh().then(() => setConnected(true), () => setConnected(false));
         }, 350);
     };
     return () => {
@@ -408,8 +419,10 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
 
   async function send() {
     if (!draft.trim() || busy || groupClosed) return;
-    setBusy(true);
-    await perform(async () => {
+    const submittedDraft = draft;
+    await sendFeedback.run("send", async () => {
+      setBusy(true);
+      try {
       const content = {
         group_id: groupId,
         body: draft,
@@ -422,18 +435,22 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
       if (pendingMessage.current?.fingerprint !== fingerprint)
         pendingMessage.current = { fingerprint, id: requestId() };
       const sent = await post<Message>("/messages", { id: pendingMessage.current.id, ...content });
-      if (sent.command === "btw" && sent.side_chat_id) go({ sideChatId: sent.side_chat_id, view: "Chat" });
+      const sameChat = groupRef.current.groupId === groupId && groupRef.current.sideChatId === sideChatId;
+      if (sent.command === "btw" && sent.side_chat_id && sameChat && groupRef.current.tab === "Chat") go({ sideChatId: sent.side_chat_id, view: "Chat" });
       pendingMessage.current = null;
       followLatest.current = true;
-      setDraft("");
-      setReply(null);
-      setAttachments([]);
-      await refresh();
-    });
-    setBusy(false);
+      if (sameChat) {
+        if (currentDraft.current === submittedDraft) setDraft("");
+        setReply(current => current?.id === content.reply_to ? null : current);
+        setAttachments(current => current.filter(id => !content.artifacts.includes(id)));
+      }
+      try { await refresh(); }
+      catch { return { kind: "warning", message: "Message accepted, but the conversation could not refresh. Refresh the view without sending again." }; }
+      } finally { setBusy(false); }
+    }, { errorMessage: "Message acceptance could not be confirmed. Your draft is kept; retrying the same message uses its original request ID." });
   }
   async function upload(file: File) {
-    await perform(async () => {
+    await uploadFeedback.run("upload", async () => {
       const form = new FormData();
       form.append("group_id", groupId);
       form.append("file", file);
@@ -441,9 +458,11 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
         method: "POST",
         body: form,
       });
-      if (tab === "Chat") setAttachments((old) => [...old, artifact.id]);
-      await refresh();
-    });
+      if (tab === "Chat" && groupRef.current.groupId === groupId && groupRef.current.sideChatId === sideChatId) setAttachments((old) => [...old, artifact.id]);
+      try { await refresh(); }
+      catch { return { kind: "warning", message: "File stored, but the view could not refresh. Refresh before uploading it again." }; }
+      return { kind: "success", message: tab === "Chat" ? "Attachment stored and ready to send." : "File stored. Index it to make it searchable." };
+    }, { errorMessage: "Upload could not be confirmed. Check the files before uploading again." });
   }
 
   async function addReportToKnowledge(file: MarkdownFile, source: Blob): Promise<Artifact> {
@@ -1042,7 +1061,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                       value={draft}
                       agents={participants}
                       ref={composerInput}
-                      onChange={setDraft}
+                      onChange={value => { setDraft(value); sendFeedback.clear(); }}
                       onSend={() => void send()}
                       busy={busy}
                       placeholder={chatQuestions.length ? "Answer the question above to continue · new messages are queued" : sideChatId ? "Message this side chat · independent session" : `Message #${group?.name ?? ""} · / for commands`}
@@ -1069,9 +1088,11 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                       <button aria-label="Mention an agent" onMouseDown={e=>e.preventDefault()} onClick={()=>composerInput.current?.openMentions()}> @ </button>
                       <button
                         aria-label="Attach file"
+                        disabled={Boolean(uploadFeedback.pending)}
+                        aria-busy={Boolean(uploadFeedback.pending)}
                         onClick={() => uploadRef.current?.click()}
                       >
-                        <Paperclip size={18} />
+                        {uploadFeedback.pending ? <PendingIcon pending size={18} /> : <Paperclip size={18} />}
                       </button>
                       <span className="chat-lead-hint">
                         {draft.trim().startsWith("/")
@@ -1084,11 +1105,12 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                       </span>
                       <Button
                         aria-label="Send message"
+                        aria-busy={Boolean(sendFeedback.pending)}
                         disabled={!draft.trim() || busy}
                         size="icon"
                         onClick={() => void send()}
                       >
-                        <ArrowUp size={18} />
+                        {sendFeedback.pending ? <PendingIcon pending size={18} /> : <ArrowUp size={18} />}
                       </Button>
                     </div>
                   </div>
@@ -1097,6 +1119,10 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                     commands · @name to send directly{" "}
                     <span>Agent activity is saved to your organization.</span>
                   </p>
+                  <ActionStatus feedback={sendFeedback}>
+                    {sendFeedback.result?.kind === "warning" && <Button variant="outline" onClick={() => void sendFeedback.run("refresh", async () => { await refresh(); return { kind: "success", message: "Conversation refreshed." }; }, { errorMessage: "Conversation could not refresh. The previously accepted message remains saved." })}>Retry refresh</Button>}
+                  </ActionStatus>
+                  <ActionStatus feedback={uploadFeedback} />
                 </div>}
               </>
             )}
@@ -1159,6 +1185,8 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
             )}
             {tab === "Knowledge" && (
               <KnowledgeExplorer
+                groupId={groupId}
+                uploadPending={Boolean(uploadFeedback.pending)}
                 readOnly={groupClosed}
                 key={`${groupId}:${groupClosed}`}
                 files={
@@ -1167,9 +1195,11 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                 groupName={group?.name ?? ""}
                 onUpload={() => uploadRef.current?.click()}
                 onRefresh={refresh}
-                perform={perform}
               />
             )}
+            {tab === "Knowledge" && <ActionStatus feedback={uploadFeedback}>
+              {uploadFeedback.result?.kind === "warning" && <Button variant="outline" onClick={() => void uploadFeedback.run("refresh", async () => { await refresh(); return { kind: "success", message: "Files refreshed." }; }, { errorMessage: "Files could not refresh. Check the stored file before uploading it again." })}>Retry refresh</Button>}
+            </ActionStatus>}
             {(tab === "Action board" || tab === "Actions") && data && <ActionBoard key={tab === "Actions" ? groupId : "organization"} data={data} groupId={tab === "Actions" ? groupId : undefined} onRefresh={refresh} onOpenRun={(groupId,runId)=>go({groupId,view:"Runs",runId,agentId:null})}/>}
             {["Profile", "User settings", "Workspace settings"].includes(tab) && <section className="user-settings-shell" aria-label="User settings">
               <header className="settings-shell-heading"><h1>User settings</h1><nav className="settings-tabs" aria-label="User settings sections">
@@ -1179,7 +1209,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
               </nav></header>
             {tab === "Profile" && <section className="user-settings"><div className="settings-page"><header className="settings-page-heading"><p className="settings-kicker">ACCOUNT</p><h1>Profile</h1><p>Your signed-in account and workspace access.</p></header><section className="settings-card"><div className="settings-section-title"><UserRound size={20}/><h2>{user}</h2></div><dl className="profile-details"><dt>Account</dt><dd>{user === "owner" ? "Platform administrator" : "Matrix account"}</dd><dt>Workspace</dt><dd>{workspaceName}</dd><dt>Role</dt><dd>{role === "owner" ? "Owner" : "Member"}</dd></dl></section></div></section>}
             {tab === "Workspace settings" && <section className="user-settings"><div className="settings-page"><header className="settings-page-heading"><p className="settings-kicker">SETTINGS</p><h1>Workspace</h1><p>Manage your workspace, people, and their access.</p></header>{workspaceSettings}</div></section>}
-            {tab === "User settings" && <UserSettings role={role} user={user} controllerAccess={controllerAccess} workstations={data?.workstations ?? []} onRefresh={refresh}/>}
+            {tab === "User settings" && <UserSettings role={role} user={user} controllerAccess={controllerAccess} workstations={data?.workstations ?? []} onRefresh={refresh} enrollmentToken={enrollmentToken} onEnrollmentTokenChange={setEnrollmentToken}/>}
             </section>}
             {tab === "Structure" && group?.project && data && <div className="project-structure-view">{projectTeamOpen && <ProjectTeam key={`${group.id}:${JSON.stringify(group.project.members)}`} group={group} agents={data.agents} onSaved={refresh} onClose={() => setProjectTeamOpen(false)} onAdd={() => { setNewAgentProject(groupId); setNewAgent(true); }}/>}<Suspense fallback={<div className="empty-state">Opening project structure…</div>}><OrganizationChart key={groupId} workstations={data.workstations ?? []}
               projectName={group.name} layoutPath={`/organization/layout?group_id=${encodeURIComponent(groupId)}`}
@@ -1237,7 +1267,7 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
             {agent && !preview && (
               <AgentInspector
                 controllerAccess={controllerAccess}
-                key={`${agent.id}-${agent.revision}`}
+                key={agent.id}
                 agent={agent}
                 workstations={data?.workstations ?? []}
                 connection={data?.connections?.[agent.id]}
@@ -1353,8 +1383,6 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
           go(saved.deleted_at ? { view: "Organization", agentId: null, runId: null } : { groupId: saved.id, view: saved.project && !groupEditor.id ? "Structure" : "Chat", agentId: null, runId: null });
           if (saved.project && !groupEditor.id) setProjectTeamOpen(true);
           setReply(null); setAttachments([]);
-          setNotice(saved.deleted_at ? "Group deleted and hidden from the platform."
-            : saved.archived_at ? "Group archived. Find it beside Sign out. Scheduled tasks are paused." : saved.project && !groupEditor.id ? "Project created. Add agents and reporting lines below." : "Group saved. Scheduled tasks can be reviewed in their tab.");
         }} />}
       <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
         <DialogContent className="search-dialog">
@@ -1584,6 +1612,10 @@ function OrganizationRelationships({
   );
 }
 
+function editableProfile(agent: Agent): Agent {
+  return { ...agent, instructions: [...new Set([agent.instructions, agent.agents_md].filter(text => text.trim()))].join("\n\n"), agents_md: "" };
+}
+
 function AgentInspector({
   controllerAccess,
   workstations,
@@ -1611,15 +1643,19 @@ function AgentInspector({
   onSaved: () => Promise<void>;
   perform: (work: () => Promise<void>) => Promise<void>;
 }) {
-  const [edited, setEdited] = useState(() => ({
-    ...agent,
-    instructions: [
-      ...new Set(
-        [agent.instructions, agent.agents_md].filter((text) => text.trim()),
-      ),
-    ].join("\n\n"),
-    agents_md: "",
-  }));
+  const [edited, setEdited] = useState(() => editableProfile(agent));
+  const [baseline, setBaseline] = useState(() => editableProfile(agent));
+  const [legacyPending, setLegacyPending] = useState(() => Boolean(agent.agents_md.trim()));
+  const accepted = useRef(baseline);
+  const draftProfile = useRef(edited);
+  useLayoutEffect(() => { draftProfile.current = edited; }, [edited]);
+  const feedback = useActionFeedback(`agent:${agent.id}`, section);
+  const [needsReview, setNeedsReview] = useState(false);
+  const [retrySave, setRetrySave] = useState(false);
+  const [reviewed, setReviewed] = useState<Agent | null>(null);
+  const dirty = JSON.stringify(edited) !== JSON.stringify(baseline) || legacyPending;
+  const externalChange = agent.revision > baseline.revision;
+  const profileLocked = Boolean(feedback.pending);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [folderPicker, setFolderPicker] = useState(false);
@@ -1639,7 +1675,6 @@ function AgentInspector({
   const [scriptContent, setScriptContent] = useState("");
   const [sessionList, setSessionList] = useState<Session[]>([]);
   const [revisionList, setRevisionList] = useState<Agent[]>([]);
-  const [saved, setSaved] = useState(false);
   const [models, setModels] = useState<CodexSettings | null>(null);
   const [organization, setOrganization] = useState<OrganizationContext | null>(
     null,
@@ -1683,11 +1718,52 @@ function AgentInspector({
     selectedModel?.slug === models?.model
       ? models?.reasoning
       : selectedModel?.default_reasoning_level;
-  async function save(next = edited) {
-    const result = await put<Agent>(`/agents/${agent.id}`, next);
-    setEdited(result);
-    setSaved(true);
-    await onSaved();
+  const adoptProfile = useCallback((value: Agent) => {
+    const next = editableProfile(value);
+    accepted.current = next;
+    setBaseline(next); setEdited(next); setLegacyPending(Boolean(value.agents_md.trim()));
+    setPath(next.workdir?.path ?? ""); setSshHost(next.workdir?.ssh_host ?? "");
+    setRuntimeId(projectWorkdir?.runtime_id ?? next.runtime_id ?? next.workdir?.runtime_id ?? "");
+    setProbe(""); setNeedsReview(false); setReviewed(null); setRetrySave(false);
+  }, [projectWorkdir?.runtime_id]);
+  useEffect(() => {
+    if (agent.revision <= accepted.current.revision || feedback.pending || needsReview) return;
+    if (JSON.stringify(draftProfile.current) === JSON.stringify(accepted.current)) adoptProfile(agent);
+  }, [agent, feedback.pending, needsReview, adoptProfile]);
+  const resultKind = feedback.result?.kind;
+  const clearFeedback = feedback.clear;
+  useEffect(() => {
+    if (dirty && resultKind === "success") clearFeedback();
+  }, [dirty, resultKind, clearFeedback]);
+  async function persistProfile(next: Agent, action: string): Promise<ActionResult> {
+      let result: Agent;
+      try { result = await put<Agent>(`/agents/${agent.id}`, next); }
+      catch (error) {
+        if (error instanceof ApiFailure && error.message === "Profile changed since it was opened; reload before saving") {
+          setNeedsReview(true);
+          return { kind: "error", message: "This profile changed elsewhere. Your draft is kept. Check the saved profile before saving again." };
+        }
+        if (error instanceof ApiFailure && /^Timeout must be/.test(error.message)) return { kind: "error", message: "Run timeout must be between 10 and 14400 seconds. Your draft is kept." };
+        setNeedsReview(true);
+        return { kind: "warning", message: `Save not confirmed for ${agent.name}. Your draft is kept. Check saved state before trying again; configuration files may not have been updated.` };
+      }
+      adoptProfile(result);
+      try { await onSaved(); }
+      catch { return { kind: "warning", message: `${agent.name}: configuration saved, but the view could not refresh. Retry refresh without saving again.` }; }
+      return { kind: "success", message: action === "restore" ? `${agent.name}: configuration restored as a new revision. Applies to the next run.` : `${agent.name}: changes saved. Instructions apply to the next run.` };
+  }
+  async function save(next = edited, action = "save") {
+    if (needsReview || externalChange) return;
+    await feedback.run(action, () => persistProfile(next, action));
+  }
+  async function checkSavedProfile() {
+    await feedback.run("review", async () => {
+      const state = await api<StateView>("/state");
+      const current = state.agents.find(value => value.id === agent.id);
+      if (!current) return { kind: "error", message: "The agent is no longer available. Your draft is kept." };
+      setReviewed(current);
+      return { kind: "warning", message: `Saved revision ${current.revision} is available for review. Your draft is kept; reading stored data does not confirm configuration-file updates.` };
+    }, { errorMessage: "Could not read the saved profile. Your draft is kept. Try checking again." });
   }
   const loadFile = useCallback(
     async (relative: string, scripts: boolean) => {
@@ -1759,8 +1835,16 @@ function AgentInspector({
         <p className="project-kind">{agent.project_id ? "Project-specific agent" : "Organization agent"}</p>
         {projectWorkdir && <p className="hint">Runs, terminal and skills use this project's workdir: <code>{projectWorkdir.path}</code>. <a href={`/projects/${agent.project_id}/structure`}>Open project structure</a></p>}
         {effectiveAgent.workdir?.ssh_host && <WorkstationStatus host={sshWorkstationLabel(effectiveAgent.workdir.ssh_host, workstations)} connection={connection} />}
+        {(externalChange || needsReview) && <div className="profile-conflict">
+          <p role={externalChange && !needsReview && !profileLocked ? "alert" : undefined}>{externalChange ? "This profile has a newer saved revision. Your draft has been kept." : "The last save could not be confirmed. Check saved state before another save."}</p>
+          <Button variant="outline" disabled={profileLocked} aria-busy={feedback.isPending("review")} onClick={() => void checkSavedProfile()}><PendingIcon pending={feedback.isPending("review")} />Check saved profile</Button>
+          {reviewed && <><details><summary>Saved revision {reviewed.revision}</summary><p>{reviewed.name} · {reviewed.position}</p><pre>{editableProfile(reviewed).instructions}</pre></details>
+            <Button variant="outline" disabled={profileLocked} onClick={() => { adoptProfile(reviewed); feedback.clear(); }}>Discard draft and load saved profile</Button>
+            <Button variant="outline" disabled={profileLocked} onClick={() => { const nextBaseline = editableProfile(reviewed); accepted.current = nextBaseline; setBaseline(nextBaseline); setEdited(current => ({ ...current, revision: reviewed.revision })); setRetrySave(needsReview); setNeedsReview(false); setReviewed(null); feedback.clear(); }}>Keep my draft using saved revision</Button>
+            <p className="hint">Keeping your draft lets the next explicit save replace the reviewed configuration. It does not retry the previous save.</p></>}
+        </div>}
         {section === "Profile" && (
-          <div className="form-stack">
+          <div className="form-stack"><fieldset className="form-stack profile-lock" disabled={profileLocked}>
             <Label htmlFor="profile-name">Display name</Label>
             <Input
               id="profile-name"
@@ -1821,7 +1905,7 @@ function AgentInspector({
             </details>
             <RuntimeSelect value={runtimeId} onLoaded={setRuntimes} disabled={Boolean(projectWorkdir)} allowController={controllerAccess}
               onChange={id => {
-                setRuntimeId(id); setSshHost(""); setPath(""); setProbe(""); setModels(null); setModelError(""); setSaved(false);
+                setRuntimeId(id); setSshHost(""); setPath(""); setProbe(""); setModels(null); setModelError("");
                 const available = availableHarnesses(runtimes.find(runtime => runtime.id === id));
                 setEdited({...edited, runtime_id: id || undefined, workdir: null, model: "", reasoning: "", harness: available.includes(edited.harness) ? edited.harness : available[0] ?? edited.harness});
               }} />
@@ -1933,7 +2017,7 @@ function AgentInspector({
               />{" "}
               Agent enabled
             </label>
-            <Button
+            </fieldset><Button
               variant="outline"
               onClick={() =>
                 void perform(async () => {
@@ -1951,7 +2035,7 @@ function AgentInspector({
         )}
         {section === "Workdir" && projectWorkdir && <div className="form-stack"><h3>Project workdir</h3><p>Runtime and workdir are inherited from this project.</p><code>{projectWorkdir.path}</code><a href={`/projects/${agent.project_id}/structure`}>Open project structure to manage its workdir</a></div>}
         {section === "Workdir" && !projectWorkdir && (
-          <div className="form-stack">
+          <fieldset className="form-stack profile-lock" disabled={profileLocked}>
             <div className="workdir-icon">
               <FolderOpen size={26} />
             </div>
@@ -2017,17 +2101,19 @@ function AgentInspector({
             )}
             <Button
               onClick={() =>
-                void perform(async () => {
+                void feedback.run("attach", async () => {
                   const result = await post<{ workspace: Workspace }>(
                     "/workspaces/probe",
                     { path, harness: edited.harness, runtime_id: runtimeId || null, ssh_host: remote ? sshHost.trim() : null },
                   );
                   const changedSshHost = (result.workspace.ssh_host ?? null) !== (agent.workdir?.ssh_host ?? null);
-                  await save({ ...edited, runtime_id: result.workspace.runtime_id, workdir: result.workspace, ...(changedSshHost ? {model:"", reasoning:""} : {}) });
-                })
+                  return persistProfile({ ...edited, runtime_id: result.workspace.runtime_id, workdir: result.workspace, ...(changedSshHost ? {model:"", reasoning:""} : {}) }, "attach");
+                }, { errorMessage: "Workdir attachment could not be confirmed. Check the saved profile before trying again." })
               }
+              disabled={needsReview || externalChange}
+              aria-busy={feedback.isPending("attach")}
             >
-              {agent.workdir ? "Change workdir" : "Attach workdir"}
+              <PendingIcon pending={feedback.isPending("attach")} />{feedback.isPending("attach") ? "Attaching…" : agent.workdir ? "Change workdir" : "Attach workdir"}
             </Button>
             {agent.workdir && (
               <>
@@ -2038,7 +2124,7 @@ function AgentInspector({
                 <Button
                   variant="ghost"
                   onClick={() =>
-                    void perform(() => save({ ...edited, workdir: null }))
+                    void save({ ...edited, workdir: null }, "detach")
                   }
                 >
                   Detach workdir
@@ -2049,10 +2135,10 @@ function AgentInspector({
               Attaching does not copy or change files. Detaching never deletes
               your codebase. Remote native sessions stay on that workstation; chat and execution records stay under org.
             </p>
-          </div>
+          </fieldset>
         )}
         {section === "Instructions" && (
-          <div className="form-stack">
+          <fieldset className="form-stack profile-lock" disabled={profileLocked}>
             <Label htmlFor="markdown-editor">Role and task instructions</Label>
             <Textarea
               id="markdown-editor"
@@ -2077,7 +2163,7 @@ function AgentInspector({
               Applied to the next run. Existing repository AGENTS.md files
               remain unchanged.
             </p>
-          </div>
+          </fieldset>
         )}
         {section === "Code" && (
           <div className="form-stack">
@@ -2137,28 +2223,34 @@ function AgentInspector({
                 <Label htmlFor="script-name">Script filename</Label>
                 <Input
                   id="script-name"
+                  disabled={feedback.isPending("script")}
                   value={scriptName}
                   onChange={(e) => setScriptName(e.target.value)}
                   placeholder="verify.ps1"
                 />
                 <Textarea
                   aria-label="Script content"
+                  disabled={feedback.isPending("script")}
                   className="code-editor"
                   value={scriptContent}
                   onChange={(e) => setScriptContent(e.target.value)}
                 />
                 <Button
+                  disabled={profileLocked || !scriptName.trim()}
+                  aria-busy={feedback.isPending("script")}
                   onClick={() =>
-                    void perform(async () => {
+                    void feedback.run("script", async () => {
                       await put(`/agents/${agent.id}/files`, {
                         name: scriptName,
                         content: scriptContent,
                       });
-                      await loadFile("", true);
-                    })
+                      try { await loadFile("", true); }
+                      catch { return { kind: "warning", message: `${agent.name}: script saved, but the file list could not refresh.` }; }
+                      return { kind: "success", message: `${agent.name}: script saved. It has not been executed.` };
+                    }, { errorMessage: `${agent.name}: script save not confirmed. Filename and content are kept; check the file before trying again.` })
                   }
                 >
-                  Save script
+                  <PendingIcon pending={feedback.isPending("script")} />{feedback.isPending("script") ? "Saving script…" : "Save script"}
                 </Button>
                 <p className="hint">Saving does not execute the script.</p>
               </>
@@ -2237,11 +2329,13 @@ function AgentInspector({
                 <Button
                   size="sm"
                   variant="outline"
+                  disabled={profileLocked || needsReview || externalChange}
+                  aria-busy={feedback.isPending("restore")}
                   onClick={() =>
-                    void perform(() => save({ ...r, revision: agent.revision }))
+                    void save({ ...editableProfile(r), revision: baseline.revision }, "restore")
                   }
                 >
-                  Restore this revision
+                  <PendingIcon pending={feedback.isPending("restore")} />{feedback.isPending("restore") ? "Restoring…" : "Restore this revision"}
                 </Button>
               </div>
             ))}
@@ -2250,16 +2344,22 @@ function AgentInspector({
         {["Profile", "Instructions"].includes(section) && (
           <Button
             className="save-profile"
-            onClick={() => void perform(() => save())}
+            disabled={profileLocked || needsReview || externalChange || (!dirty && !retrySave)}
+            aria-busy={feedback.isPending("save")}
+            onClick={() => void save()}
           >
-            <Check size={15} />
-            {saved ? "Saved" : "Save changes"}
+            {feedback.isPending("save") ? <PendingIcon pending size={15} /> : <Check size={15} />}
+            {feedback.isPending("save") ? "Saving…" : !dirty && feedback.result?.kind === "success" ? "Saved" : "Save changes"}
           </Button>
         )}
+        {["Profile", "Instructions", "Workdir", "History", "Code"].includes(section) && <><ActionStatus feedback={feedback}>
+          {feedback.result?.kind === "warning" && !needsReview && <Button variant="outline" disabled={profileLocked} onClick={() => void feedback.run("refresh", async () => { if (section === "Code") await loadFile("", true); else await onSaved(); return { kind: "success", message: `${agent.name}: view refreshed.` }; }, { errorMessage: "The view could not refresh. Previously acknowledged changes remain saved." })}>Retry refresh</Button>}
+        </ActionStatus>{dirty && ["Profile", "Instructions"].includes(section) && <p className="hint" data-draft-status="unsaved">Unsaved changes</p>}</>}
         {section === "Profile" && (
           <Button
             variant="destructive"
             className="delete-agent"
+            disabled={profileLocked}
             onClick={() => setConfirmDelete(true)}
           >
             Delete agent

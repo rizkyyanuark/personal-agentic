@@ -12,6 +12,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { api, post, put } from "./api";
+import { ActionStatus, PendingIcon, useActionFeedback } from "./ActionFeedback";
 import type { Schedule } from "./bindings/Schedule";
 import type { Run } from "./bindings/Run";
 
@@ -51,20 +52,28 @@ export function ScheduledTasks({
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [deleting, setDeleting] = useState<Schedule | null>(null);
-  const [busy, setBusy] = useState(false);
+  const feedback = useActionFeedback(`schedules:${groupId}`);
+  const [refreshNeeded, setRefreshNeeded] = useState(false);
+  const busy = feedback.pending !== null;
+  const blocked = busy || refreshNeeded;
   const [error, setError] = useState("");
-  async function perform(action: () => Promise<void>) {
-    setError("");
-    setBusy(true);
+  async function refreshed(message: string) {
     try {
-      await action();
       await onRefresh();
-    } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
+      setRefreshNeeded(false);
+      return { kind: "success" as const, message };
+    } catch {
+      setRefreshNeeded(true);
+      return { kind: "warning" as const, message: `${message} The task list could not refresh. Refresh the view before making another change.` };
     }
   }
+  const refreshControl = refreshNeeded && <Button type="button" variant="outline" disabled={busy} aria-busy={feedback.isPending("refresh")} onClick={() => void feedback.run("refresh", async () => {
+    await onRefresh();
+    setRefreshNeeded(false);
+    return { kind: "success", message: "Task list refreshed. No schedule was changed again." };
+  }, { errorMessage: "The task list could not refresh. No schedule was changed again." })}>
+    {feedback.isPending("refresh") && <PendingIcon pending size={16} />} {feedback.isPending("refresh") ? "Refreshing schedules…" : "Refresh task list"}
+  </Button>;
   return (
     <section className="scheduled-tasks" aria-label="Scheduled tasks">
       <header className="schedule-header">
@@ -73,8 +82,9 @@ export function ScheduledTasks({
           <p>Schedule a message with an explicit @agent mention.</p>
         </div>
         <Button
-          disabled={readOnly}
+          disabled={readOnly || blocked}
           onClick={() => {
+            feedback.clear();
             setError("");
             setDraft({
               name: "",
@@ -93,6 +103,8 @@ export function ScheduledTasks({
           {error}
         </p>
       )}
+      {!draft && !deleting && <ActionStatus feedback={feedback} />}
+      {!draft && !deleting && refreshControl}
       <p className="schedule-note">
         Times shown in {Intl.DateTimeFormat().resolvedOptions().timeZone}. Keep
         this machine awake and Agentic Enterprise running. After downtime, one
@@ -109,6 +121,8 @@ export function ScheduledTasks({
       )}
       <div className="schedule-list">
         {tasks.map((task) => {
+          const pausing = feedback.isPending(`pause:${task.id}`);
+          const resuming = feedback.isPending(`resume:${task.id}`);
           const run = runs.find((r) => r.message_id === task.last_message_id);
           const status = task.last_error
             ? "Needs attention"
@@ -169,24 +183,27 @@ export function ScheduledTasks({
                     <Button
                       variant="ghost"
                       size="sm"
-                      disabled={busy || readOnly}
+                      disabled={blocked || readOnly}
+                      aria-busy={pausing || resuming}
                       onClick={() =>
-                        void perform(async () => {
+                        void feedback.run(`${task.enabled ? "pause" : "resume"}:${task.id}`, async () => {
                           await put(`/schedules/${task.id}/enabled`, {
                             enabled: !task.enabled,
                           });
-                        })
+                          return refreshed(`Schedule “${task.name}” ${task.enabled ? "paused" : "resumed"}. This changes future messages, not an existing run.`);
+                        }, { errorMessage: "Schedule change not confirmed. Refresh the task list before retrying." })
                       }
                     >
-                      {task.enabled ? <Pause size={14} /> : <Play size={14} />}{" "}
-                      {task.enabled ? "Pause" : "Resume"}
+                      {pausing || resuming ? <PendingIcon pending size={14} /> : task.enabled ? <Pause size={14} /> : <Play size={14} />}{" "}
+                      {pausing ? "Pausing…" : resuming ? "Resuming…" : task.enabled ? "Pause" : "Resume"}
                     </Button>
                   )}
                   <Button
                     variant="ghost"
                     size="sm"
-                    disabled={busy || readOnly}
+                    disabled={blocked || readOnly}
                     onClick={() => {
+                      feedback.clear();
                       setError("");
                       setDraft({
                         id: task.id,
@@ -208,8 +225,9 @@ export function ScheduledTasks({
                   <Button
                     variant="ghost"
                     size="sm"
-                    disabled={busy || readOnly}
+                    disabled={blocked || readOnly}
                     onClick={() => {
+                      feedback.clear();
                       setError("");
                       setDeleting(task);
                     }}
@@ -246,13 +264,14 @@ export function ScheduledTasks({
               className="schedule-form"
               onSubmit={(e) => {
                 e.preventDefault();
-                void perform(async () => {
-                  const date = new Date(draft.start);
-                  if (
-                    !Number.isFinite(date.getTime()) ||
-                    date.getTime() <= Date.now()
-                  )
-                    throw new Error("Choose a future date and time.");
+                const date = new Date(draft.start);
+                if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) {
+                  setError("Choose a future date and time.");
+                  return;
+                }
+                setError("");
+                let closed = false;
+                void feedback.run(`save:${draft.id ?? "new"}`, async () => {
                   const input = {
                     name: draft.name,
                     body: draft.body,
@@ -262,12 +281,15 @@ export function ScheduledTasks({
                   if (draft.id) await put(`/schedules/${draft.id}`, input);
                   else await post(`/groups/${groupId}/schedules`, input);
                   setDraft(null);
-                });
+                  closed = true;
+                  return refreshed(`Schedule “${draft.name}” saved. Its message will be sent at the configured time; no task has run yet.`);
+                }, { toast: () => closed, errorMessage: "Schedule save not confirmed. Your input is retained; refresh the task list before retrying." });
               }}
             >
               <Label htmlFor="task-name">Name</Label>
               <Input
                 id="task-name"
+                disabled={busy || readOnly}
                 required
                 maxLength={80}
                 value={draft.name}
@@ -277,6 +299,7 @@ export function ScheduledTasks({
               <Label htmlFor="task-message">Custom message</Label>
               <Textarea
                 id="task-message"
+                disabled={busy || readOnly}
                 required
                 maxLength={64000}
                 rows={5}
@@ -291,6 +314,7 @@ export function ScheduledTasks({
                 type="datetime-local"
                 step="1"
                 id="task-start"
+                disabled={busy || readOnly}
                 required
                 value={draft.start}
                 onChange={(e) => setDraft({ ...draft, start: e.target.value })}
@@ -298,6 +322,7 @@ export function ScheduledTasks({
               <Label htmlFor="task-repeat">Repeat</Label>
               <select
                 id="task-repeat"
+                disabled={busy || readOnly}
                 value={
                   ["", "60", "1440", "10080"].includes(draft.repeat)
                     ? draft.repeat
@@ -324,6 +349,7 @@ export function ScheduledTasks({
                     </Label>
                     <Input
                       id="task-interval"
+                      disabled={busy || readOnly}
                       type="number"
                       required
                       min="1"
@@ -345,8 +371,11 @@ export function ScheduledTasks({
                   {error}
                 </p>
               )}
-              <Button type="submit" disabled={busy || readOnly}>
-                {busy ? "Saving…" : "Save task"}
+              <ActionStatus feedback={feedback} />
+              {refreshControl}
+              <Button type="submit" disabled={blocked || readOnly} aria-busy={feedback.isPending(`save:${draft.id ?? "new"}`)}>
+                {feedback.isPending(`save:${draft.id ?? "new"}`) && <PendingIcon pending size={16} />}
+                {feedback.isPending(`save:${draft.id ?? "new"}`) ? "Saving schedule…" : "Save task"}
               </Button>
             </form>
           )}
@@ -374,17 +403,24 @@ export function ScheduledTasks({
               {error}
             </p>
           )}
+          <ActionStatus feedback={feedback} />
+          {refreshControl}
           <Button
-            disabled={busy || readOnly}
-            onClick={() =>
-              void perform(async () => {
-                if (deleting)
-                  await api(`/schedules/${deleting.id}`, { method: "DELETE" });
+            disabled={blocked || readOnly}
+            aria-busy={deleting ? feedback.isPending(`delete:${deleting.id}`) : false}
+            onClick={() => {
+              if (!deleting) return;
+              let closed = false;
+              void feedback.run(`delete:${deleting.id}`, async () => {
+                await api(`/schedules/${deleting.id}`, { method: "DELETE" });
                 setDeleting(null);
-              })
-            }
+                closed = true;
+                return refreshed(`Schedule “${deleting.name}” deleted. Previously sent messages and runs are retained.`);
+              }, { toast: () => closed, errorMessage: "Schedule deletion not confirmed. Refresh the task list before retrying." });
+            }}
           >
-            Delete task
+            {deleting && feedback.isPending(`delete:${deleting.id}`) && <PendingIcon pending size={16} />}
+            {deleting && feedback.isPending(`delete:${deleting.id}`) ? "Deleting schedule…" : "Delete task"}
           </Button>
         </DialogContent>
       </Dialog>

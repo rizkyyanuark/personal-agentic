@@ -15,6 +15,70 @@ The browser smoke tests in `frontend/tests/native-smoke.mjs` exercise the runnin
 
 Some phases require a signed-in provider CLI or a configured SSH workstation and may use provider quota. Keep test organizations and evidence outside the repository; never commit credentials, private addresses, runtime state, screenshots, or production run records.
 
+## Action feedback
+
+Build the candidate frontend with `npm run check` from `src`, then serve it through
+the real application on a separate loopback port with disposable data, home and
+workdir. The backend must match the candidate source revision; a frontend-only
+change can reuse that exact backend image with its static frontend mounted read-only.
+Do not run these mutations or filesystem faults against production.
+
+From `src/frontend`, set `AE_TEST_ORG`, `AE_TEST_URL`, and
+`AE_TEST_DISPOSABLE=true`. On Linux, also set `AE_TEST_BROWSER_EXECUTABLE` to the
+installed Chromium executable. The existing smoke runner reads only the candidate's
+owner key from `AE_TEST_ORG/.state/owner.key` and signs in through the real login API.
+
+```sh
+node tests/native-smoke.mjs action-feedback-core
+node tests/native-smoke.mjs action-feedback
+# Focused retries use the same real candidate and authentication:
+node tests/native-smoke.mjs action-feedback-settings
+node tests/native-smoke.mjs action-feedback-operations
+node tests/native-smoke.mjs action-feedback-existing
+node tests/native-smoke.mjs action-feedback-accessibility
+```
+
+The core phase creates an unattached agent, checks real profile persistence and
+revision guards, script writes, fast/delayed save feedback, duplicate suppression,
+draft retention, historical revision restoration (including legacy instructions),
+panel close/reopen, read-only refresh recovery, delayed snapshots, and chat request
+deduplication. A new attachment added during a pending send must remain unsent;
+a delayed side-chat response must not navigate away from a newly selected view.
+It submits no provider prompt. Transport faults are explicit: delay a genuine request, abort a
+follow-up read, or discard a response after forwarding the real save. A temporary
+directory collision at that test agent's `profile.json` proves an actual HTTP 400
+after the database commit; the fixture is restored in `finally`. This is not a
+mocked backend response and does not prove atomic database/file materialization.
+
+The full phase also verifies group/project lifecycle, SSH import/save/test/host-key
+review/trust/removal, runtime registration/edit/revocation, knowledge upload and
+indexing, schedules, action dispatch/cancellation, and feedback accessibility.
+Supply `AE_TEST_WORKSTATION_ID`, `AE_TEST_KEY_WORKSTATION_ID`,
+`AE_TEST_SSH_ALIAS`, and `AE_TEST_WORKDIR` for real disposable SSH fixtures.
+Supply `AE_TEST_ACTION_RUN_AGENT` for a dedicated enabled Antigravity agent with a
+read-only disposable SSH workdir and an actual signed-in model catalog. The action
+case uses provider quota and cancels only its own run; schedules are set in the
+future so they cannot launch unrelated work. Registration CRUD does not require
+a connected worker and does not prove worker execution.
+
+The existing-feedback regression also uses one actual Antigravity reply linking
+a deliberately missing Markdown file in the disposable SSH workdir. It verifies
+the real failed capture, explicit recovery after creating that fixture through
+Terminal, Knowledge Add, export, existing-file rejection, and ChatActivity's
+terminal state. Its private manifest reuses the same completed run on retries.
+Live Preview checks real WebGL assets, refresh and reduced motion at 720x600 to
+bound software rendering cost; this does not claim broad cockpit viewport coverage.
+Accessibility checks desktop, 390 px, landscape, reduced available height, native
+200 percent Chromium profile zoom, keyboard dismissal and workspace/logout
+boundaries. Reduced height models available space; it does not emulate a native
+mobile software keyboard.
+
+Evidence stays in the disposable organization's `.state/verification` directory:
+`proof.json`, focused scenario reports and browser screenshots. Keep credentials,
+tokens, private connection settings and screenshots outside Git. Inspect actual
+HTTP results, stored revisions/files and run states alongside the screenshots;
+passing UI assertions alone does not prove provider completion.
+
 ## Workstation location
 
 Use a disposable candidate with separate data, application home, and workdir on a
