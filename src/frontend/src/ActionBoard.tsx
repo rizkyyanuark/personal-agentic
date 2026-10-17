@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { api, post, requestId } from "./api";
+import { ActionStatus, PendingIcon, useActionFeedback } from "./ActionFeedback";
 import type { StateView } from "./bindings/StateView";
 import type { ActionItem } from "./bindings/ActionItem";
 import "./ActionBoard.css";
@@ -29,8 +30,10 @@ export function ActionBoard({ data, groupId, onRefresh, onOpenRun }: {
   const [widths,setWidths] = useState(initialWidths);
   const resizing = useRef<{column:number; x:number; width:number}|null>(null);
   const resize = (column:number, width:number) => setWidths(values=>values.map((value,i)=>i===column?Math.max(column===5?150:100,Math.min(800,width)):value));
-  const [busy,setBusy] = useState(false);
-  const [error,setError] = useState("");
+  const feedback = useActionFeedback("action-board", groupId ?? "organization");
+  const [refreshNeeded, setRefreshNeeded] = useState(false);
+  const busy = feedback.pending !== null;
+  const blocked = busy || refreshNeeded;
   const groups = data.groups.filter(g => !g.archived_at && !g.deleted_at);
   const items = (data.actions??[]).filter(a => data.groups.some(g=>g.id===a.group_id&&!g.deleted_at) && (!groupId && !filter || a.group_id === (groupId || filter)) && (!pic || a.assignee_id === pic));
   const value = (a:ActionItem) => [data.groups.find(g=>g.id===a.group_id)?.name??"Unavailable group",data.agents.find(p=>p.id===a.assignee_id)?.name??"Deleted agent",a.title,a.planned_start??"",a.status][sort.column];
@@ -44,26 +47,72 @@ export function ActionBoard({ data, groupId, onRefresh, onOpenRun }: {
   const allowed = data.group_access[draft?.group_id??""]?.delegate_ids ?? [];
   const people = data.agents.filter(a=>allowed.includes(a.id) && a.enabled);
   const running = (a: ActionItem) => ["queued","running"].includes(a.status);
-  async function perform(work:()=>Promise<unknown>) {
-    setBusy(true);setError("");
-    try { await work(); await onRefresh(); }
-    catch(e) {setError(e instanceof Error?e.message:String(e));}
-    finally {setBusy(false);}
+  async function refreshed(message: string) {
+    try {
+      await onRefresh();
+      setRefreshNeeded(false);
+      return { kind: "success" as const, message };
+    } catch {
+      setRefreshNeeded(true);
+      return { kind: "warning" as const, message: `${message} The action list could not refresh. Refresh it before another change.` };
+    }
+  }
+  async function invoke(item: ActionItem) {
+    await feedback.run(`invoke:${item.id}`, async () => {
+      const result = await post<ActionItem>(`/actions/${item.id}/invoke`);
+      return refreshed(`“${item.title}” ${result.status === "running" ? "is running" : "queued"}. Open its evidence to follow the run.`);
+    }, { errorMessage: "Action launch not confirmed. Refresh its status before explicitly retrying; the task is not confirmed complete." });
+  }
+  async function cancel(item: ActionItem) {
+    await feedback.run(`cancel:${item.id}`, async () => {
+      const result = await post<ActionItem>(`/actions/${item.id}/cancel`);
+      return refreshed(result.status === "cancelled" ? `“${item.title}” cancelled.` : `Cancellation requested for “${item.title}”. Its run has not been confirmed stopped.`);
+    }, { errorMessage: "Cancellation was not confirmed. Refresh the action and inspect its run before retrying." });
+  }
+  async function save(item: ActionItem, now: boolean) {
+    let closed = false;
+    await feedback.run(`${now ? "save-run" : "save"}:${item.id}`, async () => {
+      const saved = await post<ActionItem>("/actions", {id:item.id,revision:item.revision,group_id:item.group_id,title:item.title,body:item.body,assignee_id:item.assignee_id,planned_start:now?null:item.planned_start});
+      setDraft(saved);
+      if (now) {
+        try {
+          await post<ActionItem>(`/actions/${saved.id}/invoke`);
+        } catch {
+          setRefreshNeeded(true);
+          return { kind: "warning", message: `“${saved.title}” saved at revision ${saved.revision}, but its launch was not confirmed. Refresh the action list before retrying. Your saved action is retained.` };
+        }
+      }
+      setDraft(null);
+      closed = true;
+      return refreshed(now ? `“${saved.title}” saved and queued. This confirms the request, not task completion.` : saved.planned_start ? `“${saved.title}” scheduled. It has not run yet.` : `“${saved.title}” saved to backlog.`);
+    }, { toast: () => closed, errorMessage: "Action save not confirmed. Your input is retained; refresh the action list before retrying." });
   }
   function create(date?: Date) {
+    feedback.clear();
     const selected = groupId || filter || groups[0]?.id || "";
     setDraft({id:requestId(),revision:0,group_id:selected,title:"",body:"",assignee_id:"",planned_start:date?.toISOString()??null,status:"backlog",created_by:"owner",created_at:"",updated_at:"",run_id:null,error:null});
   }
   function card(a: ActionItem) {
-    return <button className={`action-calendar-item status-${a.status}`} key={a.id} onClick={()=>setDraft(a)} title={`${a.title} · ${data.agents.find(p=>p.id===a.assignee_id)?.name}`}>
+    return <button className={`action-calendar-item status-${a.status}`} key={a.id} disabled={blocked} onClick={()=>{feedback.clear();setDraft(a);}} title={`${a.title} · ${data.agents.find(p=>p.id===a.assignee_id)?.name}`}>
       <strong>{a.title}</strong><small>{data.agents.find(p=>p.id===a.assignee_id)?.name} · {a.status}</small>
     </button>;
+  }
+  function refreshControl() {
+    return refreshNeeded && <Button type="button" variant="outline" disabled={busy} aria-busy={feedback.isPending("refresh")} onClick={()=>void feedback.run("refresh",async()=>{
+      await onRefresh();
+      setRefreshNeeded(false);
+      setDraft(null);
+      return {kind:"success",message:"Action list refreshed. Reopen an action to inspect its current revision and run status."};
+    },{errorMessage:"The action list could not refresh. No action was saved or invoked again."})}>
+      {feedback.isPending("refresh") && <PendingIcon pending size={16}/>} {feedback.isPending("refresh")?"Refreshing actions…":"Refresh action list"}
+    </Button>;
   }
   const days = Array.from({length:42},(_,i)=>new Date(month.getFullYear(),month.getMonth(),1-month.getDay()+i));
   return <section className="action-board" aria-label="Action board">
     <header className="action-board-heading"><div><h1>Action board</h1><p>Organization → project or group → person in charge. Without a planned start, work stays in Backlog.</p></div>
-      <Button onClick={()=>create()} disabled={!groups.length||!!groupId&&!groups.some(g=>g.id===groupId)}><Plus size={16}/> New action</Button></header>
-    {error && <p className="banner error" role="alert">{error}</p>}
+      <Button onClick={()=>create()} disabled={blocked||!groups.length||!!groupId&&!groups.some(g=>g.id===groupId)}><Plus size={16}/> New action</Button></header>
+    {!draft && !deleting && <ActionStatus feedback={feedback} />}
+    {!draft && !deleting && refreshControl()}
     <div className="action-toolbar">
       <div role="group" aria-label="Board view"><Button variant={view==="table"?"default":"outline"} onClick={()=>setView("table")}><List size={15}/>Table</Button><Button variant={view==="calendar"?"default":"outline"} onClick={()=>setView("calendar")}><CalendarDays size={15}/>Calendar</Button></div>
       {!groupId && <select aria-label="Filter project or group" value={filter} onChange={e=>setFilter(e.target.value)}><option value="">All projects and groups</option>{data.groups.filter(g=>!g.deleted_at).map(g=><option key={g.id} value={g.id}>{g.project?"Project: ":"Group: "}{g.name}</option>)}</select>}
@@ -77,29 +126,29 @@ export function ActionBoard({ data, groupId, onRefresh, onOpenRun }: {
         onPointerUp={()=>{resizing.current=null;}} onPointerCancel={()=>{resizing.current=null;}} onLostPointerCapture={()=>{resizing.current=null;}}
         onKeyDown={e=>{if(["ArrowLeft","ArrowRight","Home"].includes(e.key)){e.preventDefault();resize(i,e.key==="Home"?initialWidths[i]:widths[i]+(e.key==="ArrowRight"?16:-16));}}}/>
     </th>)}</tr></thead><tbody>
-      {sorted.map(a=><tr key={a.id}><td data-label="Project / group">{data.groups.find(g=>g.id===a.group_id)?.name??"Unavailable group"}</td><td data-label="PIC">{data.agents.find(p=>p.id===a.assignee_id)?.name??"Deleted agent"}</td><td data-label="Action"><button onClick={()=>setDraft(a)}>{a.title}</button>{a.error && <small className="error">{a.error}</small>}</td><td data-label="Planned start">{a.planned_start?new Date(a.planned_start).toLocaleString():"Unscheduled"}</td><td data-label="Status"><span className={`action-status status-${a.status}`}>{a.status}</span></td><td data-label="Controls"><div className="action-controls">
-        <Button variant="ghost" size="icon" aria-label={`Edit ${a.title}`} title="Edit action" disabled={busy||running(a)} onClick={()=>setDraft(a)}><Pencil size={16}/></Button>
-        {running(a)?<Button variant="ghost" size="icon" aria-label={`Stop ${a.title}`} title="Stop action" disabled={busy} onClick={()=>void perform(()=>post(`/actions/${a.id}/cancel`))}><Square size={16}/></Button>:<Button variant="ghost" size="icon" className="action-play" aria-label={`Run ${a.title}`} title="Run now" disabled={busy||a.status==="completed"||!groups.some(g=>g.id===a.group_id)} onClick={()=>void perform(()=>post(`/actions/${a.id}/invoke`))}><Play size={16}/></Button>}
-        <Button variant="ghost" size="icon" className="action-delete" aria-label={`Delete ${a.title}`} title={running(a)?"Stop the action before deleting":"Delete action"} disabled={busy||running(a)} onClick={()=>setDeleting(a)}><Trash2 size={16}/></Button>
+      {sorted.map(a=><tr key={a.id}><td data-label="Project / group">{data.groups.find(g=>g.id===a.group_id)?.name??"Unavailable group"}</td><td data-label="PIC">{data.agents.find(p=>p.id===a.assignee_id)?.name??"Deleted agent"}</td><td data-label="Action"><button disabled={blocked} onClick={()=>{feedback.clear();setDraft(a);}}>{a.title}</button>{a.error && <small className="error">{a.error}</small>}</td><td data-label="Planned start">{a.planned_start?new Date(a.planned_start).toLocaleString():"Unscheduled"}</td><td data-label="Status"><span className={`action-status status-${a.status}`}>{a.status}</span></td><td data-label="Controls"><div className="action-controls">
+        <Button variant="ghost" size="icon" aria-label={`Edit ${a.title}`} title="Edit action" disabled={blocked||running(a)} onClick={()=>{feedback.clear();setDraft(a);}}><Pencil size={16}/></Button>
+        {(running(a) && !feedback.isPending(`invoke:${a.id}`) || feedback.isPending(`cancel:${a.id}`))?<Button variant="ghost" size="icon" aria-label={feedback.isPending(`cancel:${a.id}`)?`Requesting cancellation for ${a.title}`:`Stop ${a.title}`} title="Stop action" disabled={blocked} aria-busy={feedback.isPending(`cancel:${a.id}`)} onClick={()=>void cancel(a)}>{feedback.isPending(`cancel:${a.id}`)?<PendingIcon pending size={16}/>:<Square size={16}/>}</Button>:<Button variant="ghost" size="icon" className="action-play" aria-label={feedback.isPending(`invoke:${a.id}`)?`Queuing ${a.title}`:`Run ${a.title}`} title="Run now" disabled={blocked||a.status==="completed"||!groups.some(g=>g.id===a.group_id)} aria-busy={feedback.isPending(`invoke:${a.id}`)} onClick={()=>void invoke(a)}>{feedback.isPending(`invoke:${a.id}`)?<PendingIcon pending size={16}/>:<Play size={16}/>}</Button>}
+        <Button variant="ghost" size="icon" className="action-delete" aria-label={`Delete ${a.title}`} title={running(a)?"Stop the action before deleting":"Delete action"} disabled={blocked||running(a)} onClick={()=>{feedback.clear();setDeleting(a);}}><Trash2 size={16}/></Button>
         {a.run_id&&<Button variant="ghost" size="icon" aria-label={`Evidence for ${a.title}`} title="View evidence" onClick={()=>onOpenRun(a.group_id,a.run_id!)}><FileText size={16}/></Button>}
       </div></td></tr>)}
     </tbody></table>{!items.length&&<p className="empty-state">No actions here yet.</p>}</div> : <>
       <div className="calendar-heading"><Button variant="ghost" aria-label="Previous month" onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()-1,1))}><ChevronLeft/></Button><strong>{month.toLocaleDateString(undefined,{month:"long",year:"numeric"})}</strong><Button variant="ghost" aria-label="Next month" onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()+1,1))}><ChevronRight/></Button></div>
-      <div className="action-calendar">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=><strong className="calendar-weekday" key={d}>{d}</strong>)}{days.map(day=><div key={localDate(day)} className={`calendar-day ${day.getMonth()!==month.getMonth()?"outside":""}`}><button className="calendar-day-number" aria-label={`Add action on ${localDate(day)}`} onClick={()=>{const start=new Date(day);start.setHours(9);create(start);}}>{day.getDate()}</button>{items.filter(a=>a.planned_start&&localDate(new Date(a.planned_start))===localDate(day)).map(card)}</div>)}</div>
+      <div className="action-calendar">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=><strong className="calendar-weekday" key={d}>{d}</strong>)}{days.map(day=><div key={localDate(day)} className={`calendar-day ${day.getMonth()!==month.getMonth()?"outside":""}`}><button className="calendar-day-number" disabled={blocked} aria-label={`Add action on ${localDate(day)}`} onClick={()=>{const start=new Date(day);start.setHours(9);create(start);}}>{day.getDate()}</button>{items.filter(a=>a.planned_start&&localDate(new Date(a.planned_start))===localDate(day)).map(card)}</div>)}</div>
       <h2 className="backlog-heading">Unscheduled backlog</h2><div className="action-backlog">{items.filter(a=>!a.planned_start&&!["completed","cancelled"].includes(a.status)).map(card)}{!items.some(a=>!a.planned_start&&!["completed","cancelled"].includes(a.status))&&<p>No unscheduled actions.</p>}</div>
     </>}
-    {deleting&&<Dialog open onOpenChange={open=>{if(!open&&!busy)setDeleting(null);}}><DialogContent><DialogHeader><DialogTitle>Delete action?</DialogTitle><DialogDescription>Remove “{deleting.title}” from the board. Existing run history and evidence are retained.</DialogDescription></DialogHeader>{error&&<p className="error" role="alert">{error}</p>}<div className="action-controls"><Button variant="outline" disabled={busy} onClick={()=>setDeleting(null)}>Keep action</Button><Button variant="destructive" disabled={busy} onClick={()=>void perform(async()=>{await api(`/actions/${deleting.id}`,{method:"DELETE"});setDeleting(null);})}>Delete action</Button></div></DialogContent></Dialog>}
+    {deleting&&<Dialog open onOpenChange={open=>{if(!open&&!busy)setDeleting(null);}}><DialogContent><DialogHeader><DialogTitle>Delete action?</DialogTitle><DialogDescription>Remove “{deleting.title}” from the board. Existing run history and evidence are retained.</DialogDescription></DialogHeader><ActionStatus feedback={feedback}/>{refreshControl()}<div className="action-controls"><Button variant="outline" disabled={busy} onClick={()=>setDeleting(null)}>Keep action</Button><Button variant="destructive" disabled={blocked} aria-busy={feedback.isPending(`delete:${deleting.id}`)} onClick={()=>{let closed=false;void feedback.run(`delete:${deleting.id}`,async()=>{await api(`/actions/${deleting.id}`,{method:"DELETE"});setDeleting(null);closed=true;return refreshed(`“${deleting.title}” deleted. Run history and evidence are retained.`);},{toast:()=>closed,errorMessage:"Action deletion not confirmed. Refresh the board before retrying."});}}>{feedback.isPending(`delete:${deleting.id}`)&&<PendingIcon pending size={16}/>} {feedback.isPending(`delete:${deleting.id}`)?"Deleting action…":"Delete action"}</Button></div></DialogContent></Dialog>}
     {draft&&<Dialog open onOpenChange={open=>{if(!open&&!busy)setDraft(null);}}><DialogContent className="action-dialog"><DialogHeader><DialogTitle>{draft.revision?"Edit action":"New action"}</DialogTitle><DialogDescription>Assign a PIC, then save for later, schedule, or run now.</DialogDescription></DialogHeader>
-      <form className="form-stack" onSubmit={e=>{e.preventDefault();const now=(e.nativeEvent as SubmitEvent).submitter?.getAttribute("value")==="now";void perform(async()=>{const saved=await post<ActionItem>("/actions",{id:draft.id,revision:draft.revision,group_id:draft.group_id,title:draft.title,body:draft.body,assignee_id:draft.assignee_id,planned_start:now?null:draft.planned_start});setDraft(saved);if(now)await post(`/actions/${draft.id}/invoke`);setDraft(null);});}}>
-        <Label htmlFor="action-group">Project or group</Label><select id="action-group" value={draft.group_id} required disabled={busy||running(draft)} onChange={e=>setDraft({...draft,group_id:e.target.value,assignee_id:""})}><option value="" disabled>Select a workspace</option>{groups.map(g=><option key={g.id} value={g.id}>{g.project?"Project: ":"Group: "}{g.name}</option>)}</select>
+      <form className="form-stack" onSubmit={e=>{e.preventDefault();const now=(e.nativeEvent as SubmitEvent).submitter?.getAttribute("value")==="now";void save(draft,now);}}>
+        <Label htmlFor="action-group">Project or group</Label><select id="action-group" value={draft.group_id} required disabled={blocked||running(draft)} onChange={e=>setDraft({...draft,group_id:e.target.value,assignee_id:""})}><option value="" disabled>Select a workspace</option>{groups.map(g=><option key={g.id} value={g.id}>{g.project?"Project: ":"Group: "}{g.name}</option>)}</select>
         {editingGroup?.project&&<p className="hint">Runs in {editingGroup.project.workdir.ssh_host?`${editingGroup.project.workdir.ssh_host}: `:""}{editingGroup.project.workdir.path}</p>}
-        <Label htmlFor="action-title">Title</Label><Input id="action-title" value={draft.title} required maxLength={160} disabled={busy||running(draft)} onChange={e=>setDraft({...draft,title:e.target.value})}/>
-        <Label htmlFor="action-body">Task / instructions</Label><Textarea id="action-body" value={draft.body} required disabled={busy||running(draft)} onChange={e=>setDraft({...draft,body:e.target.value})}/>
-        <Label htmlFor="action-pic">Person in charge (PIC)</Label><select id="action-pic" value={draft.assignee_id} required disabled={busy||running(draft)} onChange={e=>setDraft({...draft,assignee_id:e.target.value})}><option value="" disabled>Choose an agent</option>{people.map(a=><option key={a.id} value={a.id}>{a.name} · {a.position}</option>)}</select>
-        <Label htmlFor="action-start">Planned start (optional, your local time)</Label><Input id="action-start" type="datetime-local" value={draft.planned_start?localTime(new Date(draft.planned_start)):""} disabled={busy||running(draft)} onChange={e=>setDraft({...draft,planned_start:e.target.value?new Date(e.target.value).toISOString():null})}/>
+        <Label htmlFor="action-title">Title</Label><Input id="action-title" value={draft.title} required maxLength={160} disabled={blocked||running(draft)} onChange={e=>setDraft({...draft,title:e.target.value})}/>
+        <Label htmlFor="action-body">Task / instructions</Label><Textarea id="action-body" value={draft.body} required disabled={blocked||running(draft)} onChange={e=>setDraft({...draft,body:e.target.value})}/>
+        <Label htmlFor="action-pic">Person in charge (PIC)</Label><select id="action-pic" value={draft.assignee_id} required disabled={blocked||running(draft)} onChange={e=>setDraft({...draft,assignee_id:e.target.value})}><option value="" disabled>Choose an agent</option>{people.map(a=><option key={a.id} value={a.id}>{a.name} · {a.position}</option>)}</select>
+        <Label htmlFor="action-start">Planned start (optional, your local time)</Label><Input id="action-start" type="datetime-local" value={draft.planned_start?localTime(new Date(draft.planned_start)):""} disabled={blocked||running(draft)} onChange={e=>setDraft({...draft,planned_start:e.target.value?new Date(e.target.value).toISOString():null})}/>
         <p className="hint">Leave blank to keep it unscheduled. Saving a future start schedules one invocation.</p>
-        {error&&<p className="error" role="alert">{error}</p>}
-        <div className="action-controls"><Button type="submit" value="save" disabled={busy||running(draft)}>{draft.planned_start?"Schedule action":"Save to backlog"}</Button><Button type="submit" value="now" variant="outline" disabled={busy||running(draft)}><Play size={14}/>Run now</Button></div>
+        <ActionStatus feedback={feedback}/>{refreshControl()}
+        <div className="action-controls"><Button type="submit" value="save" aria-busy={feedback.isPending(`save:${draft.id}`)} disabled={blocked||running(draft)}>{feedback.isPending(`save:${draft.id}`)&&<PendingIcon pending size={16}/>} {feedback.isPending(`save:${draft.id}`)?draft.planned_start?"Scheduling action…":"Saving action…":draft.planned_start?"Schedule action":"Save to backlog"}</Button><Button type="submit" value="now" variant="outline" aria-busy={feedback.isPending(`save-run:${draft.id}`)} disabled={blocked||running(draft)}>{feedback.isPending(`save-run:${draft.id}`)?<PendingIcon pending size={14}/>:<Play size={14}/>} {feedback.isPending(`save-run:${draft.id}`)?"Saving and queuing…":"Run now"}</Button></div>
       </form></DialogContent></Dialog>}
   </section>;
 }

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { Artifact } from "./bindings/Artifact";
 import { api, post } from "./api";
+import { ActionStatus, PendingIcon, useActionFeedback } from "./ActionFeedback";
 
 const category = (file: Artifact) =>
   file.media_type.startsWith("image/")
@@ -40,22 +41,26 @@ const status = (file: Artifact) =>
 // explorer + single-file preview interaction. See UPSTREAM.md.
 export function KnowledgeExplorer({
   readOnly = false,
+  groupId,
+  uploadPending = false,
   files,
   groupName,
   onUpload,
   onRefresh,
-  perform,
 }: {
   readOnly?: boolean;
+  groupId: string;
+  uploadPending?: boolean;
   files: Artifact[];
   groupName: string;
   onUpload: () => void;
   onRefresh: () => Promise<void>;
-  perform: (work: () => Promise<void>) => Promise<void>;
 }) {
+  const [refreshNeeded, setRefreshNeeded] = useState(false);
   const [folder, setFolder] = useState("All files");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+  const feedback = useActionFeedback(`knowledge:${groupId}`, selected ?? "files");
   const [sort, setSort] = useState<"name" | "created_at" | "size">("name");
   const [ascending, setAscending] = useState(true);
   const [preview, setPreview] = useState("");
@@ -105,6 +110,16 @@ export function KnowledgeExplorer({
     setLoading(next.media_type.startsWith("text/") && next.size <= 256 * 1024);
     setSelected(next.id);
   }
+  async function refreshed(message: string) {
+    try {
+      await onRefresh();
+      setRefreshNeeded(false);
+      return { kind: "success" as const, message };
+    } catch {
+      setRefreshNeeded(true);
+      return { kind: "warning" as const, message: `${message} The file list could not refresh. Refresh it to check the current state.` };
+    }
+  }
   function sortBy(next: typeof sort) {
     setAscending(next === sort ? !ascending : true);
     setSort(next);
@@ -118,10 +133,18 @@ export function KnowledgeExplorer({
           <ChevronRight size={14} />
           <strong>Knowledge</strong>
         </div>
-        <Button disabled={readOnly} onClick={onUpload}>
-          <Plus size={16} /> Upload files
+        <Button disabled={readOnly || uploadPending} aria-busy={uploadPending} onClick={onUpload}>
+          {uploadPending ? <PendingIcon pending size={16} /> : <Plus size={16} />} {uploadPending ? "Uploading files…" : "Upload files"}
         </Button>
       </div>
+      {!file && <ActionStatus feedback={feedback} />}
+      {refreshNeeded && <Button variant="outline" disabled={feedback.pending !== null} aria-busy={feedback.isPending("refresh")} onClick={() => void feedback.run("refresh", async () => {
+        await onRefresh();
+        setRefreshNeeded(false);
+        return { kind: "success", message: "File list refreshed." };
+      }, { errorMessage: "The file list could not refresh. No upload, index, or deletion was repeated." })}>
+        {feedback.isPending("refresh") && <PendingIcon pending size={16} />} {feedback.isPending("refresh") ? "Refreshing files…" : "Refresh file list"}
+      </Button>}
       <div className="explorer-layout">
         <nav className="explorer-folders" aria-label="File categories">
           <p>EXPLORER</p>
@@ -304,6 +327,7 @@ export function KnowledgeExplorer({
               </p>
             )}
           </div>
+          <ActionStatus feedback={feedback} />
           <footer>
             <a
               className="file-download"
@@ -315,15 +339,17 @@ export function KnowledgeExplorer({
             {category(file) !== "Other files" && (
               <Button
                 variant="outline"
-                disabled={readOnly || file.status === "indexing"}
+                disabled={readOnly || feedback.pending !== null || refreshNeeded || file.status === "indexing"}
+                aria-busy={feedback.isPending(`index:${file.id}`)}
                 onClick={() =>
-                  void perform(async () => {
-                    await post(`/artifacts/${file.id}/index`);
-                    await onRefresh();
-                  })
+                  void feedback.run(`index:${file.id}`, async () => {
+                    const result = await post<Artifact>(`/artifacts/${file.id}/index`);
+                    return refreshed(result.status === "indexed" ? `“${file.name}” is searchable.` : `Search preparation accepted for “${file.name}”. The file remains stored; Searchable appears only after indexing finishes.`);
+                  }, { errorMessage: "Search preparation was not confirmed. The stored file is retained; refresh its status before retrying." })
                 }
               >
-                {file.status === "indexing"
+                {feedback.isPending(`index:${file.id}`) && <PendingIcon pending size={16} />}
+                {feedback.isPending(`index:${file.id}`) ? "Requesting search…" : file.status === "indexing"
                   ? "Preparing search…"
                   : file.status === "indexed"
                     ? "Update search"
@@ -333,16 +359,19 @@ export function KnowledgeExplorer({
             <Button
               variant="ghost"
               aria-label={`Delete ${file.name}`}
-              disabled={readOnly}
-              onClick={() =>
-                void perform(async () => {
+              disabled={readOnly || feedback.pending !== null || refreshNeeded}
+              aria-busy={feedback.isPending(`delete:${file.id}`)}
+              onClick={() => {
+                let deleted = false;
+                void feedback.run(`delete:${file.id}`, async () => {
                   await api(`/artifacts/${file.id}`, { method: "DELETE" });
+                  deleted = true;
                   setSelected(null);
-                  await onRefresh();
-                })
-              }
+                  return refreshed(`“${file.name}” deleted.`);
+                }, { toast: () => deleted, errorMessage: "File deletion was not confirmed. Refresh the file list before retrying." });
+              }}
             >
-              <Trash2 size={15} /> Delete
+              {feedback.isPending(`delete:${file.id}`) ? <PendingIcon pending size={15} /> : <Trash2 size={15} />} {feedback.isPending(`delete:${file.id}`) ? "Deleting file…" : "Delete"}
             </Button>
           </footer>
         </section>

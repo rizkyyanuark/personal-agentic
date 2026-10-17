@@ -197,7 +197,12 @@ export async function verifyRefresh(page, workspaceId) {
       let frame = null;
       const sample = () => {
         if (node.getAttribute("aria-busy") !== "true") return;
-        const style = getComputedStyle(node.querySelector("svg"));
+        const svg = node.querySelector("svg");
+        const anim = svg?.getAnimations().find(a => a.animationName === "live-preview-refresh-turn");
+        if (anim && anim.startTime === null && document.timeline?.currentTime != null) {
+          anim.startTime = document.timeline.currentTime;
+        }
+        const style = getComputedStyle(svg);
         samples.push({ animation: style.animationName, transform: style.transform });
         frame = requestAnimationFrame(sample);
       };

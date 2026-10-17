@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, post, put, ApiFailure } from "./api";
 import App from "./App";
+import { ActionFeedbackProvider } from "./ActionFeedback";
 import { navigate, useRoute } from "./navigation";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -98,6 +99,6 @@ export function WorkspaceGate() {
         {workspaceSettings}
       </DialogContent>
     </Dialog>
-    {workspace&&<div className="platform-content"><App workspaceSettings={workspaceSettings} key={selected} user={user} workspaceName={workspace.name} workspaceId={workspace.id} role={workspace.role} controllerAccess={user==="owner"&&selected==="default"}/></div>}
+    {workspace&&<div className="platform-content"><ActionFeedbackProvider key={selected}><App workspaceSettings={workspaceSettings} user={user} workspaceName={workspace.name} workspaceId={workspace.id} role={workspace.role} controllerAccess={user==="owner"&&selected==="default"}/></ActionFeedbackProvider></div>}
   </div>;
 }

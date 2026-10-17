@@ -6,6 +6,19 @@ Click a quoted preview (or press Enter/Space while focused) to jump to and highl
 
 The decentralized workspace implementation adds authenticated tenants, registered outbound workers, explicit human/agent groups, and Matrix rooms. Start with [deployment and one-line installation](DEPLOYMENT.md) and the [verification guide](VERIFICATION.md). The local/SSH instructions below describe the retained bootstrap-owner mode; new workspaces use registered runtimes.
 
+## Action feedback
+
+Agent Profile and Instructions show Saving while the request is pending, then
+Saved for the accepted revision. Instructions apply to the next run. Editing again
+marks the draft unsaved; conflicting or unconfirmed saves retain it and offer
+**Check saved profile** before another save. **Retry refresh** repeats only the
+read when a change was saved but the view could not refresh.
+
+Other user actions identify their own pending state and result. Results stay near
+the action, or appear in one dismissible toast when its dialog closes or context
+is left. Queued work is distinguished from completed work. Feedback uses the
+existing visual style, keyboard controls and the system's reduced-motion setting.
+
 ## Workspace navigation
 
 Organization and project structure cards show a rounded runtime-name badge beside the agent type. The badge uses the effective workdir (including project overrides); hover for the full name when truncated. Unattached agents show “Not assigned”, and existing local/SSH workdirs retain their corresponding labels.

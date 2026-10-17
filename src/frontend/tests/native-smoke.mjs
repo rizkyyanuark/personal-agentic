@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir, mkdtemp, chmod, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { chromium, expect } from "@playwright/test";
+import { chromium, expect as playwrightExpect } from "@playwright/test";
+const expect = playwrightExpect.configure({ timeout: 30000 });
 
 // Real service, real SQLite/LanceDB and (in the codex phase) the signed-in CLI.
 const org = path.resolve(process.env.AE_TEST_ORG || "../../org");
@@ -15,7 +16,7 @@ const proofPath = path.join(directory, "proof.json");
 const proof = existsSync(proofPath)
   ? JSON.parse(await readFile(proofPath, "utf8"))
   : {};
-const browser = await chromium.launch({ channel: "msedge", headless: true });
+const browser = await chromium.launch({ ...(process.env.AE_TEST_BROWSER_EXECUTABLE ? { executablePath: process.env.AE_TEST_BROWSER_EXECUTABLE } : { channel: "msedge" }), headless: true, args: ["--disable-dev-shm-usage"] });
 const context = await browser.newContext({
   baseURL: base,
   viewport: { width: 1440, height: 980 },
@@ -82,7 +83,21 @@ try {
     page.getByRole("heading", { name: "General", exact: true }),
   ).toBeVisible();
   const phase = process.argv[2] || "basic";
-  if (phase === "workspace-navigation") {
+  if (phase === "action-feedback" || phase === "action-feedback-core") {
+    const { verifyActionFeedback } = await import("./action-feedback.mjs");
+    proof.actionFeedback = await verifyActionFeedback({ page, request, call, state, until, finished, org, directory, base, coreOnly: phase === "action-feedback-core" });
+    console.log("PASS truthful action feedback, persisted agent saves, contextual recovery, motion and workspace boundaries");
+  } else if (["action-feedback-settings", "action-feedback-operations", "action-feedback-accessibility", "action-feedback-existing"].includes(phase)) {
+    const suite = {
+      "action-feedback-settings": ["./action-feedback-settings.mjs", "verifyActionFeedbackSettings"],
+      "action-feedback-operations": ["./action-feedback-operations.mjs", "verifyActionFeedbackOperations"],
+      "action-feedback-accessibility": ["./action-feedback-accessibility.mjs", "verifyActionFeedbackAccessibility"],
+      "action-feedback-existing": ["./action-feedback-existing.mjs", "verifyActionFeedbackExisting"],
+    }[phase];
+    const module = await import(suite[0]);
+    proof[phase] = await module[suite[1]]({ page, request, call, state, until, finished, org, directory, base });
+    console.log(`PASS ${phase}`);
+  } else if (phase === "workspace-navigation") {
     const { verifyWorkspaceNavigation } = await import("./workspace-navigation.mjs");
     proof.workspaceNavigation = await verifyWorkspaceNavigation({ page, request, call, state, until, finished, org, directory, base });
     console.log("PASS persisted sections, sort menu, archived restore, hidden deleted groups, mobile navigation, recorded model badges and real run activity");
@@ -956,6 +971,7 @@ try {
     proof.workspace = await mkdtemp(
       path.join(tmpdir(), "Agentic Enterprise codebase "),
     );
+    await chmod(proof.workspace, 0o755);
     execFileSync("git", ["init", proof.workspace], { stdio: "ignore" });
     await writeFile(
       path.join(proof.workspace, "README.md"),
@@ -985,6 +1001,11 @@ try {
       .getByRole("button", { name: "Organization", exact: true })
       .click();
     await page.getByRole("button", { name: "Add agent", exact: true }).click();
+    if (process.env.AE_TEST_WORKSTATION_ID) {
+      await page.getByLabel("Harness", { exact: true }).selectOption("antigravity");
+      await page.getByLabel("Workstation", { exact: true }).selectOption(process.env.AE_TEST_WORKSTATION_ID);
+    }
+    await page.getByLabel("Workdir", { exact: true }).fill(process.env.AE_TEST_WORKSTATION_ID ? process.env.AE_TEST_WORKDIR : proof.workspace);
     await page.getByLabel("Name", { exact: true }).fill("Engineer");
     await page
       .getByLabel("Role", { exact: true })
@@ -1000,10 +1021,11 @@ try {
       (a) => a.name === "Engineer",
     ).id;
     await page.getByRole("button", { name: "Workdir", exact: true }).click();
+    if (process.env.AE_TEST_WORKSTATION_ID) await page.getByLabel("Workstation", { exact: true }).selectOption("");
     await page.getByLabel("Absolute directory path").fill(proof.workspace);
     await page.getByLabel("Access mode").selectOption("workspace-write");
     await page
-      .getByRole("button", { name: "Attach workdir", exact: true })
+      .getByRole("button", { name: /^(Attach|Change) workdir$/ })
       .click();
     await until(
       async () =>
@@ -1027,7 +1049,7 @@ try {
     await page.getByRole("button", { name: "Close agent settings" }).click();
     await page
       .getByRole("navigation", { name: "Groups" })
-      .getByRole("button", { name: "Platform verification" })
+      .getByRole("button", { name: "Platform verification", exact: true })
       .last()
       .click();
     await expect(
@@ -2459,6 +2481,8 @@ try {
   assert.deepEqual(errors, [], "Browser JavaScript errors");
   await writeFile(proofPath, JSON.stringify(proof, null, 2));
 } catch (error) {
+  await page.screenshot({ path: path.join(directory, "failure.png"), fullPage: true, timeout: 10000 }).catch(captureError => console.error(`Failure screenshot unavailable: ${captureError.message}`));
+  if (errors.length) console.error(JSON.stringify({ browserErrors: errors }));
   console.error(String(error.message).replaceAll(ownerKey, "[REDACTED]"));
   process.exitCode = 1;
 } finally {
