@@ -1,3 +1,4 @@
+import { selectValue } from "./value-picker.mjs";
 // Real native application, SQLite, filesystem, Codex account and MCP integration.
 // Use the isolated organization only; no mock provider or browser API interception.
 import assert from "node:assert/strict";
@@ -47,7 +48,7 @@ try{
   await page.getByRole("dialog").last().getByRole("button",{name:"Close",exact:true}).click();
   await page.getByLabel("Include CEO",{exact:true}).check();
   await page.getByLabel("Include Collaboration Worker",{exact:true}).check();
-  await page.getByLabel("Project manager for Collaboration Worker").selectOption(ceo.id);
+  await selectValue(page.getByLabel("Project manager for Collaboration Worker"), ceo.id);
   await page.getByRole("button",{name:"Save project",exact:true}).click();
   await expect(page).toHaveURL(/\/projects\/collaboration-alpha--/);
   s=await state();const project=s.groups.find(g=>g.name==="Collaboration Alpha");assert(project.project);proof.project=project.id;

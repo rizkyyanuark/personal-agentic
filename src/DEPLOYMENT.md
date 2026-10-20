@@ -157,6 +157,113 @@ Use the container path `/workdir` when attaching it in the platform. The non-roo
 UID is `10001`; grant it access to the selected paths. Each worker registration belongs to
 one workspace; use separate worker state directories/containers for different workspaces.
 
+### Explicit local projects overlay
+
+To grant the platform and an optional worker service access to existing host projects (such as repositories under `C:/Users/rizky/Documents/GitHub`), use the opt-in overlay `src/compose.projects.local.yaml`.
+
+On Windows, start this setup through `node scripts/local-projects-compose.mjs`
+from `src`. This required entrypoint checks the source directory before any Docker
+call, requires an explicit project name, and uses only the local Docker Desktop
+Linux named pipe. Keep `create_host_path: false` in the overlay: Docker documents
+that option as preventing missing source creation in its [Compose services reference](https://docs.docker.com/reference/compose-file/services/).
+Local acceptance on Docker Desktop Compose 5.6.0 nevertheless created a missing
+Windows source and started the service despite rendering that option correctly.
+The entrypoint's filesystem preflight protects this documented setup from that
+observed behavior; direct `docker compose` startup bypasses the check.
+
+Configuration example:
+```sh
+# Export in the shell before setup (keep machine-specific paths out of Git)
+AE_PROJECTS_DIR="C:/Users/rizky/Documents/GitHub"
+```
+
+Use a dedicated Compose project so its platform, Matrix, and worker state are
+separate from existing `/workdir` installations. From `src`, choose unused
+loopback ports and a new project name. Do not reuse an enrolled worker's state.
+For the first setup, choose a new Matrix bridge password through the masked prompt
+and retain it in your private local configuration for later starts. Do not print
+or commit that configuration:
+
+```powershell
+$env:AE_PROJECTS_DIR = 'C:/Users/rizky/Documents/GitHub'
+$env:AE_PORT = '18866'
+$env:AE_MATRIX_PORT = '18867'
+$env:AE_PUBLIC_URL = 'http://127.0.0.1:18866'
+$env:AE_MATRIX_SERVER_NAME = 'agentic-projects.local'
+$env:AE_MATRIX_BOT_USERNAME = 'agentic'
+$bridgePassword = Read-Host 'New project Matrix bridge password' -AsSecureString
+$env:AE_MATRIX_BOT_PASSWORD = [System.Net.NetworkCredential]::new('', $bridgePassword).Password
+$projectArgs = @('-p', 'agentic-projects-local')
+node scripts/local-projects-compose.mjs @projectArgs config --quiet
+if ($LASTEXITCODE -ne 0) { throw 'Project configuration is invalid' }
+node scripts/local-projects-compose.mjs @projectArgs run --rm matrix generate
+if ($LASTEXITCODE -ne 0) { throw 'Synapse configuration generation failed' }
+node scripts/local-projects-compose.mjs @projectArgs up -d matrix
+if ($LASTEXITCODE -ne 0) { throw 'Synapse startup failed' }
+```
+
+These commands initialize this project's new `matrix-data` volume. Wait for that
+homeserver, then create its private bridge account before starting the platform:
+
+```powershell
+$matrixReady = $false
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+  node scripts/local-projects-compose.mjs @projectArgs exec -T matrix python -c 'import urllib.request; urllib.request.urlopen("http://localhost:8008/_matrix/client/versions", timeout=3).close()' *> $null
+  if ($LASTEXITCODE -eq 0) { $matrixReady = $true; break }
+  Start-Sleep -Seconds 2
+}
+if (-not $matrixReady) { throw 'The project homeserver is not ready' }
+$registerBridge = @'
+import hashlib, hmac, json, sys, urllib.request, yaml
+account = json.load(sys.stdin)
+config = yaml.safe_load(open('/data/homeserver.yaml'))
+url = 'http://localhost:8008/_synapse/admin/v1/register'
+nonce = json.load(urllib.request.urlopen(url, timeout=5))['nonce']
+message = '\0'.join([nonce, account['username'], account['password'], 'notadmin'])
+mac = hmac.new(config['registration_shared_secret'].encode(), message.encode(), hashlib.sha1).hexdigest()
+payload = dict(nonce=nonce, username=account['username'], password=account['password'], admin=False, mac=mac)
+request = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
+urllib.request.urlopen(request, timeout=10).close()
+'@
+@{ username = $env:AE_MATRIX_BOT_USERNAME; password = $env:AE_MATRIX_BOT_PASSWORD } |
+  ConvertTo-Json -Compress |
+  node scripts/local-projects-compose.mjs @projectArgs exec -T matrix python -c $registerBridge
+if ($LASTEXITCODE -ne 0) { throw 'Bridge account provisioning failed; do not change an existing account password implicitly' }
+Remove-Variable bridgePassword, registerBridge
+node scripts/local-projects-compose.mjs @projectArgs up -d --build platform
+if ($LASTEXITCODE -ne 0) { throw 'Platform startup failed' }
+```
+
+Account provisioning is a first-start operation. To resume an initialized project,
+load its same private settings and use `up -d` without repeating account creation.
+Use the same entrypoint and `@projectArgs` for subsequent commands, including
+owner-key retrieval and human-account registration, so they address this project's state.
+
+The worker is optional and remains behind its existing Compose profile. Create
+an enrollment for this new workspace through Runtime settings, provide its token
+through the private `AE_ENROLLMENT_TOKEN` environment setting, then explicitly
+start this project's worker:
+
+```powershell
+node scripts/local-projects-compose.mjs @projectArgs --profile worker up -d worker
+node scripts/local-projects-compose.mjs @projectArgs --profile worker stop
+```
+
+`stop` preserves all data and registration. Ordinary operation does not need
+volume deletion. To resume, use the same project name, ports, private configuration,
+and `up -d` commands. Do not apply this overlay to an existing enrolled `/workdir`
+worker. For automated acceptance with temporary state, use the isolated verifier
+in [VERIFICATION.md](VERIFICATION.md#local-projects-overlay-verification).
+
+Key operational policies:
+- The overlay mounts `${AE_PROJECTS_DIR}` to `/projects` with `bind.create_host_path: false` on both platform and worker; the required Windows entrypoint separately rejects missing source directories before invoking Docker.
+- The worker command is configured with `--worker-root /projects` so agent bindings under `/projects` are validated against this containment root.
+- Root-switch implications: Existing registered workers bound to `/workdir` must not have their root switched abruptly; changing an enrolled worker root invalidates old path bindings. Use a separate registered worker or dedicated workspace.
+- Linux credential boundary: Host Windows credentials and Git configurations do not transfer into Linux containers. Configure needed Git identities and keys inside the container/worker environment.
+- Backup ownership: Files mounted from external host directories are owned and backed up by the host; platform organization backups do not bundle external project source trees.
+- Containment: Only access approved project subdirectories within the mounted root; do not mount user home roots or unrelated host directories.
+- Safe fixture cleanup: Temporary test fixtures created inside mounted paths must be cleaned up explicitly after tests.
+
 ## Failure and recovery contract
 
 Claims and ordered output frames are durable. Workers retain an acknowledged result outbox

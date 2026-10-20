@@ -1,0 +1,61 @@
+.date-popover-positioner {
+  z-index: var(--value-popup-layer, 90);
+  isolation: isolate;
+}
+.date-popover-content {
+  width: min(304px, calc(100vw - 16px), var(--available-width));
+  max-height: min(440px, var(--available-height));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--foreground) 12%, transparent);
+  transform-origin: var(--transform-origin);
+  transition: opacity 200ms, transform 200ms;
+  outline: none;
+}
+.date-popover-content[data-starting-style],
+.date-popover-content[data-ending-style] {
+  opacity: 0;
+  transform: translateY(-4px) scale(.98);
+}
+.date-popover-content:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.date-popover-header { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+.date-popover-title { font-size: 14px; font-weight: 600; }
+.date-popover-description { font-size: 11px; color: var(--muted-foreground); line-height: 1.5; }
+.schedule-calendar { width: 100%; padding: 10px 0; font-family: inherit; }
+.schedule-calendar-months, .schedule-calendar-month { width: 100%; position: relative; }
+.schedule-calendar-month-caption { height: 36px; display: flex; align-items: center; justify-content: center; padding-inline: 36px; }
+.schedule-calendar-caption-label { font-size: 13px; font-weight: 500; }
+.schedule-calendar-nav { position: absolute; inset: 4px 0 auto; display: flex; justify-content: space-between; gap: 4px; }
+.schedule-calendar-nav button { flex: none; width: 28px; height: 28px; }
+.schedule-calendar-nav button svg { width: 16px; height: 16px; }
+.schedule-calendar-grid { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 6px; }
+.schedule-calendar-weekday { color: var(--muted-foreground); height: 28px; font-size: 11px; font-weight: 400; text-align: center; }
+.schedule-calendar-day { padding: 2px; text-align: center; }
+.schedule-calendar-day-button { width: 100%; height: auto; min-width: 0; aspect-ratio: 1; border-radius: 7px; font-size: 12px; font-weight: 400; }
+.schedule-calendar-today:not([data-selected]) .schedule-calendar-day-button { background: var(--secondary); }
+.schedule-calendar-day-button[data-selected-single="true"] { background: var(--primary); color: var(--primary-foreground); }
+.schedule-calendar-outside { color: var(--muted-foreground); }
+.schedule-calendar-disabled .schedule-calendar-day-button { opacity: .45; }
+.schedule-calendar-hidden { visibility: hidden; }
+.schedule-date-time { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, .65fr); gap: 10px; }
+.schedule-date-field, .schedule-time-field { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
+.schedule-date-trigger { width: 100%; height: 36px; justify-content: flex-start; gap: 8px; border-radius: 7px; font-size: 13px; }
+.schedule-date-trigger span { overflow: hidden; text-overflow: ellipsis; }
+.schedule-date-time input { min-height: 36px; height: 36px; }
+.schedule-date-entry { display: flex; flex-direction: column; gap: 7px; }
+.schedule-calendar-done { width: 100%; }
+.schedule-dialog { max-height: calc(100dvh - 24px); overflow-y: auto; }
+@media (max-width: 420px) {
+  .schedule-date-time { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .date-popover-content { transition: none; }
+}

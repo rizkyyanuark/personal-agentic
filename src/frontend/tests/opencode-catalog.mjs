@@ -1,3 +1,4 @@
+import { expectValue, readOptions, selectValue } from "./value-picker.mjs";
 // Real native catalogs, Rust API and browser; no provider calls in catalog checks.
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -32,14 +33,15 @@ try {
     assert(catalog.models.some(m => !m.slug.endsWith("-free")));
     assert(catalog.models.some(m => m.slug === catalog.model));
     await page.goto(`/organization/agents/${agent.id}/profile`);
-    await page.getByLabel("Harness", { exact: true }).selectOption("opencode");
-    await expect(page.locator('#profile-harness option[value="opencode"]')).toHaveText("OpenCode");
+    await selectValue(page.getByLabel("Harness", { exact: true }), "opencode");
+    await expectValue(page.locator("#profile-harness"), "opencode", "OpenCode");
     const model = page.getByLabel("Model", { exact: true });
-    await expect(model.locator("option")).toHaveCount(catalog.models.length + 1, { timeout: 30000 });
+    await expect.poll(async () => (await readOptions(model)).length).toBe(catalog.models.length + 1);
+    const modelOptions = await readOptions(model);
     for (const entry of catalog.models) {
-      await expect(model.locator(`option[value="${entry.slug}"]`)).toHaveText(`${entry.display_name} · ${entry.slug.split("/")[0]}`);
+      assert.equal(modelOptions.find(option => option.value === entry.slug)?.label, `${entry.display_name} · ${entry.slug.split("/")[0]}`);
     }
-    await expect(model.locator('option[value=""]')).toHaveText(`Use OpenCode setting (${catalog.model})`);
+    assert.equal(modelOptions.find(option => option.value === "")?.label, `Use OpenCode setting (${catalog.model})`);
     if (!live && !remote) {
       const file = path.join(agent.workdir.path, "opencode.json");
       // A temporary native provider definition tests discovery only; no model call
@@ -47,10 +49,10 @@ try {
       await fs.writeFile(file, JSON.stringify({ provider: { "catalog-smoke": { npm: "@ai-sdk/openai-compatible", name: "Catalog smoke", options: { baseURL: "http://127.0.0.1:11434/v1" }, models: { "new-model": { name: "New CLI model" } } } } }), { flag: "wx" });
       try {
         await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-        await expect(model.locator('option[value="catalog-smoke/new-model"]')).toHaveText("New CLI model · catalog-smoke", { timeout: 30000 });
+        await expect.poll(async () => (await readOptions(model)).find(option => option.value === "catalog-smoke/new-model")?.label).toBe("New CLI model · catalog-smoke");
       } finally { await fs.unlink(file); }
       await page.getByRole("button", { name: "Refresh models" }).click();
-      await expect(model.locator('option[value="catalog-smoke/new-model"]')).toHaveCount(0, { timeout: 30000 });
+      await expect.poll(async () => (await readOptions(model)).filter(option => option.value === "catalog-smoke/new-model").length).toBe(0);
     }
     await page.screenshot({ path: path.join(proofDir, `${live ? "live" : "pilot"}-${remote ? "mac" : "local"}-catalog.png`) });
     proof.push({ host: remote ? "macos-example" : "local", modelCount: catalog.models.length, providers, default: catalog.model });

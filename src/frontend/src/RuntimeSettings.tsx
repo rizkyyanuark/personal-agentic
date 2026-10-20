@@ -7,6 +7,7 @@ import { Input } from "./components/ui/input";
 import { Server, Plus, Copy, Check, KeyRound, RefreshCw } from "lucide-react";
 import { api, post, put } from "./api";
 import { ActionStatus, PendingIcon, useActionFeedback } from "./ActionFeedback";
+import { ValuePicker } from "./ValuePicker";
 export function RuntimeSelect({value,onChange,onLoaded,disabled=false,required=false,allowController=false}: {
   value:string; onChange:(id:string)=>void; onLoaded?:(runtimes:RegisteredRuntime[])=>void;
   disabled?:boolean; required?:boolean; allowController?:boolean;
@@ -19,11 +20,12 @@ export function RuntimeSelect({value,onChange,onLoaded,disabled=false,required=f
     refresh();window.addEventListener("focus",refresh);
     return()=>{cancelled=true;window.removeEventListener("focus",refresh);};
   },[onLoaded,value]);
-  return <label className="runtime-select">Registered runtime <select aria-label="Registered runtime" value={value} disabled={disabled} required={required} onChange={e=>onChange(e.target.value)}>
-    <option value="">{allowController ? "Controller / SSH" : "Choose a runtime"}</option>
-    {runtimes.filter(r=>!r.revoked||r.id===value).map(r=><option key={r.id} value={r.id} disabled={r.revoked}>{r.name}</option>)}
-    {value&&!runtimes.some(r=>r.id===value)&&<option value={value} disabled>{error?"Runtime unavailable":"Loading runtime…"}</option>}
-  </select>{error&&<span role="alert">{error}</span>}</label>;
+  return <label className="runtime-select">Registered runtime <ValuePicker searchable aria-label="Registered runtime" value={value} disabled={disabled} required={required} onValueChange={onChange}
+    options={[
+      { value: "", label: allowController ? "Controller / SSH" : "Choose a runtime", disabled: !allowController },
+      ...runtimes.filter(r=>!r.revoked||r.id===value).map(r=>({ value: r.id, label: r.name, disabled: r.revoked })),
+      ...(value&&!runtimes.some(r=>r.id===value) ? [{ value, label: error?"Runtime unavailable":"Loading runtime…", disabled: true }] : []),
+    ]} />{error&&<span role="alert">{error}</span>}</label>;
 }
 export function HarnessSelect({id,value,onChange,runtimeId,runtimes,allowController=false}: {
   id:string; value:Agent["harness"]|""; onChange:(harness:Agent["harness"])=>void;
@@ -31,11 +33,12 @@ export function HarnessSelect({id,value,onChange,runtimeId,runtimes,allowControl
 }) {
   const runtime=runtimes.find(r=>r.id===runtimeId);
   const options=runtimeId?availableHarnesses(runtime):allowController?(Object.keys(harnessNames) as Agent["harness"][]):[];
-  return <><label htmlFor={id}>Harness</label><select id={id} value={value} disabled={!options.length||Boolean(runtimeId&&(!runtime?.online||runtime.revoked))} required onChange={e=>onChange(e.target.value as Agent["harness"])}>
-    {!value&&<option value="">Choose a harness</option>}
-    {value&&!options.includes(value)&&<option value={value} disabled>{harnessNames[value]} (unavailable)</option>}
-    {options.map(harness=><option key={harness} value={harness}>{harnessNames[harness]}</option>)}
-  </select>{runtimeId&&(!runtime?.online||runtime.revoked)?<p className="hint">Connect this runtime to choose an available harness.</p>:runtimeId&&!options.length?<p className="hint">No harness catalog reported. Install and sign in to a harness on this machine, then refresh.</p>:null}</>;
+  return <><label htmlFor={id}>Harness</label><ValuePicker id={id} value={value} disabled={!options.length||Boolean(runtimeId&&(!runtime?.online||runtime.revoked))} required onValueChange={next=>onChange(next as Agent["harness"])}
+    options={[
+      ...(!value ? [{ value: "", label: "Choose a harness", disabled: true }] : []),
+      ...(value&&!options.includes(value) ? [{ value, label: `${harnessNames[value]} (unavailable)`, disabled: true }] : []),
+      ...options.map(harness=>({ value: harness, label: harnessNames[harness] })),
+    ]} />{runtimeId&&(!runtime?.online||runtime.revoked)?<p className="hint">Connect this runtime to choose an available harness.</p>:runtimeId&&!options.length?<p className="hint">No harness catalog reported. Install and sign in to a harness on this machine, then refresh.</p>:null}</>;
 }
 export function RuntimeSettings({enrollmentToken,onEnrollmentTokenChange}:{enrollmentToken:string;onEnrollmentTokenChange:(token:string)=>void}){
   const [runtimes,setRuntimes]=useState<RegisteredRuntime[]>([]);
@@ -89,7 +92,7 @@ export function RuntimeSettings({enrollmentToken,onEnrollmentTokenChange}:{enrol
       <div className="settings-section-title"><Plus size={20}/><h2>Register a runtime</h2></div><p className="settings-description">Give the machine a recognizable name. You’ll get a temporary key to connect its worker.</p>
       <form className="settings-inline-form" onSubmit={e=>{e.preventDefault();void act("register",async()=>{const r=await post<{enrollment_token:string}>("/runtimes",{name:name.trim()});setToken(r.enrollment_token);setCopied(false);setName("");},`${name.trim()} registered. Its temporary key is available in Runtime to connect its worker.`);}}><label htmlFor="runtime-name">Runtime name<Input id="runtime-name" required maxLength={80} disabled={busy} placeholder="e.g. MacBook or build server" value={name} onChange={e=>{feedback.clear();setDetail("");setName(e.target.value);}}/></label><Button type="submit" disabled={busy||!name.trim()} aria-busy={feedback.isPending("register")}><PendingIcon pending={feedback.isPending("register")} size={16}/>{feedback.isPending("register")?"Registering runtime…":"Register runtime"}</Button></form>
     </section>
-    {token&&<section className="settings-card runtime-enrollment" aria-label="Connect your worker"><div className="settings-section-title"><KeyRound size={20}/><h2>Connect your worker</h2></div><p className="settings-description">This key can be used once and expires in 15 minutes.</p><div className="runtime-token"><Input aria-label="Enrollment token" readOnly type="password" value={token}/><Button variant="outline" onClick={()=>{void (async()=>{try{await navigator.clipboard.writeText(token);setCopied(true);}catch{setError("Could not copy the key. Select the key field and copy it manually.");}})();}}>{copied?<Check size={16}/>:<Copy size={16}/>} {copied?"Copied":"Copy token"}</Button></div>
+    {token&&<section className="settings-card runtime-enrollment" aria-label="Connect your worker"><div className="settings-section-title"><KeyRound size={20}/><h2>Connect your worker</h2></div><p className="settings-description">This key can be used once and expires in 15 minutes.</p><div className="runtime-token"><Input aria-label="Enrollment token" readOnly type="password" value={token}/><Button variant="outline" onClick={()=>{void feedback.run("copy",async()=>{try{await navigator.clipboard.writeText(token);setCopied(true);return {kind:"success",message:"Enrollment token copied to clipboard."};}catch{return {kind:"error",message:"Could not copy the enrollment token. Select the token field and copy it manually."};}});}}>{copied?<Check size={16}/>:<Copy size={16}/>} {copied?"Copied":"Copy token"}</Button></div>
       <details className="runtime-instructions"><summary>Worker connection instructions</summary><p>On the worker machine, set <code>AE_ENROLLMENT_TOKEN</code> to this key, then run the installed worker:</p><pre>{`agentic-enterprise --worker --controller ${location.origin} --worker-state .ae-worker --worker-root /absolute/workdir`}</pre><p>Replace the workdir with your folder. For a different machine, use the platform’s reachable network address instead of localhost. Docker workers can mount a host folder at /workdir; persist /data to keep their registration.</p></details><Button variant="ghost" onClick={()=>{setToken("");setCopied(false);}}>Hide token</Button></section>}
     {runtimes.some(r=>r.revoked)&&<details className="runtime-history"><summary>Revoked runtimes ({runtimes.filter(r=>r.revoked).length})</summary>{runtimes.filter(r=>r.revoked).map(r=><div className="settings-person" key={r.id}><strong>{r.name}</strong><span className="settings-badge">Revoked</span></div>)}</details>}
   </div>;

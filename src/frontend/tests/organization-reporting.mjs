@@ -1,3 +1,4 @@
+import { expectValue } from "./value-picker.mjs";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -63,7 +64,7 @@ export async function verifyOrganizationReporting({ page, call, state, base, dir
   await connector(manager); await connector(worker, manager.id);
   await page.getByRole("button", { name: "Auto arrange", exact: true }).click();
   await page.locator(`.org-card[data-agent-id="${manager.id}"]`).click();
-  await expect(page.getByLabel("Reports to", { exact: true })).toHaveValue("");
+  await expectValue(page.getByLabel("Reports to", { exact: true }), "");
   await page.getByText("Organization knowledge", { exact: true }).click();
   await expect(page.getByLabel("Organization relationships")).toContainText("Owner (Owner)");
   await connector(manager); await connector(worker, manager.id);

@@ -1,5 +1,32 @@
 # Upstream sources
 
+## Workspace UI controls (2026-10-18)
+
+Toast, Select, Combobox, Calendar, and Popover presentation adapts the official
+shadcn `base-nova` registry, inspected through MCP shadcn and the CLI `view` command:
+[Toast](https://ui.shadcn.com/r/styles/base-nova/toast.json),
+[Select](https://ui.shadcn.com/r/styles/base-nova/select.json),
+[Combobox](https://ui.shadcn.com/r/styles/base-nova/combobox.json),
+[Calendar](https://ui.shadcn.com/r/styles/base-nova/calendar.json), and
+[Popover](https://ui.shadcn.com/r/styles/base-nova/popover.json).
+The adapted component source is retained under `frontend/src/components/ui` and
+uses the installed MIT Base UI 1.8.0 API, existing button utility, Lucide icons,
+and application tokens. The registry's global toast singleton, bottom placement,
+and 500 ms motion are replaced by the existing workspace-owned manager, top-right
+presentation, and 200–300 ms transitions. No Sonner dependency or second presenter
+is introduced.
+
+The Calendar composition uses MIT `react-day-picker` 9.14.0 and `date-fns` 4.1.0,
+with exact resolved dependencies in `package-lock.json`. React remains at the
+previously resolved 19.3.0 version, hoisted once so the application and DayPicker
+share the same runtime as ReactDOM 19.3.0. The value adapter and local schedule-time
+conversion are application-specific glue; API routing, schedule recurrence,
+authentication, and persistence remain owned by the existing backend.
+
+This section records implementation provenance. The colleague completed local
+browser acceptance on 18 October 2026; its reviewed evidence and verification
+boundaries are recorded in [Verification](VERIFICATION.md#workspace-controls-local-handoff).
+
 ## Saved workstations and project setup (2026-09-20)
 
 Reuses the existing group/project API, React Flow chart, shadcn form components, native OpenSSH bridge and SQLite state. Project membership editing moved from GroupDialog into the Structure page; it does not introduce a second membership store.

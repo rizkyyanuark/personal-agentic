@@ -1,3 +1,4 @@
+import { expectValue, readValue, selectValue } from "./value-picker.mjs";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -304,7 +305,7 @@ export async function verifyActionFeedbackAccessibility({ page, call, state, org
     const tenant = await call("/tenants", { name: `Feedback isolation ${suffix}` });
     console.log("ACCESSIBILITY: opening instructions");
     const workspaceEditor = await openInstructions(page);
-    const selected = await page.getByRole("combobox", { name: "Workspace", exact: true }).inputValue();
+    const selected = await readValue(page.getByRole("combobox", { name: "Workspace", exact: true }));
     await workspaceEditor.fill("ACCESSIBILITY_PENDING_WORKSPACE_CHANGE");
     const saveBtn = page.getByRole("button", { name: "Save changes", exact: true });
     await saveBtn.scrollIntoViewIfNeeded();
@@ -318,8 +319,8 @@ export async function verifyActionFeedbackAccessibility({ page, call, state, org
       console.log("ACCESSIBILITY: workspaceGate is ready, status:", workspaceGate.status());
       assert.equal(workspaceGate.status(), 200);
       console.log("ACCESSIBILITY: selecting workspace tenant:", tenant.id);
-      await page.getByRole("combobox", { name: "Workspace", exact: true }).selectOption(tenant.id);
-      await expect(page.getByRole("combobox", { name: "Workspace", exact: true })).toHaveValue(tenant.id);
+      await selectValue(page.getByRole("combobox", { name: "Workspace", exact: true }), tenant.id);
+      await expectValue(page.getByRole("combobox", { name: "Workspace", exact: true }), tenant.id);
       await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
       const scopedUrl = page.url();
       console.log("ACCESSIBILITY: releasing workspaceGate");
@@ -333,8 +334,8 @@ export async function verifyActionFeedbackAccessibility({ page, call, state, org
       assert.equal(page.url(), scopedUrl, "Old workspace completion cannot navigate the new workspace");
       const nextState = await state();
       assert(!nextState.agents.some(value => value.id === agent.id));
-      await page.getByRole("combobox", { name: "Workspace", exact: true }).selectOption(selected);
-      await expect(page.getByRole("combobox", { name: "Workspace", exact: true })).toHaveValue(selected);
+      await selectValue(page.getByRole("combobox", { name: "Workspace", exact: true }), selected);
+      await expectValue(page.getByRole("combobox", { name: "Workspace", exact: true }), selected);
       assert.equal((await state()).agents.find(value => value.id === agent.id).instructions, "ACCESSIBILITY_PENDING_WORKSPACE_CHANGE");
       proof.workspaceIsolation = { source: selected, target: tenant.id, responseStatus: workspaceGate.status(), oldResultSuppressed: true, oldNavigationSuppressed: true, mutationPersistedInSourceOnly: true };
     } finally { await workspaceGate.dispose(); }
@@ -352,8 +353,8 @@ export async function verifyActionFeedbackAccessibility({ page, call, state, org
       console.log("ACCESSIBILITY: sideChatGate ready, status:", sideChatGate.status());
       assert.equal(sideChatGate.status(), 200);
       console.log("ACCESSIBILITY: switching workspace to tenant");
-      await page.getByRole("combobox", { name: "Workspace", exact: true }).selectOption(tenant.id);
-      await expect(page.getByRole("combobox", { name: "Workspace", exact: true })).toHaveValue(tenant.id);
+      await selectValue(page.getByRole("combobox", { name: "Workspace", exact: true }), tenant.id);
+      await expectValue(page.getByRole("combobox", { name: "Workspace", exact: true }), tenant.id);
       await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
       const scopedUrl = page.url();
       console.log("ACCESSIBILITY: releasing sideChatGate");
@@ -364,8 +365,8 @@ export async function verifyActionFeedbackAccessibility({ page, call, state, org
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       assert.equal(page.url(), scopedUrl, "Old /btw response cannot navigate the new workspace to its side chat");
       await expect(page.locator(".action-toast")).toHaveCount(0);
-      await page.getByRole("combobox", { name: "Workspace", exact: true }).selectOption(selected);
-      await expect(page.getByRole("combobox", { name: "Workspace", exact: true })).toHaveValue(selected);
+      await selectValue(page.getByRole("combobox", { name: "Workspace", exact: true }), selected);
+      await expectValue(page.getByRole("combobox", { name: "Workspace", exact: true }), selected);
       const sideChats = await call("/groups/general/messages", undefined, "GET");
       assert(sideChats.some(value => value.command === "btw" && value.body === "/btw" && value.side_chat_id));
       proof.workspaceNavigationIsolation = { command: "Empty /btw without recipients", responseStatus: sideChatGate.status(), sourceMessagePersisted: true, oldNavigationSuppressed: true, providerTasksStarted: 0 };
@@ -387,8 +388,20 @@ export async function verifyActionFeedbackAccessibility({ page, call, state, org
       assert.equal(logoutGate.status(), 200);
       logoutGate.allowNavigationAbort();
       console.log("ACCESSIBILITY: clicking sign out");
-      await page.getByRole("button", { name: "Sign out", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Administrator sign in", exact: true })).toBeVisible();
+      const directSignOut = page.getByRole("button", { name: "Sign out", exact: true });
+      if (await directSignOut.isVisible().catch(() => false)) {
+        await directSignOut.click();
+      } else {
+        await page.getByRole("button", { name: "Account menu", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+      }
+      const adminHeading = page.getByRole("heading", { name: "Administrator sign in", exact: true });
+      const welcomeHeading = page.getByRole("heading", { name: "Welcome back", exact: true });
+      await expect(adminHeading.or(welcomeHeading)).toBeVisible();
+      if (await welcomeHeading.isVisible()) {
+        await page.getByRole("button", { name: "Administrator sign in", exact: true }).click();
+        await expect(adminHeading).toBeVisible();
+      }
       console.log("ACCESSIBILITY: releasing logoutGate");
       logoutGate.release();
       console.log("ACCESSIBILITY: waiting logoutGate.finished()");

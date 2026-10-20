@@ -1,3 +1,4 @@
+import { expectValue, readOptions, selectValue } from "./value-picker.mjs";
 // Real Rust/SQLite/browser, native Codex + OpenCode and SSH. No provider mocks.
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -45,10 +46,10 @@ try {
   assert.equal((await call("/sessions")).length,0);
   const bad=await context.request.put(`/api/agents/${agent.id}`,{data:{...agent,model:"unavailable/paid-model"}});assert.equal(bad.status(),400);
   assert.equal((await fetch(`${base}/api/harness/settings?harness=opencode`)).status,401);
-  await page.goto(`/organization/agents/${agent.id}/profile`);await expect(page.getByLabel("Harness",{exact:true})).toHaveValue("opencode");
-  await expect(page.getByLabel("Model",{exact:true})).toHaveValue(model.slug);await expect(page.getByLabel("Model variant",{exact:true})).toHaveCount(0);
+  await page.goto(`/organization/agents/${agent.id}/profile`);await expectValue(page.getByLabel("Harness",{exact:true}), "opencode");
+  await expectValue(page.getByLabel("Model",{exact:true}), model.slug);await expect(page.getByLabel("Model variant",{exact:true})).toHaveCount(0);
   const varied=catalog.models.find(m=>m.supported_reasoning_levels.length>0);
-  if(varied){await page.getByLabel("Model",{exact:true}).selectOption(varied.slug);await expect(page.getByLabel("Model variant",{exact:true})).toBeVisible();assert.equal(await page.getByLabel("Model variant").locator("option").count(),varied.supported_reasoning_levels.length+1);}
+  if(varied){await selectValue(page.getByLabel("Model",{exact:true}), varied.slug);await expect(page.getByLabel("Model variant",{exact:true})).toBeVisible();assert.equal((await readOptions(page.getByLabel("Model variant"))).length,varied.supported_reasoning_levels.length+1);}
   await page.reload();await page.screenshot({path:path.join(dir,"opencode-profile.png")});
   await page.setViewportSize({width:390,height:844});await page.reload();await expect(page.getByLabel("Harness",{exact:true})).toBeVisible();await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);await page.screenshot({path:path.join(dir,"opencode-profile-mobile.png")});
   const skills=await call(`/agents/${agent.id}/skills`);const found=skills.skills.find(s=>s.name==="pilot-check");assert(found);assert.match((await call(`/agents/${agent.id}/skills?path=${encodeURIComponent(found.path)}`)).text,/PILOT_SKILL_LOADED/);
@@ -169,7 +170,7 @@ try {
   const catalog=await call(`/harness/settings?harness=opencode&agent_id=${proof.agent}`);
   const selected=catalog.models.find(m=>m.slug===proof.model);assert(selected);
   await page.goto(`/organization/agents/${proof.agent}/profile`);
-  await expect(page.getByLabel("Model",{exact:true}).locator(`option[value="${proof.model}"]`)).toHaveText(selected.display_name);
+  assert.equal((await readOptions(page.getByLabel("Model",{exact:true}))).find(option=>option.value===proof.model)?.label,selected.display_name);
   await page.screenshot({path:path.join(dir,"opencode-profile-final.png")});
   await page.setViewportSize({width:390,height:844});await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);await page.screenshot({path:path.join(dir,"opencode-profile-mobile-final.png")});
   const run=await success(await send(proof.remote.agent,"What file did you create in our previous conversation? Reply with its filename without using any tool."));

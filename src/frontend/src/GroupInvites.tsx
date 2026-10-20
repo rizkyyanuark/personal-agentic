@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Bot, Check, Search, Users, X, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Agent } from "./bindings/Agent";
+import { ValuePicker } from "./ValuePicker";
 
 type Invite = { id: string; name: string; detail: string; kind: "agent" | "team" | "person"; ids: string[] };
 
@@ -87,7 +88,7 @@ export function GroupInvites({ agents, people, memberIds, humanIds, disabled, on
       </div>}
     </div>
     <p className="hint">Invite adds your selections below. Save {agents.length ? "group" : "changes"} to apply them.</p>
-    <div className="invite-access-heading"><h3>Who has access</h3><select aria-label="Human access" disabled={disabled} value={humanIds == null ? "everyone" : "invited"} onChange={e => onChange(memberIds, e.target.value === "everyone" ? undefined : people.filter(p => p.role !== "owner").map(p => p.user))}><option value="invited">Invited people</option><option value="everyone">Everyone in workspace</option></select></div>
+    <div className="invite-access-heading"><h3>Who has access</h3><ValuePicker aria-label="Human access" disabled={disabled} value={humanIds == null ? "everyone" : "invited"} onValueChange={value => onChange(memberIds, value === "everyone" ? undefined : people.filter(p => p.role !== "owner").map(p => p.user))} options={[{ value: "invited", label: "Invited people" }, { value: "everyone", label: "Everyone in workspace" }]} /></div>
     <div className="invite-members">
       {visiblePeople.map(p => <div className="invite-member" key={p.user}><span className="invite-avatar person"><UserRound size={17}/></span><span className="invite-person"><strong>{p.user.split(":")[0].replace(/^@/, "")}</strong><small>{p.user}</small></span>{p.role === "owner" ? <span className="invite-kind"><Check size={12}/> Owner</span> : humanIds == null ? <span className="invite-kind">Workspace</span> : <button type="button" className="invite-remove" disabled={disabled} aria-label={`Remove ${p.user}`} onClick={() => onChange(memberIds, humanIds.filter(id => id !== p.user))}><X size={15}/></button>}</div>)}
       {agents.filter(a => included.has(a.id)).map(a => <div className="invite-member" key={a.id}><span className="invite-avatar agent"><Bot size={17}/></span><span className="invite-person"><strong>{a.name}</strong><small>{invited.has(a.id) ? a.position || "Agent" : "Included manager"}</small></span><button type="button" className="invite-remove" disabled={disabled} aria-label={`Remove ${a.name} and their team`} title="Remove this agent and their team" onClick={() => { const removed = new Set(branch(a.id)); onChange(memberIds.filter(id => !removed.has(id)), humanIds); }}><X size={15}/></button></div>)}

@@ -1,3 +1,4 @@
+import { selectValue } from "./value-picker.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -24,7 +25,7 @@ export async function verifyOrganizationContext({ page, request, call, state, un
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("Alex");
   await page.getByRole("textbox", { name: "Position", exact: true }).fill("Software Engineer");
   await page.getByRole("textbox", { name: "Role", exact: true }).fill("Owns backend implementation and inspection of the attached backend codebase.");
-  await page.getByLabel("Reports to", { exact: true }).selectOption(manager.id);
+  await selectValue(page.getByLabel("Reports to", { exact: true }), manager.id);
   await page.getByRole("button", { name: "Create agent", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Add your agent" })).toBeHidden();
   await expect(page.getByLabel("Display name", { exact: true })).toHaveValue("Alex");

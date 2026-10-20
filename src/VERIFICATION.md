@@ -17,6 +17,32 @@ Some phases require a signed-in provider CLI or a configured SSH workstation and
 
 ## Action feedback
 
+Explicit management actions must show one top-right result toast even when the
+editor remains open. Outcome prose (success, warning, error) appears once in the
+active workspace top-right toast and is not repeated inline as duplicate
+paragraphs or announced twice via assistive technology. Pending and Saved control
+states remain in place.
+
+Dismissing the toast retains separate diagnostic details, validation hints, draft
+state, and recovery controls. Contextual validation (such as workdir probe errors,
+folder browsing failures, field validation, or catalog unavailability) remains
+near the affected fields and does not emit mutation toasts. Workdir attachment
+explicitly separates probe validation from persistence: an invalid folder probe
+yields zero profile writes and no irrelevant saved-profile or post-save-refresh
+controls, while ambiguous writes preserve draft reconciliation and acknowledged
+writes followed by failed reads offer read-only refresh without repeating PUTs.
+
+Selected-workspace management operations (create, rename, invite, role change,
+remove, delete, restore) run through the scoped workspace provider without
+introducing a second toast viewport, and suppress stale notifications upon
+workspace switch or logout. Chat message acceptance and attachment feedback remain
+contextual; passive refresh does not emit mutation toasts. Sensitive actions (such
+as token copying) display safe operation context without exposing credentials,
+retaining dedicated masked inputs and manual copy buttons.
+
+The suite records `feedback-agent-saved-top-right-toast.png` and toast bounds in
+its proof JSON.
+
 Build the candidate frontend with `npm run check` from `src`, then serve it through
 the real application on a separate loopback port with disposable data, home and
 workdir. The backend must match the candidate source revision; a frontend-only
@@ -34,8 +60,10 @@ node tests/native-smoke.mjs action-feedback
 # Focused retries use the same real candidate and authentication:
 node tests/native-smoke.mjs action-feedback-settings
 node tests/native-smoke.mjs action-feedback-operations
+node tests/native-smoke.mjs action-feedback-operations-core
 node tests/native-smoke.mjs action-feedback-existing
 node tests/native-smoke.mjs action-feedback-accessibility
+node tests/native-smoke.mjs action-feedback-review
 ```
 
 The core phase creates an unattached agent, checks real profile persistence and
@@ -58,8 +86,11 @@ Supply `AE_TEST_WORKSTATION_ID`, `AE_TEST_KEY_WORKSTATION_ID`,
 Supply `AE_TEST_ACTION_RUN_AGENT` for a dedicated enabled Antigravity agent with a
 read-only disposable SSH workdir and an actual signed-in model catalog. The action
 case uses provider quota and cancels only its own run; schedules are set in the
-future so they cannot launch unrelated work. Registration CRUD does not require
-a connected worker and does not prove worker execution.
+future so they cannot launch unrelated work. The `action-feedback-operations-core`
+target verifies operations lifecycle with zero provider runs (`noProvider: true`),
+while the full `action-feedback-operations` target strictly requires
+`AE_TEST_ACTION_RUN_AGENT` and fails explicitly if the fixture is missing.
+Registration CRUD does not require a connected worker and does not prove worker execution.
 
 The existing-feedback regression also uses one actual Antigravity reply linking
 a deliberately missing Markdown file in the disposable SSH workdir. It verifies
@@ -78,6 +109,228 @@ Evidence stays in the disposable organization's `.state/verification` directory:
 tokens, private connection settings and screenshots outside Git. Inspect actual
 HTTP results, stored revisions/files and run states alongside the screenshots;
 passing UI assertions alone does not prove provider completion.
+
+## Workspace controls: local handoff
+
+The colleague completed local browser/integration acceptance for
+`refine-workspace-ui-controls` on 18 October 2026. Codex then reviewed the actual
+receipts, screenshots, candidate mounts, served frontend assets, and final diff.
+All 21 implementation-and-evidence tasks are complete. This status records local
+acceptance; it does not authorize a push, CI, or production access.
+
+| Phase / receipt | Verified local result |
+| --- | --- |
+| `basic` / `proof.json` | `passed: true` at `2026-10-18T06:11:27.153Z`; real group/agent creation, shared workdir attachment, instructions, chat, auth/origin and path protections; `duplicateCount: 1`, `maintenanceRemoved: true` |
+| `value-controls.json` | Seven scenarios, including nonempty New-agent Reports to FormData through real discovery, workdir validation and creation; selection/no-results, permission locks, one committed role update, project/PIC reset, retained unavailable values, nested Live Preview popup |
+| `schedule-calendar.json` | Asia/Jakarta and America/Los_Angeles UTC round trips, seconds, leap/future boundaries, DST gap rejection, repeated-hour instant preservation, retained draft after API failure, recurrence and paused state |
+| `action-board-calendar.json` | Action Board optional planned-start picker, backlog restoration with null start, UTC round trips in Asia/Jakarta and America/Los_Angeles, independent date/time editing, seconds preservation, DST gap rejection, unattached fixture invocation failure recovery retaining revision |
+| `action-feedback-core.json` | One save mutation and one top-right toast, retained Saved state and recovery, no duplicate local announcement, real persistence and transport-fault receipts |
+| `action-feedback-accessibility.json` | Six layouts/settings including 390 px and actual 200 percent browser zoom; keyboard dismissal, focus/hover timer pause, reduced motion, limited stack expansion/promotion, workspace/logout suppression |
+| `settings-proof.json`, `action-feedback-extra-toasts.json` | Project/reporting persistence and cycle rejection; one runtime-refresh/upload toast per action, no duplicate inline success, stored upload content verified |
+
+The candidate was bound to host loopback port 18789. Read-only review matched its
+five entry/preload frontend assets byte-for-byte against the local `dist` built
+before the final `basic` run. Raw receipts and screenshots remain in the disposable
+organization and ignored local evidence directories, outside the source commit.
+The basic receipt SHA-256 is
+`D3D0BBC0F1B83863B5A984E935280F7D3254D0AD80986EFD1FDB2F78D2A6AB28`.
+
+These receipts cover the listed local paths, not every older smoke phase. They do
+not establish production/ARM64 compatibility, provider inference, or a manual
+screen-reader session. Calendar boundary tests use a fixed browser clock; the real
+server clock and scheduler remain unchanged. Fault tests forward real mutations
+before delaying or dropping responses. No product API or persistence mock is used.
+The audited forms have no user-facing Reset control, so a future Reset caller
+needs its own browser acceptance.
+
+The following instructions reproduce the local checks. Keep them on the laptop;
+do not use EC2, production credentials/volumes, or remote SSH workstations.
+
+Use this exact checkout and a disposable loopback candidate with matching backend
+source, separate data/home/workdir, and the newly built `frontend/dist`. Existing
+candidate images may be reused only after their backend/source correspondence is
+established; a successful frontend build does not update a running container.
+Do not point the tests at the default `org` directory. Keep the candidate owner-key
+file private, accessible to the existing test runner, and out of command output.
+
+From `src`, prepare dependencies and build using the lockfile:
+
+```powershell
+$env:PUPPETEER_SKIP_DOWNLOAD = 'true'
+npm ci
+npm run lint --workspace frontend
+npm run build
+```
+
+Start or update only the disposable local candidate after checking its actual
+Docker mounts and loopback port. Leave other application stacks untouched. If no
+source-matched candidate exists, build the platform image locally from the root
+with `docker build --target platform -t personal-agentic:ui-controls-local -f src/Dockerfile src`,
+then follow the existing disposable-candidate/data setup. Do not repurpose any
+production Compose project. Report missing local resources or fixtures rather
+than borrowing a remote server.
+
+From `src/frontend`, set the paths to the colleague's actual disposable fixtures:
+
+```powershell
+$env:AE_TEST_URL = 'http://127.0.0.1:18789'
+$env:AE_TEST_ORG = '<absolute path to the separate disposable test organization>'
+$env:AE_TEST_DISPOSABLE = 'true'
+node tests/native-smoke.mjs basic
+node tests/native-smoke.mjs value-controls
+node tests/native-smoke.mjs schedule-calendar
+node tests/native-smoke.mjs action-board-calendar
+node tests/native-smoke.mjs action-feedback-core
+node tests/native-smoke.mjs action-feedback-accessibility
+node tests/native-smoke.mjs workspace-navigation
+```
+
+For a Docker runner, mount the disposable workdir at the same absolute `/workdir`
+path in both the backend and runner, set `TMPDIR=/workdir/acceptance/tmp`, and make
+that test directory writable by their test users. The runner can join the candidate's
+network namespace and use `http://127.0.0.1:8765`; host access remains on port 18789.
+Mount only disposable candidate data read-only into the runner, with a separate
+writable evidence directory. Never substitute a production data volume.
+
+The five phases above passed locally; their receipts were reviewed rather than
+rerunning the suites during final review. `value-controls` and `schedule-calendar`
+use the real authenticated local API and persisted
+state, without provider inference. The calendar phase creates far-future tasks,
+uses browser contexts in Asia/Jakarta and America/Los_Angeles, and records date/time
+round trips, seconds, recurrence/paused state, validation, DST, keyboard and mobile
+receipts. Its fixed browser clock is an explicit time-boundary fixture; the real
+service clock and scheduler are not replaced. The `action-board-calendar` phase verifies the Action Board's optional planned-start picker, backlog restoration (`planned_start: null`), seconds preservation, independent component editing, leap-year and 3650-day window bounds, DST transitions, unattached agent invocation failure recovery, and mobile/zoomed viewport containment while preserving the agenda layout.
+
+Picker tests use `tests/value-picker.mjs` to open the real popup, search/select
+visible labelled options, and verify identifiers on visible controls plus existing
+API/persistence receipts. Native `selectOption` and hidden native-select assertions
+are not a valid primary proof for the new controls. Selected unavailable options,
+group labels, default/empty values, role commitment, permission locks, and dependent
+field resets must remain covered.
+
+Run focused settings/operations/workstation/runtime/cockpit regressions where their
+real local fixtures are available. Inspect the suite prerequisites first: several
+older phases submit provider work, expect signed-in catalogs, or restart a service.
+A missing fixture is an explicit unverified boundary, not a passing test or a reason
+to use production. The broad legacy coordination/group-scope phases contain older
+contracts; migrated fixtures must distinguish current membership UI from legacy
+scope API coverage. Do not claim obsolete chat-lead UI is present.
+
+Inspect one viewport and one notification per management result, retained Saved
+and error recovery, late results after workspace/logout, long stacked messages,
+focus/hover pause and keyboard dismissal. Check Select/Combobox/Calendar inside
+dialogs and Live Preview with Escape/focus restoration, search/no-results, touch,
+390 px, reduced height, 200 percent browser zoom, and reduced motion. Confirm the
+existing Action Board agenda keeps its own layout.
+
+Store screenshots and actual request/state receipts in the disposable organization's
+`.state/verification` outside Git, recording the exact source/diff and candidate.
+Fix genuine failures without weakening assertions; rerun only the relevant checks
+after a fix. A later source change needs relevant verification before its runtime
+tasks are marked complete. Archiving and release are separate steps.
+
+## Workspace navigation and candidate restart
+
+The `workspace-navigation` phase exercises the desktop and mobile navigation behavior on a live candidate:
+1. Desktop sidebar layout: verifies initial expanded state, resize persistence (180-420 px bounds), collapse to the non-zero rail (~56 px) with the outer panel wrapper contracting and `#content` expanding, reload persistence while collapsed, and expand restoring the previously resized width.
+2. Group options and organization: verifies sort menu (A-Z, Z-A, custom), Pinned group management, section creation, moving groups into sections, and collapsing/expanding sections.
+3. Account menu and recovery: verifies access to Profile, Runtime settings, Workspace settings, and Archived groups from the account trigger at the bottom of the navigation rail/sidebar. Archived groups can be previewed and restored; deleted groups remain hidden from navigation and links.
+4. Mobile navigation: verifies drawer transitions across 320 px, 390 px, and 768 px viewports with touch-accessible controls and zero page overflow.
+5. Candidate restart verification: run `node src/scripts/verify-candidate-restart.mjs` against a disposable candidate container controlled from the host Docker CLI. The script:
+   - Records container metadata (`StartedAt`, PID) before restart.
+   - Writes a known section into `group_preferences` via `PUT /api/preferences/groups`.
+   - Restarts the container from the host (`docker restart <container>`) without mounting the Docker socket into the test runner.
+   - Polls authenticated `/api/state` until ready, recording readiness latency.
+   - Inspects container metadata after restart (`StartedAt`, PID) to prove an actual process restart.
+   - Reads `/api/state` and `/api/me`, verifies preferences and the owner's profile
+     survived restart, then restores the original group preferences.
+   - Writes verification receipt to `.state/runner-verification/container-restart.json`.
+
+The host restart verifier requires `AE_TEST_DISPOSABLE=true`; `AE_TEST_URL` must
+be loopback and match `AE_TEST_CONTAINER`'s published port. It reads the owner key
+from `AE_TEST_KEY_FILE`, `AE_TEST_KEY`, or the named disposable container without
+printing it. Run it from the repository root; no Docker socket is mounted in the
+browser runner. External restart receipts remain separate from a browser phase's
+own restart result.
+
+## Account profile verification
+
+The `account-profile` phase uses two real browser contexts, the owner-key login
+and an existing human account on the local Matrix fixture. Supply the ignored
+fixture credentials file via `AE_TEST_MATRIX_CREDENTIALS_FILE`; never put the
+password or owner key in a command or receipt. Run from `src/frontend` against a
+disposable candidate with its Matrix homeserver reachable:
+
+```powershell
+$env:AE_TEST_PROFILE_PHASE = 'prepare'
+node tests/native-smoke.mjs account-profile
+# From the repository root, restart the same candidate with the host verifier.
+# Its receipt must be available in the browser runner's evidence directory.
+$env:AE_TEST_PROFILE_PHASE = 'verify'
+node tests/native-smoke.mjs account-profile
+```
+
+Prepare tests 64/65 Unicode scalar input through the actual form, trim,
+clear/fallback, reload, plain-text rendering, invalid API payloads, auth/origin
+denials, independent owner/Matrix names, workspace roles and menu permissions.
+Verify resumes the same authenticated sessions after a real host restart, checks
+identity/profile/membership and agent state, and cleans up only its own fixtures.
+Private browser storage states live in ignored `account-profile/` evidence with
+restricted permissions; only sanitized `prepare.json`/`verify.json` and screenshots
+are review artifacts. `AE_TEST_PROFILE_PHASE=cleanup` recovers an interrupted run.
+
+The existing `action-feedback-review` phase separately proves PUT A commits while
+its response is lost, draft B remains after **Check saved profile**, and only one
+PUT occurred. This is explicit network-boundary fault injection, not a replacement
+backend. Display names never rename Matrix users, alter passwords/owner keys, or
+grant workspace/controller access; see [account behavior](README.md#account-display-name).
+
+## Local projects overlay verification
+
+To verify opt-in host project access under `C:/Users/rizky/Documents/GitHub`
+mounted to `/projects`, explicitly select a locally built, source-matched platform
+image and run from the repository root:
+
+```powershell
+$env:AE_TEST_PROJECTS_IMAGE = 'personal-agentic:navigation-local'
+node src/scripts/verify-local-projects-overlay.mjs
+```
+
+Windows startup must go through `scripts/local-projects-compose.mjs` from `src`
+(for example, `node scripts/local-projects-compose.mjs -p agentic-projects-local up -d`).
+The verifier uses that same entrypoint for startup. It rejects a missing
+`AE_PROJECTS_DIR` source before any Docker call and requires a dedicated project
+plus the local Docker Desktop named pipe. Keep the overlay's explicit
+`create_host_path: false`, as documented in the [Docker Compose services reference](https://docs.docker.com/reference/compose-file/services/).
+An actual local Compose 5.6.0 run rendered that option correctly but still created
+the missing Windows source; the preflight is therefore part of acceptance, rather
+than assuming the rendered option alone enforces the boundary.
+
+The test creates a uniquely named Compose project (`ae-projects-proof-<nonce>`)
+with separate state and loopback ports 18794/18795. It requires a local Synapse
+image and a fixture directory under the approved source. It never reuses an
+enrolled worker or deletes a pre-existing project:
+1. Creates a disposable repository fixture under `C:/Users/rizky/Documents/GitHub` with a unique marker file and commit.
+2. Starts the platform and registered worker with `compose.projects.local.yaml`.
+3. Asserts non-root UID 10001 execution on both platform and worker containers.
+4. Verifies exact marker bytes and Git HEAD commit SHA match across host, controller, and worker containers.
+5. Verifies browse discovery via `GET /api/workspaces/directories?path=/projects` showing `Local projects` available.
+6. Probes the fixture repository on the controller and on the registered worker runtime via `POST /api/workspaces/probe`.
+7. Binds the project workdir to a project group via `POST /api/groups` and verifies persistence in SQLite.
+8. Exercises missing host-source startup, worker traversal/symlink containment
+   against existing directories, reserved state, workspace ownership and
+   controller-access denials, and a registered worker that is actually offline.
+   A non-root permission fixture separately verifies the unreadable-root diagnosis.
+9. Verifies ownership before every destructive operation and removes only its
+   own stack/volumes and exact host fixture in `finally`, including failure paths.
+10. Writes verification receipt to `.state/runner-verification/local-projects-overlay.json`.
+
+For the cleanup regression, set `AE_TEST_PROJECTS_FAIL_AFTER_START=1`. That run
+intentionally exits nonzero after real worker startup; its failure receipt must
+still show every owned resource removed and `cleanupSuccessful: true`. Unset the
+flag before the normal run. This is verifier fault injection, not mocked product
+behavior. Git trust is restricted to the disposable repository, and credentials
+are generated or read privately at runtime rather than embedded in source.
 
 ## Workstation location
 

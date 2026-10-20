@@ -1,4 +1,5 @@
 import { Label } from "@/components/ui/label";
+import { ValuePicker, type ValueOption } from "./ValuePicker";
 import type { Workstation } from "./bindings/Workstation";
 import { applicationEnvironmentHelp, applicationEnvironmentLabel, workstationLocationLabels } from "./workstationLabels";
 
@@ -8,17 +9,14 @@ export function WorkstationSelect({ id, value, workstations, disabled, onChange 
   const historicalAlias = value && !workstations.some(host => host.id === value) ? value : "";
   return <>
     <Label htmlFor={id}>Workstation</Label>
-    <select id={id} value={value} disabled={disabled} aria-describedby={`${id}-help`} onChange={e => onChange(e.target.value)}>
-      <option value="">{applicationEnvironmentLabel}</option>
-      {(["local_host", "remote", "unspecified"] as const).map(location => {
+    <ValuePicker id={id} value={value} disabled={disabled} searchable aria-describedby={`${id}-help`} onValueChange={onChange}
+      options={[{ value: "", label: applicationEnvironmentLabel }, ...(["local_host", "remote", "unspecified"] as const).flatMap<ValueOption>(location => {
         const hosts = workstations.filter(host => (host.location ?? "unspecified") === location);
-        if (!hosts.length && !(location === "unspecified" && historicalAlias)) return null;
-        return <optgroup key={location} label={workstationLocationLabels[location]}>
-          {hosts.map(host => <option key={host.id} value={host.id}>{host.name} · SSH</option>)}
-          {location === "unspecified" && historicalAlias && <option value={historicalAlias}>{historicalAlias} · Existing SSH alias</option>}
-        </optgroup>;
-      })}
-    </select>
+        return [
+          ...hosts.map(host => ({ value: host.id, label: `${host.name} · SSH`, group: workstationLocationLabels[location] })),
+          ...(location === "unspecified" && historicalAlias ? [{ value: historicalAlias, label: `${historicalAlias} · Existing SSH alias`, group: workstationLocationLabels[location] }] : []),
+        ];
+      })]} />
     <p id={`${id}-help`} className="hint">{applicationEnvironmentHelp} Local means the host instance running personal-agentic. <a href="/settings/workstations">Manage workstations in user settings</a></p>
   </>;
 }

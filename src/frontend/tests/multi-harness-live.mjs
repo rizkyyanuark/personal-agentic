@@ -1,3 +1,4 @@
+import { expectValue, readOptions, selectValue } from "./value-picker.mjs";
 // Read-only production smoke: inspect both workstation catalogs and unsaved profile UI.
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -15,13 +16,13 @@ try {
  const before=await get("/state"), catalogs=[];
  for(const remote of [false,true]){
   const agent=before.agents.find(a=>remote?a.workdir?.ssh_host==="macos-example":a.workdir&&!a.workdir.ssh_host);assert(agent);
-  await page.goto(`/organization/agents/${agent.id}/profile`);await expect(page.getByLabel("Harness",{exact:true})).toHaveValue("codex");
-  await page.getByLabel("Harness",{exact:true}).selectOption("opencode");
+  await page.goto(`/organization/agents/${agent.id}/profile`);await expectValue(page.getByLabel("Harness",{exact:true}), "codex");
+  await selectValue(page.getByLabel("Harness",{exact:true}), "opencode");
   const catalog=await get(`/harness/settings?harness=opencode&agent_id=${agent.id}`);assert(catalog.models.length);
-  await expect(page.getByLabel("Model",{exact:true}).locator(`option[value="${catalog.models[0].slug}"]`)).toHaveText(`${catalog.models[0].display_name} · ${catalog.models[0].slug.split("/")[0]}`,{timeout:30000});
+  await expect.poll(async()=> (await readOptions(page.getByLabel("Model",{exact:true}))).find(option=>option.value===catalog.models[0].slug)?.label).toBe(`${catalog.models[0].display_name} · ${catalog.models[0].slug.split("/")[0]}`);
   await page.screenshot({path:path.join(directory,remote?"mac-harness-settings.png":"local-harness-settings.png")});
   catalogs.push({host:remote?"macos-example":"local",models:catalog.models.length});
-  await page.reload();await expect(page.getByLabel("Harness",{exact:true})).toHaveValue("codex");
+  await page.reload();await expectValue(page.getByLabel("Harness",{exact:true}), "codex");
  }
  const after=await get("/state");assert.deepEqual(after.agents,before.agents);assert.deepEqual(after.groups,before.groups);assert.deepEqual(errors,[]);
  await fs.writeFile(path.join(directory,"live-ui-proof.json"),JSON.stringify({url:base,profilesPreserved:true,groupsPreserved:true,catalogs,browserErrors:errors},null,2));

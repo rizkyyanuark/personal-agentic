@@ -1,3 +1,4 @@
+import { expectValue, selectValue } from "./value-picker.mjs";
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -69,18 +70,18 @@ export async function verifyActionFeedbackExisting({ page, request, call, state,
     const team = page.getByRole("region", { name: "Project team and reporting structure", exact: true });
     await expect(team).toBeVisible();
     for (const member of members) {
-      await team.locator("#project-add-member").selectOption(member.id);
+      await selectValue(team.locator("#project-add-member"), member.id);
       await team.getByRole("button", { name: "Add to team", exact: true }).click();
     }
-    await team.getByRole("combobox", { name: `Project manager for ${members[0].name}`, exact: true }).selectOption(members[1].id);
-    await team.getByRole("combobox", { name: `Project manager for ${members[1].name}`, exact: true }).selectOption(members[0].id);
+    await selectValue(team.getByRole("combobox", { name: `Project manager for ${members[0].name}`, exact: true }), members[1].id);
+    await selectValue(team.getByRole("combobox", { name: `Project manager for ${members[1].name}`, exact: true }), members[0].id);
     const invalid = page.waitForResponse(response => new URL(response.url()).pathname === "/api/groups" && response.request().method() === "POST");
     await team.getByRole("button", { name: "Save team", exact: true }).click();
     assert.equal((await invalid).status(), 400);
     await expect(team.getByRole("alert")).toContainText("cycle");
-    await expect(team.getByRole("combobox", { name: `Project manager for ${members[0].name}`, exact: true })).toHaveValue(members[1].id);
+    await expectValue(team.getByRole("combobox", { name: `Project manager for ${members[0].name}`, exact: true }), members[1].id);
     assert.deepEqual((await state()).groups.find(item => item.id === project.id).project.members, []);
-    await team.getByRole("combobox", { name: `Project manager for ${members[1].name}`, exact: true }).selectOption("");
+    await selectValue(team.getByRole("combobox", { name: `Project manager for ${members[1].name}`, exact: true }), "");
     const save = await holdMutation(page, "**/api/groups", "POST");
     try {
       await team.getByRole("button", { name: "Save team", exact: true }).click();
