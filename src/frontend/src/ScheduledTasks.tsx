@@ -13,15 +13,12 @@ import {
 } from "@/components/ui/dialog";
 import { api, post, put } from "./api";
 import { ActionStatus, PendingIcon, useActionFeedback } from "./ActionFeedback";
+import { ScheduleDateTime } from "./ScheduleDateTime";
+import { resolveScheduleStart, scheduleDateTime, type ScheduleDateTimeDraft } from "./scheduleTime";
+import { ValuePicker } from "./ValuePicker";
 import type { Schedule } from "./bindings/Schedule";
 import type { Run } from "./bindings/Run";
 
-function localTime(value: string) {
-  const date = new Date(value);
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 19);
-}
 const displayTime = (value: string) =>
   new Date(value).toLocaleString(undefined, {
     dateStyle: "medium",
@@ -31,7 +28,7 @@ type Draft = {
   id?: string;
   name: string;
   body: string;
-  start: string;
+  start: ScheduleDateTimeDraft;
   repeat: string;
 };
 
@@ -89,7 +86,7 @@ export function ScheduledTasks({
             setDraft({
               name: "",
               body: "",
-              start: localTime(new Date(Date.now() + 3600000).toISOString()),
+              start: scheduleDateTime(new Date(Date.now() + 3600000).toISOString()),
               repeat: "",
             });
           }}
@@ -209,7 +206,7 @@ export function ScheduledTasks({
                         id: task.id,
                         name: task.name,
                         body: task.body,
-                        start: localTime(
+                        start: scheduleDateTime(
                           task.next_run_at &&
                             new Date(task.next_run_at).getTime() > Date.now()
                             ? task.next_run_at
@@ -264,9 +261,9 @@ export function ScheduledTasks({
               className="schedule-form"
               onSubmit={(e) => {
                 e.preventDefault();
-                const date = new Date(draft.start);
-                if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) {
-                  setError("Choose a future date and time.");
+                const start = resolveScheduleStart(draft.start);
+                if (!start.ok) {
+                  setError(start.error);
                   return;
                 }
                 setError("");
@@ -275,7 +272,7 @@ export function ScheduledTasks({
                   const input = {
                     name: draft.name,
                     body: draft.body,
-                    start_at: date.toISOString(),
+                    start_at: start.instant,
                     repeat_minutes: draft.repeat ? Number(draft.repeat) : null,
                   };
                   if (draft.id) await put(`/schedules/${draft.id}`, input);
@@ -307,40 +304,39 @@ export function ScheduledTasks({
                 onChange={(e) => setDraft({ ...draft, body: e.target.value })}
                 placeholder="Review the codebase and tell me what needs attention."
               />
-              <Label htmlFor="task-start">
-                Send at · {Intl.DateTimeFormat().resolvedOptions().timeZone}
-              </Label>
-              <Input
-                type="datetime-local"
-                step="1"
-                id="task-start"
-                disabled={busy || readOnly}
-                required
+              <ScheduleDateTime
                 value={draft.start}
-                onChange={(e) => setDraft({ ...draft, start: e.target.value })}
+                disabled={busy || readOnly}
+                invalid={!!error}
+                onChange={(start) => {
+                  setDraft({ ...draft, start });
+                  setError("");
+                }}
               />
               <Label htmlFor="task-repeat">Repeat</Label>
-              <select
+              <ValuePicker
                 id="task-repeat"
                 disabled={busy || readOnly}
+                searchable={false}
                 value={
                   ["", "60", "1440", "10080"].includes(draft.repeat)
                     ? draft.repeat
                     : "custom"
                 }
-                onChange={(e) =>
+                onValueChange={(value) =>
                   setDraft({
                     ...draft,
-                    repeat: e.target.value === "custom" ? "30" : e.target.value,
+                    repeat: value === "custom" ? "30" : value,
                   })
                 }
-              >
-                <option value="">Does not repeat</option>
-                <option value="60">Every hour</option>
-                <option value="1440">Every 24 hours</option>
-                <option value="10080">Every 7 days</option>
-                <option value="custom">Custom interval</option>
-              </select>
+                options={[
+                  { value: "", label: "Does not repeat" },
+                  { value: "60", label: "Every hour" },
+                  { value: "1440", label: "Every 24 hours" },
+                  { value: "10080", label: "Every 7 days" },
+                  { value: "custom", label: "Custom interval" },
+                ]}
+              />
               {draft.repeat &&
                 !["60", "1440", "10080"].includes(draft.repeat) && (
                   <>

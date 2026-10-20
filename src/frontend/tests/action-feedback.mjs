@@ -18,12 +18,39 @@ export async function verifyActionFeedback(harness) {
   const current = async () => (await state()).agents.find(value => value.id === agent.id);
   const editor = () => page.getByLabel("Role and task instructions");
   const status = () => page.locator(".inspector .action-status-area");
+  const toastFor = text => page.locator(".action-toast:not([data-ending-style])").filter({ hasText: text });
+  const expandToasts = async () => {
+    await page.locator(".action-toast:not([data-ending-style]):not([data-limited])").first().hover();
+  };
+  const leaveToasts = async () => {
+    await expect(page.locator(".action-toast[data-ending-style]")).toHaveCount(0);
+    await page.getByRole("button", { name: "Organization", exact: true }).focus();
+    await page.mouse.move(0, 0);
+    await expect(page.locator(".action-toast[data-expanded]")).toHaveCount(0);
+  };
+  const expectResultToast = async text => {
+    const toast = toastFor(text);
+    await expect(toast).toHaveCount(1);
+    await expandToasts();
+    await expect(toast).toBeVisible();
+    await toast.hover();
+    await expect(status()).not.toContainText(text);
+    await toast.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+    await expect(toast).toHaveCount(0);
+    await leaveToasts();
+  };
   const navigate = async (section = "instructions") => { await page.goto(`/organization/agents/${agent.id}/${section}`); await expect(page.locator(".inspector")).toBeVisible(); };
   const save = () => page.getByRole("button", { name: "Save changes", exact: true });
   const acceptDraft = async () => {
     await page.getByRole("button", { name: "Check saved profile", exact: true }).click();
     await expect(page.getByRole("button", { name: "Keep my draft using saved revision", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Keep my draft using saved revision", exact: true }).click();
+    const reviewToast = page.locator(".action-toast:not([data-ending-style])").filter({ hasText: "available for review" });
+    if (await reviewToast.count()) {
+      await reviewToast.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+      await expect(reviewToast).toHaveCount(0);
+    }
+    await leaveToasts();
   };
   await navigate();
   await editor().fill("FEEDBACK_SLOW_SAVE");
@@ -42,30 +69,51 @@ export async function verifyActionFeedback(harness) {
   await expect(page.getByRole("button", { name: "Close agent settings" })).toBeEnabled();
   await page.getByRole("button", { name: "Saving…", exact: true }).dispatchEvent("click");
   await page.screenshot({ path: path.join(directory, "feedback-agent-pending.png") });
+  const closeSettings = page.getByRole("button", { name: "Close agent settings", exact: true });
+  await closeSettings.focus();
   release();
-  await expect(status()).toContainText("changes saved");
-  await expect(status()).toContainText("next run");
+  const savedToast = toastFor(`${agent.name}: changes saved`);
+  await expect(savedToast).toHaveCount(1);
+  await expect(savedToast).toContainText("next run");
+  await expect(savedToast).toBeVisible();
+  await savedToast.hover();
+  await expect(closeSettings).toBeFocused();
+  await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeVisible();
+  await expect(status()).not.toContainText("changes saved");
+  await expect(status().locator('[role="status"], [role="alert"], [aria-live]')).toHaveCount(0);
+  await expect.poll(() => savedToast.evaluate(element => element.getAnimations({ subtree: true }).some(animation => animation.playState === "running"))).toBe(false);
+  const savedToastPosition = await savedToast.evaluate(element => {
+    const box = element.getBoundingClientRect();
+    return { top: box.top, rightGap: innerWidth - box.right, left: box.left, viewportWidth: innerWidth };
+  });
+  assert(savedToastPosition.top >= 0 && savedToastPosition.top <= 100, "Save result appears near the top of the viewport");
+  assert(savedToastPosition.rightGap >= 0 && savedToastPosition.rightGap <= 24, "Save result is anchored to the right edge");
+  if (savedToastPosition.viewportWidth >= 800) assert(savedToastPosition.left > savedToastPosition.viewportWidth / 2, "Desktop Save result appears on the right");
   assert.equal(putCount, 1);
   assert.equal((await current()).revision, before.revision + 1);
   await page.unroute(`**/api/agents/${agent.id}`, slow);
-  await expect(page.locator(".action-toast")).toHaveCount(0);
+  await page.screenshot({ path: path.join(directory, "feedback-agent-saved-top-right-toast.png") });
+  await savedToast.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+  await expect(savedToast).toHaveCount(0);
+  await leaveToasts();
+  await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeVisible();
   await page.screenshot({ path: path.join(directory, "feedback-agent-saved.png") });
   await editor().fill("FEEDBACK_FAST_SAVE");
   await expect(page.locator('[data-draft-status="unsaved"]')).toBeVisible();
   await expect(status()).not.toContainText("changes saved");
   await save().click();
-  await expect(status()).toContainText("changes saved");
+  await expectResultToast("changes saved");
   await navigate();
   await expect(editor()).toHaveValue("FEEDBACK_FAST_SAVE");
   const beforeRestore = await current();
   await page.getByRole("button", { name: "History", exact: true }).click();
   const revision = page.locator(".session-list > div").filter({ has: page.getByText(`Revision ${before.revision}`, { exact: true }) });
   await revision.getByRole("button", { name: "Restore this revision", exact: true }).click();
-  await expect(status()).toContainText("restored as a new revision");
+  await expectResultToast("restored as a new revision");
   assert.equal((await current()).revision, beforeRestore.revision + 1);
   assert.equal((await current()).instructions, "FEEDBACK_BASELINE\n\nFEEDBACK_LEGACY_INSTRUCTIONS");
   assert.equal((await current()).agents_md, "");
-  await expect(status()).toContainText("restored as a new revision");
+  await expect(status()).not.toContainText("restored as a new revision");
   await page.getByRole("button", { name: "Instructions", exact: true }).click();
 
   let releaseSnapshot, receivedSnapshot;
@@ -82,7 +130,7 @@ export async function verifyActionFeedback(harness) {
   const chatGroup = await call("/groups", { id: "", name: `Feedback chat ${crypto.randomUUID().slice(0, 8)}`, description: "Disposable feedback message acceptance", member_ids: [], scope_levels: null });
   await snapshotReady;
   await editor().fill("FEEDBACK_NEWER_THAN_SNAPSHOT"); await save().click();
-  await expect(status()).toContainText("changes saved");
+  await expectResultToast("changes saved");
   releaseSnapshot();
   await page.unrouteAll({ behavior: "wait" });
   await expect(editor()).toHaveValue("FEEDBACK_NEWER_THAN_SNAPSHOT");
@@ -100,7 +148,7 @@ export async function verifyActionFeedback(harness) {
   await expect(save()).toBeDisabled();
   await acceptDraft();
   await save().click();
-  await expect(status()).toContainText("changes saved");
+  await expectResultToast("changes saved");
   assert.equal((await current()).instructions, "FEEDBACK_DRAFT_CONFLICT");
 
   await editor().fill("FEEDBACK_STALE_REQUEST");
@@ -114,16 +162,26 @@ export async function verifyActionFeedback(harness) {
   const rejected = page.waitForResponse(response => response.url().endsWith(`/api/agents/${agent.id}`) && response.request().method() === "PUT");
   unblockStale();
   assert.equal((await rejected).status(), 400);
-  await expect(status()).toContainText("profile changed elsewhere");
+  const conflictToast = toastFor("profile changed elsewhere");
+  await expect(conflictToast).toHaveCount(1);
+  await expandToasts();
+  await expect(conflictToast.getByRole("button", { name: "Dismiss notification", exact: true })).toBeVisible();
+  await expect(status()).not.toContainText("profile changed elsewhere");
+  await expect(status().locator('[role="status"], [role="alert"], [aria-live]')).toHaveCount(0);
+  await conflictToast.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+  await expect(conflictToast).toHaveCount(0);
+  await leaveToasts();
+  await expect(status()).not.toContainText("profile changed elsewhere");
   await expect(editor()).toHaveValue("FEEDBACK_STALE_REQUEST");
   await page.unroute(`**/api/agents/${agent.id}`, stale);
-  await acceptDraft(); await save().click(); await expect(status()).toContainText("changes saved");
+  await acceptDraft(); await save().click(); await expectResultToast("changes saved");
 
   await page.getByRole("button", { name: "Profile", exact: true }).click();
   await page.getByLabel("Run timeout (seconds)").fill("5");
   const invalidResponse = page.waitForResponse(response => response.url().endsWith(`/api/agents/${agent.id}`) && response.request().method() === "PUT");
   await save().click(); assert.equal((await invalidResponse).status(), 400);
-  await expect(status()).toContainText("between 10 and 14400");
+  await expect(toastFor("between 10 and 14400")).toBeVisible();
+  await expect(status()).not.toContainText("between 10 and 14400");
   await page.getByLabel("Run timeout (seconds)").fill("90");
   await page.getByRole("button", { name: "Instructions", exact: true }).click();
 
@@ -141,14 +199,59 @@ export async function verifyActionFeedback(harness) {
   await page.route("**/api/state", failRefresh);
   await page.route(`**/api/agents/${agent.id}`, observedSave);
   await editor().fill("FEEDBACK_SAVED_REFRESH_FAILED"); await save().click();
-  await expect(status()).toContainText("configuration saved, but the view could not refresh");
+  const refreshWarningToast = toastFor("configuration saved, but the view could not refresh");
+  await expect(refreshWarningToast).toBeVisible();
+  await expect(status()).not.toContainText("configuration saved, but the view could not refresh");
   assert(refreshFailures > 0);
   assert.equal((await current()).instructions, "FEEDBACK_SAVED_REFRESH_FAILED");
+  await refreshWarningToast.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+  await expect(refreshWarningToast).toHaveCount(0);
+  const retryRefreshButton = page.getByRole("button", { name: "Retry refresh", exact: true });
+  await expect(retryRefreshButton).toBeVisible();
+  // Second failed read: retry fails again
+  await retryRefreshButton.click();
+  const retryFailedToast = page.locator(".action-toast:not([data-ending-style])").filter({ hasText: /Refresh not confirmed|could not refresh/ });
+  await expect(retryFailedToast).toBeVisible();
+  await retryFailedToast.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+  await expect(retryFailedToast).toHaveCount(0);
+  // Recovery persists after toast dismissal
+  await expect(retryRefreshButton).toBeVisible();
+  // Successful retry after unrouting
   await page.unroute("**/api/state", failRefresh);
-  await page.getByRole("button", { name: "Retry refresh", exact: true }).click();
-  await expect(status()).toContainText("view refreshed");
-  assert.equal(refreshPuts, 1, "Refresh recovery must not repeat PUT");
+  await retryRefreshButton.click();
+  await expectResultToast("view refreshed");
+  assert.equal(refreshPuts, 1, "Refresh recovery must not repeat PUT across multiple read failures and toast dismissals");
   await page.unroute(`**/api/agents/${agent.id}`, observedSave);
+
+  // Finding B: Workdir probe validation, dynamic invalidation, and attach probe failure retention
+  await page.getByRole("button", { name: "Workdir", exact: true }).click();
+  const workdirInput = page.locator("#workdir-path");
+  await workdirInput.fill(path.join(org, agent.id));
+  await page.getByRole("button", { name: "Validate workdir", exact: true }).click();
+  await expect(page.locator(".probe-result")).toBeVisible();
+  // Changing path immediately invalidates prior diagnosis
+  await workdirInput.fill(path.join(org, agent.id, "changed-path"));
+  await expect(page.locator(".probe-result")).toHaveCount(0);
+  await expect(page.locator(".workdir-diagnosis")).toHaveCount(0);
+  // Missing directory attach failure produces zero profile PUTs, preserves error diagnosis after toast dismissal
+  let attachPuts = 0;
+  const countAttachPuts = async route => { if (route.request().method() === "PUT") attachPuts++; return route.continue(); };
+  await page.route(`**/api/agents/${agent.id}`, countAttachPuts);
+  const missingPath = path.join(org, "missing-workdir-" + crypto.randomUUID().slice(0, 8));
+  await workdirInput.fill(missingPath);
+  await page.getByRole("button", { name: /^(Attach|Change) workdir$/, exact: true }).click();
+  const attachErrorToast = page.locator(".action-toast:not([data-ending-style])").filter({ hasText: /not found|failed|does not exist/i });
+  await expect(attachErrorToast).toHaveCount(1);
+  assert.equal(attachPuts, 0, "Attach probe failure must make zero profile PUTs");
+  await expect(page.getByRole("button", { name: "Saved", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Retry refresh", exact: true })).toHaveCount(0);
+  await attachErrorToast.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+  await expect(attachErrorToast).toHaveCount(0);
+  const persistedDiagnosis = page.locator(".workdir-diagnosis.error");
+  await expect(persistedDiagnosis).toBeVisible();
+  await expect(persistedDiagnosis).toContainText(/not found|failed|does not exist/i);
+  await page.unroute(`**/api/agents/${agent.id}`, countAttachPuts);
+  await page.getByRole("button", { name: "Instructions", exact: true }).click();
 
   const profileFile = path.join(org, agent.id, "profile.json");
   const profileBackup = `${profileFile}.feedback-backup`;
@@ -160,7 +263,8 @@ export async function verifyActionFeedback(harness) {
     const response = page.waitForResponse(value => value.url().endsWith(`/api/agents/${agent.id}`) && value.request().method() === "PUT");
     await save().click(); postCommitStatus = (await response).status();
     assert.equal(postCommitStatus, 400);
-    await expect(status()).toContainText("Save not confirmed");
+    await expectResultToast("Save not confirmed");
+    await expect(page.getByRole("button", { name: "Check saved profile", exact: true })).toBeVisible();
     await expect(editor()).toHaveValue("FEEDBACK_COMMITTED_FILE_FAILURE");
     const committed = await current();
     assert.equal(committed.revision, committedBefore.revision + 1);
@@ -177,23 +281,26 @@ export async function verifyActionFeedback(harness) {
     lostCount++; await route.fetch(); await route.abort("failed");
   };
   await page.route(`**/api/agents/${agent.id}`, lose);
-  await save().click(); await expect(status()).toContainText("Save not confirmed");
+  await save().click();
+  await expectResultToast("Save not confirmed");
+  await expect(page.getByRole("button", { name: "Check saved profile", exact: true })).toBeVisible();
   await expect(editor()).toHaveValue("FEEDBACK_LOST_RESPONSE");
   assert.equal(lostCount, 1); assert.equal((await current()).instructions, "FEEDBACK_LOST_RESPONSE");
   await page.unroute(`**/api/agents/${agent.id}`, lose);
   await acceptDraft();
-  await editor().fill("FEEDBACK_RECOVERED"); await save().click(); await expect(status()).toContainText("changes saved");
+  await editor().fill("FEEDBACK_RECOVERED"); await save().click(); await expectResultToast("changes saved");
 
   await page.getByRole("button", { name: "Code", exact: true }).click();
   await page.getByLabel("Agent-owned scripts").check();
   await page.getByLabel("Script filename").fill("feedback.txt");
   await page.getByLabel("Script content").fill("FEEDBACK_SCRIPT_NOT_EXECUTED\n");
   await page.getByRole("button", { name: "Save script", exact: true }).click();
-  await expect(status()).toContainText("script saved");
+  await expectResultToast("script saved");
   assert.equal(await readFile(path.join(org, agent.id, "scripts", "feedback.txt"), "utf8"), "FEEDBACK_SCRIPT_NOT_EXECUTED\n");
   await page.getByLabel("Script filename").fill("../escape.txt");
   await page.getByRole("button", { name: "Save script", exact: true }).click();
-  await expect(status()).toContainText("script save not confirmed");
+  await expect(toastFor("script save not confirmed")).toBeVisible();
+  await expect(status()).not.toContainText("script save not confirmed");
   await expect(page.getByLabel("Script content")).toHaveValue("FEEDBACK_SCRIPT_NOT_EXECUTED\n");
 
   await navigate();
@@ -205,11 +312,11 @@ export async function verifyActionFeedback(harness) {
   await page.route(`**/api/agents/${agent.id}`, closePending);
   await save().click(); await reachedClosed;
   await page.getByRole("button", { name: "Close agent settings" }).click();
-  await page.getByRole("button", { name: `Configure ${agent.name}`, exact: true }).click();
+  await page.getByRole("button", { name: `Configure ${agent.name}`, exact: true }).dispatchEvent("click");
   await page.getByRole("button", { name: "Instructions", exact: true }).click();
   await expect(editor()).toBeDisabled();
   releaseClosed();
-  await expect(page.locator(".action-toast")).toContainText(`${agent.name}: changes saved`);
+  await expectResultToast(`${agent.name}: changes saved`);
   await expect(editor()).toHaveValue("FEEDBACK_PANEL_CLOSED");
   await page.unroute(`**/api/agents/${agent.id}`, closePending);
   await until(async () => (await current()).instructions === "FEEDBACK_PANEL_CLOSED");
@@ -232,6 +339,7 @@ export async function verifyActionFeedback(harness) {
   releaseMessage();
   await expect(page.locator(".message-bubble").filter({ hasText: "FEEDBACK_CHAT_ACCEPTED" })).toHaveCount(1);
   await expect(page.locator(".compose-attachments")).toContainText("feedback-upload-during-send.txt");
+  await expect(page.locator(".action-toast")).toHaveCount(0);
   assert.equal(sentRequests, 1);
   await page.unrouteAll({ behavior: "wait" });
   await message.fill("FEEDBACK_CHAT_RETRY_SAME_ID");
@@ -246,6 +354,7 @@ export async function verifyActionFeedback(harness) {
   await page.route("**/api/messages", messageFault);
   await page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(page.locator(".action-status-area").filter({ hasText: "acceptance could not be confirmed" })).toBeVisible();
+  await expect(page.locator(".action-toast")).toHaveCount(0);
   await expect(message).toHaveValue("FEEDBACK_CHAT_RETRY_SAME_ID");
   loseMessage = false;
   await page.getByRole("button", { name: "Send message", exact: true }).click();
@@ -256,6 +365,7 @@ export async function verifyActionFeedback(harness) {
 
   await page.getByLabel("Upload attachment").setInputFiles({ name: "feedback-chat-attachment.txt", mimeType: "text/plain", buffer: Buffer.from("Real disposable attachment\n") });
   await expect(page.locator(".action-status-area").filter({ hasText: "Attachment stored and ready to send" })).toBeVisible();
+  await expect(page.locator(".action-toast")).toHaveCount(0);
   await expect(page.locator(".compose-attachments")).toContainText("feedback-chat-attachment.txt");
   let storedUpload;
   const lostUpload = async route => {
@@ -265,6 +375,7 @@ export async function verifyActionFeedback(harness) {
   await page.route("**/api/artifacts", lostUpload);
   await page.getByLabel("Upload attachment").setInputFiles({ name: "feedback-unconfirmed-upload.txt", mimeType: "text/plain", buffer: Buffer.from("Real stored file with response lost\n") });
   await expect(page.locator(".action-status-area").filter({ hasText: "Upload could not be confirmed" })).toBeVisible();
+  await expect(page.locator(".action-toast")).toHaveCount(0);
   assert((await state()).artifacts.some(value => value.id === storedUpload.id));
   await page.unrouteAll({ behavior: "wait" });
 
@@ -285,7 +396,7 @@ export async function verifyActionFeedback(harness) {
   await page.unrouteAll({ behavior: "wait" });
   assert.equal(page.url(), selectedView, "A delayed /btw response cannot navigate away from a newly selected view");
 
-  const proof = { agentId: agent.id, duplicateSaveRequests: putCount, postCommitHttpStatus: postCommitStatus, lostResponseMutationCount: lostCount, injectedFaults: ["held real request", "aborted follow-up read", "materialized profile target directory collision", "lost response after real commit"], providerRunsForCore: (await state()).runs.length - initial.runs.length };
+  const proof = { agentId: agent.id, duplicateSaveRequests: putCount, mountedSaveToast: { count: 1, position: savedToastPosition, focusUnchanged: true, savedSurvivesDismissal: true, inlineSuccessHidden: true, duplicateLocalAnnouncements: 0, screenshot: "feedback-agent-saved-top-right-toast.png" }, conflictDetailsSurviveToastDismissal: true, chatSendAndUploadRemainContextual: true, postCommitHttpStatus: postCommitStatus, lostResponseMutationCount: lostCount, injectedFaults: ["held real request", "aborted follow-up read", "materialized profile target directory collision", "lost response after real commit"], providerRunsForCore: (await state()).runs.length - initial.runs.length };
   assert.equal(proof.providerRunsForCore, 0);
   await writeFile(path.join(directory, "action-feedback-core.json"), JSON.stringify(proof, null, 2));
   console.log("PASS feedback core: real save/revision/script paths, duplicate guard, conflicts, post-commit HTTP400, lost response and remount recovery; zero provider runs");
@@ -301,6 +412,17 @@ export async function verifyActionFeedback(harness) {
   }
   await page.screenshot({ path: path.join(directory, "feedback-final.png") });
   return proof;
+  } catch (error) {
+    try {
+      const toasts = await page.locator(".action-toast").evaluateAll(elements => elements.map(element => {
+        const box = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return { html: element.outerHTML, box: { x: box.x, y: box.y, width: box.width, height: box.height }, visibility: style.visibility, opacity: style.opacity };
+      }));
+      await writeFile(path.join(directory, "action-feedback-core-failure.json"), JSON.stringify({ url: page.url(), error: error instanceof Error ? error.message : String(error), toasts }, null, 2));
+      await page.screenshot({ path: path.join(directory, "action-feedback-core-failure.png"), fullPage: true });
+    } catch (diagnosticError) { console.error("Could not capture feedback failure diagnostics:", diagnosticError); }
+    throw error;
   } finally {
     pendingReleases.forEach(release => release());
     await page.unrouteAll({ behavior: "wait" });

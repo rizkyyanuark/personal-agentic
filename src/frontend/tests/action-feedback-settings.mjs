@@ -1,3 +1,4 @@
+import { expectValue, selectValue } from "./value-picker.mjs";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -17,6 +18,20 @@ export async function verifyActionFeedbackSettings({ page, call, state, org, dir
   };
   page.on("request", observe);
   const status = () => page.locator(".action-status-area");
+  const expectSuccessToast = async text => {
+    const toast = page.locator(".action-toast:not([data-ending-style])").filter({ hasText: text });
+    await expect(toast).toHaveCount(1);
+    await page.locator(".action-toast:not([data-ending-style]):not([data-limited])").first().hover();
+    await expect(toast).toBeVisible();
+    await toast.hover();
+    await expect(status()).not.toContainText(text);
+    await toast.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+    await expect(toast).toHaveCount(0);
+    await expect(page.locator(".action-toast[data-ending-style]")).toHaveCount(0);
+    await page.getByRole("button", { name: "Organization", exact: true }).focus();
+    await page.mouse.move(0, 0);
+    await expect(page.locator(".action-toast[data-expanded]")).toHaveCount(0);
+  };
   const dialogs = () => page.locator('[data-slot="dialog-content"][role="dialog"]');
   const count = (method, pathname) => requests.filter(value => value.method === method && value.path === pathname).length;
   async function heldResponse(method, pathname) {
@@ -79,7 +94,8 @@ export async function verifyActionFeedbackSettings({ page, call, state, org, dir
     const rejectedRegistration = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/runtimes");
     await page.getByRole("button", { name: "Register runtime", exact: true }).click();
     assert.equal((await rejectedRegistration).status(), 400);
-    await expect(status()).toContainText("could not be confirmed");
+    await expect(page.locator(".action-toast").filter({ hasText: "could not be confirmed" })).toHaveCount(1);
+    await expect(status()).not.toContainText("could not be confirmed");
     await expect(page.locator("#runtime-name")).toHaveValue(invalidName);
     assert(!(await call("/runtimes", undefined, "GET")).some(value => value.name === invalidName));
 
@@ -100,8 +116,17 @@ export async function verifyActionFeedbackSettings({ page, call, state, org, dir
     assert((await token.inputValue()).length > 0, "Enrollment token stays in its dedicated field");
     const retainedToken = await token.inputValue();
     await page.getByRole("button", { name: "Organization", exact: true }).click();
-    await page.getByRole("button", { name: "User settings", exact: true }).click();
-    await page.getByRole("button", { name: "Runtime", exact: true }).click();
+    const userSettingsBtn = page.getByRole("button", { name: "User settings", exact: true });
+    if (await userSettingsBtn.isVisible().catch(() => false)) {
+      await userSettingsBtn.click();
+    } else {
+      await page.getByRole("button", { name: "Account menu", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Runtime settings", exact: true }).click();
+    }
+    const runtimeBtn = page.getByRole("button", { name: "Runtime", exact: true });
+    if (await runtimeBtn.isVisible().catch(() => false)) {
+      await runtimeBtn.click();
+    }
     await expect(token).toBeVisible();
     assert((await token.inputValue()) === retainedToken, "Ephemeral enrollment token survives SPA settings navigation without entering a notification");
     const runtime = (await call("/runtimes", undefined, "GET")).find(value => value.name === runtimeName);
@@ -118,14 +143,14 @@ export async function verifyActionFeedbackSettings({ page, call, state, org, dir
       await expect(row.getByRole("button", { name: "Saving runtime…", exact: true })).toHaveAttribute("aria-busy", "true");
       await expect(page.getByRole("button", { name: "Register runtime", exact: true })).toHaveAttribute("aria-busy", "false");
     } finally { await editGate.dispose(); }
-    await expect(status()).toContainText(`${renamedRuntime} runtime settings saved`);
+    await expectSuccessToast(`${renamedRuntime} runtime settings saved`);
     assert.equal((await call("/runtimes", undefined, "GET")).find(value => value.id === runtime.id).name, renamedRuntime);
     await page.getByRole("button", { name: "Refresh runtimes", exact: true }).click();
-    await expect(status()).toContainText("Runtime list refreshed");
+    await expectSuccessToast("Runtime list refreshed");
     const renamedRow = page.locator(".runtime-row").filter({ has: page.locator("strong", { hasText: renamedRuntime }) });
     await renamedRow.getByRole("button", { name: "Revoke", exact: true }).click();
     await renamedRow.getByRole("button", { name: "Confirm revoke", exact: true }).click();
-    await expect(status()).toContainText("registration revoked");
+    await expectSuccessToast("registration revoked");
     assert.equal((await call("/runtimes", undefined, "GET")).find(value => value.id === runtime.id).revoked, true);
     proof.scenarios.push({ name: "runtime register/edit/revoke/manual refresh and actual rejection", runtimeId: runtime.id, rejectionStatus: 400, tokenInDedicatedField: true, tokenSurvivesPendingPanelClosureAndSpaNavigation: true, unrelatedRegisterNotPending: true });
     proof.transportFaults.push("Held genuine registration/edit responses after backend completion to inspect pending UI; forwarded unchanged status/body");
@@ -136,7 +161,8 @@ export async function verifyActionFeedbackSettings({ page, call, state, org, dir
     const rejectedGroup = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/groups");
     await dialog.getByRole("button", { name: "Save group", exact: true }).click();
     assert.equal((await rejectedGroup).status(), 400);
-    await expect(dialog.locator(".action-status-area")).toContainText("could not be confirmed");
+    await expect(page.locator(".action-toast").filter({ hasText: "could not be confirmed" })).toHaveCount(1);
+    await expect(dialog.locator(".action-status-area")).not.toContainText("could not be confirmed");
     await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(invalidName);
     const groupName = `Feedback group ${suffix}`;
     await dialog.getByLabel("Name", { exact: true }).fill(groupName);
@@ -169,8 +195,10 @@ export async function verifyActionFeedbackSettings({ page, call, state, org, dir
     const beforeSaveCount = count("POST", "/api/groups");
     try {
       await dialog.getByRole("button", { name: "Save group", exact: true }).click();
-      await expect(dialog.locator(".action-status-area")).toContainText("saved. Review scheduled tasks");
-      await expect(dialog.locator(".action-status-area")).toContainText("could not refresh");
+      await expect(page.locator(".action-toast").filter({ hasText: "saved. Review scheduled tasks" })).toHaveCount(1);
+      await expect(page.locator(".action-toast").filter({ hasText: "could not refresh" })).toHaveCount(1);
+      await expect(dialog.locator(".action-status-area")).not.toContainText("saved. Review scheduled tasks");
+      await expect(dialog.locator(".action-status-area")).not.toContainText("could not refresh");
       await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(changedName);
       assert.equal((await state()).groups.find(value => value.id === group.id).name, changedName);
     } finally {
@@ -210,7 +238,7 @@ export async function verifyActionFeedbackSettings({ page, call, state, org, dir
     const renamedHost = `${copiedHost.name} saved`;
     await page.locator("#host-name").fill(renamedHost);
     await page.getByRole("button", { name: "Save workstation", exact: true }).click();
-    await expect(status()).toContainText(`${renamedHost}: workstation saved`);
+    await expectSuccessToast(`${renamedHost}: workstation saved`);
     assert.equal((await state()).workstations.find(value => value.id === copiedHost.id).name, renamedHost);
     const testGate = await heldResponse("POST", `/api/workstations/${copiedHost.id}/test`);
     try {
@@ -219,39 +247,40 @@ export async function verifyActionFeedbackSettings({ page, call, state, org, dir
       await expect(page.getByRole("button", { name: "Testing connection…", exact: true })).toHaveAttribute("aria-busy", "true");
       await expect(page.getByRole("button", { name: "Save workstation", exact: true })).toHaveAttribute("aria-busy", "false");
     } finally { await testGate.dispose(); }
-    await expect(status()).toContainText("connection is online");
+    await expectSuccessToast("connection is online");
     await page.getByRole("button", { name: "Review host keys", exact: true }).click();
-    await expect(status()).toContainText("Trust has not changed");
+    await expectSuccessToast("Trust has not changed");
     const fingerprints = page.locator(".host-key-review pre");
     await expect(fingerprints).toBeVisible();
     assert((await fingerprints.innerText()).includes("SHA256:"), "Real host fingerprints stay in the review display");
     await page.getByRole("button", { name: "Trust these host keys", exact: true }).click();
-    await expect(status()).toContainText("host keys trusted");
+    await expectSuccessToast("host keys trusted");
     await page.getByRole("button", { name: "Remove workstation", exact: true }).click();
     await page.getByRole("button", { name: "Confirm remove", exact: true }).click();
-    await expect(status()).toContainText("workstation removed");
+    await expectSuccessToast("workstation removed");
     assert(!(await state()).workstations.some(value => value.id === copiedHost.id));
 
     await page.locator("#import-ssh-alias").fill(sshAlias);
     await page.getByRole("button", { name: "Import alias", exact: true }).click();
-    await expect(status()).toContainText("SSH settings imported");
+    await expectSuccessToast("SSH settings imported");
     const importedId = (await state()).workstations.find(value => value.ssh_alias === sshAlias)?.id;
     assert(importedId, "Alias import persisted actual SSH settings");
-    await expect(page.locator("#host-auth")).toHaveValue("ssh_config");
+    await expectValue(page.locator("#host-auth"), "ssh_config");
     await page.getByRole("button", { name: "Remove workstation", exact: true }).click();
     await page.getByRole("button", { name: "Confirm remove", exact: true }).click();
-    await expect(status()).toContainText("workstation removed");
+    await expectSuccessToast("workstation removed");
 
     const unavailable = await call("/workstations", { workstation: { ...seedHost, id: "", name: `Unavailable feedback SSH ${suffix}`, port: 1 }, secret: null, clear_secret: false });
     await openSsh(unavailable.id);
     await page.getByRole("button", { name: "Test connection", exact: true }).click();
-    await expect(status()).toContainText(/Connection test failed|connection is not online/);
+    await expect(page.locator(".action-toast").filter({ hasText: /Connection test failed|connection is not online/ })).toHaveCount(1);
+    await expect(status()).not.toContainText(/Connection test failed|connection is not online/);
     await expect(page.locator("#host-name")).toHaveValue(unavailable.name);
     await expect(page.getByRole("button", { name: "Refresh workstation list", exact: true })).toBeVisible();
     await page.screenshot({ path: path.join(directory, "action-feedback-ssh-failure.png"), fullPage: true });
     await page.getByRole("button", { name: "Remove workstation", exact: true }).click();
     await page.getByRole("button", { name: "Confirm remove", exact: true }).click();
-    await expect(status()).toContainText("workstation removed");
+    await expectSuccessToast("workstation removed");
     proof.scenarios.push({ name: "SSH save/test/review/trust/remove/import and real refused-port failure", hostFixtureId: hostId, copiedHostId: copiedHost.id, aliasImported: true, hostKeysReviewedAndExplicitlyTrusted: true, keysCopied: false, connectionFailure: "Real connection attempt to dedicated host port 1" });
     proof.transportFaults.push("Held genuine successful SSH test response to prove operation-specific pending label; request used real SSH");
 
@@ -259,7 +288,7 @@ export async function verifyActionFeedbackSettings({ page, call, state, org, dir
     dialog = dialogs().filter({ has: page.locator("#group-name") });
     const projectName = `Feedback project ${suffix}`;
     await dialog.getByLabel("Name", { exact: true }).fill(projectName);
-    await page.locator("#project-host").selectOption(hostId);
+    await selectValue(page.locator("#project-host"), hostId);
     await page.locator("#project-workdir").fill(workdir);
     await dialog.getByRole("button", { name: "Create project", exact: true }).click();
     await expect(dialog).toHaveCount(0);
@@ -268,7 +297,8 @@ export async function verifyActionFeedbackSettings({ page, call, state, org, dir
     assert(project && project.project.workdir.ssh_host === hostId && project.project.workdir.path === workdir);
     await expect(page.locator(".action-toast").filter({ hasText: `${projectName} created.` })).toHaveCount(1);
     proof.scenarios.push({ name: "project creation closes with one result and preserves SSH workdir", projectId: project.id, workstationId: hostId });
-    await page.screenshot({ path: path.join(directory, "action-feedback-project-created.png"), fullPage: true });
+    const { verifyActionFeedbackReviewChecks } = await import("./action-feedback-review-checks.mjs");
+    proof.reviewChecks = await verifyActionFeedbackReviewChecks({ page, call, _state: state, org, base });
     assert.equal((await state()).runs.length, initial.runs.length, "Settings and group operations start no provider tasks");
     await writeFile(path.join(directory, "action-feedback-settings.json"), JSON.stringify(proof, null, 2));
     return proof;

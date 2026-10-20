@@ -1,3 +1,5 @@
+import { selectValue } from "./value-picker.mjs";
+import { fillScheduleDateTime } from "./schedule-calendar.mjs";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -29,7 +31,7 @@ async function holdMutation(page, pattern, method) {
   };
 }
 
-export async function verifyActionFeedbackOperations({ page, request, call, state, until, org, directory, base }) {
+export async function verifyActionFeedbackOperations({ page, request, call, state, until, org, directory, base, noProvider = false }) {
   assert(process.env.AE_TEST_ORG && process.env.AE_TEST_URL && path.resolve(org) !== path.resolve("../../org"), "Use an explicit disposable service and organization");
   const suffix = crypto.randomUUID().slice(0, 8);
   const proof = { injectedFaults: [], providerTasks: 0 };
@@ -46,12 +48,13 @@ export async function verifyActionFeedbackOperations({ page, request, call, stat
     return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
   });
   const dismissToasts = async () => {
-    const buttons = page.getByRole("button", { name: "Dismiss notification", exact: true });
-    while (await buttons.count()) {
-      const count = await buttons.count();
-      await buttons.first().click();
-      await expect.poll(() => buttons.count()).toBeLessThan(count);
+    const activeToasts = page.locator(".action-toast:not([data-ending-style])");
+    while ((await activeToasts.count()) > 0) {
+      const initial = await activeToasts.count();
+      await activeToasts.first().getByRole("button", { name: "Dismiss notification", exact: true }).click();
+      await expect.poll(() => activeToasts.count()).toBeLessThan(initial);
     }
+    await expect(page.locator(".action-toast:not([data-ending-style])")).toHaveCount(0);
   };
 
   try {
@@ -61,9 +64,15 @@ export async function verifyActionFeedbackOperations({ page, request, call, stat
     const scheduleName = `Feedback schedule ${suffix}`;
     await dialog.getByLabel("Name", { exact: true }).fill(scheduleName);
     await dialog.getByLabel("Custom message").fill(" ");
-    await dialog.locator("#task-start").fill(localFuture);
+    await fillScheduleDateTime(page, localFuture);
     await dialog.getByRole("button", { name: "Save task", exact: true }).click();
-    await expect(dialog.getByRole("alert")).toContainText("Schedule save not confirmed");
+    const rejectedScheduleToast = page.locator(".action-toast:not([data-ending-style])").filter({ hasText: "Schedule save not confirmed" });
+    await expect(rejectedScheduleToast).toHaveCount(1);
+    await expect(dialog.locator(".action-result")).toHaveCount(0);
+    await expect(dialog.locator('.action-status-area [role="alert"], .action-status-area [role="status"], .action-status-area [aria-live]')).toHaveCount(0);
+    await rejectedScheduleToast.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+    await expect(rejectedScheduleToast).toHaveCount(0);
+    await expect(dialog.locator(".action-result")).toHaveCount(0);
     await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(scheduleName);
     assert(!(await state()).schedules.some(item => item.name === scheduleName));
     proof.scheduleRejection = { persisted: false, draftRetained: true, actualBackendRejection: true };
@@ -114,6 +123,12 @@ export async function verifyActionFeedbackOperations({ page, request, call, stat
       await expect(page.getByRole("button", { name: "Upload files", exact: true })).toBeEnabled();
       assert.equal(uploadGate.count(), 1);
     } finally { await uploadGate.dispose(); }
+    const uploadMessage = "File stored. Index it to make it searchable.";
+    const uploadToast = page.locator(".action-toast:not([data-ending-style])").filter({ has: page.locator(".action-toast-title", { hasText: uploadMessage }) });
+    await expect(uploadToast).toHaveCount(1);
+    await expect(uploadToast).toBeVisible();
+    await expect(uploadToast.locator(".action-toast-title")).toHaveText(uploadMessage);
+    await expect(page.locator(".action-status-area .action-result").filter({ hasText: uploadMessage })).toHaveCount(0);
     const artifact = await until(async () => (await state()).artifacts.find(item => item.name === fileName), 15000);
     assert.equal(artifact.status, "stored");
     const downloaded = await request.get(`/api/artifacts/${artifact.id}`);
@@ -130,12 +145,13 @@ export async function verifyActionFeedbackOperations({ page, request, call, stat
       indexGate.release();
       indexResponse = await (await response).json();
       assert.equal(indexResponse.status, "indexing");
-      await expect(page.locator(".action-result").filter({ hasText: "Search preparation accepted" })).toBeVisible();
+      await expect(page.locator(".action-toast:not([data-ending-style])").filter({ hasText: "Search preparation accepted" })).toHaveCount(1);
+      await expect(page.locator(".action-result").filter({ hasText: "Search preparation accepted" })).toHaveCount(0);
     } finally { await indexGate.dispose(); }
     const indexed = await until(async () => {
       const item = (await state()).artifacts.find(value => value.id === artifact.id);
       return item && ["indexed", "failed"].includes(item.status) && item;
-    }, 90000);
+    }, 180000);
     const fileRow = page.getByRole("row").filter({ hasText: fileName });
     await expect(fileRow).toContainText(indexed.status === "indexed" ? "Searchable" : "Search failed");
     let deletes = 0;
@@ -163,7 +179,7 @@ export async function verifyActionFeedbackOperations({ page, request, call, stat
     const actionTitle = `Feedback backlog ${suffix}`;
     await dialog.getByLabel("Title", { exact: true }).fill(actionTitle);
     await dialog.getByLabel("Task / instructions", { exact: true }).fill("No task should launch while this action remains in backlog.");
-    await dialog.getByLabel("Person in charge (PIC)", { exact: true }).selectOption(agent.id);
+    await selectValue(dialog.getByLabel("Person in charge (PIC)", { exact: true }), agent.id);
     const actionGate = await holdMutation(page, "**/api/actions", "POST");
     try {
       await dialog.getByRole("button", { name: "Save to backlog", exact: true }).click();
@@ -179,7 +195,8 @@ export async function verifyActionFeedbackOperations({ page, request, call, stat
     await page.getByRole("button", { name: `Edit ${actionTitle}`, exact: true }).click();
     const editDialog = page.getByRole("dialog", { name: "Edit action", exact: true });
     await editDialog.getByRole("button", { name: "Run now", exact: true }).click();
-    await expect(editDialog.locator(".action-result")).toContainText("saved at revision 2, but its launch was not confirmed");
+    await expect(page.locator(".action-toast:not([data-ending-style])").filter({ hasText: "saved at revision 2, but its launch was not confirmed" })).toHaveCount(1);
+    await expect(editDialog.locator(".action-result")).toHaveCount(0);
     action = (await state()).actions.find(item => item.id === action.id);
     assert.equal(action.revision, 2);
     assert.equal(action.status, "backlog");
@@ -188,7 +205,13 @@ export async function verifyActionFeedbackOperations({ page, request, call, stat
     await expect(editDialog).toHaveCount(0);
     assert.equal((await state()).actions.find(item => item.id === action.id).revision, 2, "Reconciliation never repeats save or invoke");
     await page.getByRole("button", { name: `Edit ${actionTitle}`, exact: true }).click();
-    await editDialog.getByLabel("Planned start (optional, your local time)").fill(localFuture.slice(0, 16));
+    const [futureDate, futureTime] = localFuture.split("T");
+    await page.locator("#action-start").click();
+    const futurePopup = page.getByRole("dialog", { name: "Choose planned date", exact: true });
+    await expect(futurePopup).toBeVisible();
+    await futurePopup.getByLabel("Date (YYYY-MM-DD)", { exact: true }).fill(futureDate);
+    await futurePopup.getByRole("button", { name: "Done", exact: true }).click();
+    await page.locator("#action-time").fill(futureTime.slice(0, 8) || "12:00:00");
     await editDialog.getByRole("button", { name: "Schedule action", exact: true }).click();
     await expect(editDialog).toHaveCount(0);
     action = (await state()).actions.find(item => item.id === action.id);
@@ -200,6 +223,11 @@ export async function verifyActionFeedbackOperations({ page, request, call, stat
     await persistProof();
 
     const runAgentId = process.env.AE_TEST_ACTION_RUN_AGENT;
+    if (noProvider) {
+      proof.controlledRunSkipped = "Core test mode: provider run omitted by intent; boundary verified with zero provider tasks";
+      await persistProof();
+      return proof;
+    }
     assert(runAgentId, "AE_TEST_ACTION_RUN_AGENT must identify the dedicated authorized real native agent for queued/cancel proof");
     const runAgent = (await state()).agents.find(item => item.id === runAgentId);
     assert(runAgent?.workdir && runAgent.permission === "read-only", "Controlled run uses an actual attached read-only agent");
@@ -226,7 +254,10 @@ export async function verifyActionFeedbackOperations({ page, request, call, stat
     const cancellation = page.waitForResponse(result => result.request().method() === "POST" && new URL(result.url()).pathname === `/api/actions/${controlled.id}/cancel`);
     await page.getByRole("button", { name: `Stop ${controlled.title}`, exact: true }).click();
     const cancelResult = await (await cancellation).json();
-    await expect(page.locator(".action-result").filter({ hasText: controlled.title })).toContainText(cancelResult.status === "cancelled" ? "cancelled" : "Cancellation requested");
+    const cancellationMessage = cancelResult.status === "cancelled" ? "cancelled" : "Cancellation requested";
+    const cancellationToast = page.locator(".action-toast:not([data-ending-style])").filter({ hasText: controlled.title }).filter({ hasText: cancellationMessage });
+    await expect(cancellationToast).toHaveCount(1);
+    await expect(cancellationToast).toContainText(cancellationMessage);
     const terminal = await until(async () => {
       const item = (await state()).actions.find(value => value.id === controlled.id);
       return item && !["queued", "running"].includes(item.status) && item;

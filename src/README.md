@@ -14,10 +14,33 @@ marks the draft unsaved; conflicting or unconfirmed saves retain it and offer
 **Check saved profile** before another save. **Retry refresh** repeats only the
 read when a change was saved but the view could not refresh.
 
-Other user actions identify their own pending state and result. Results stay near
-the action, or appear in one dismissible toast when its dialog closes or context
-is left. Queued work is distinguished from completed work. Feedback uses the
-existing visual style, keyboard controls and the system's reduced-motion setting.
+Other user actions identify their own pending state and result. Saves and other
+explicit management actions show one dismissible result toast at the top right,
+even while their editor remains open. Saved remains on the button after toast
+dismissal. Warnings and errors retain contextual details and recovery controls
+without a second live announcement. Chat acceptance and attachments keep their
+composer feedback; passive refresh stays silent. Queued work is distinguished
+from completed work. Feedback preserves the existing visual style, keyboard
+controls and the system's reduced-motion setting.
+
+## Value choices and scheduled dates
+
+Settings with a fixed set of values use a consistent dropdown. Lists of models,
+agents, projects, runtimes, workstations, and workspaces include a search field.
+Search narrows the displayed list; it does not change the saved selection.
+Unavailable saved choices remain identifiable, and inherited or empty choices
+keep their existing meaning. Action menus and multi-person invitations retain
+their own interactions.
+
+In **Scheduled tasks → New task / Edit**, choose a send date from the calendar
+or enter an exact date, then set its time separately. The form displays your
+browser timezone and preserves seconds. Today can be selected for a future time;
+invalid or past selections need correction. Repeating tasks keep their existing
+elapsed-interval behavior, and editing a paused task does not enable it.
+
+The controls passed local browser acceptance on 18 October 2026, followed by
+review of the receipts and final diff. See [Verification](VERIFICATION.md#workspace-controls-local-handoff)
+for the recorded scope, reproduction steps, and remaining verification boundaries.
 
 ## Workspace navigation
 
@@ -26,6 +49,26 @@ Organization and project structure cards show a rounded runtime-name badge besid
 Open **User settings** from the account button at the bottom of the sidebar, then choose **Profile**, **Runtime**, or **Workspace**. **Action board** and **Organization** remain in the main sidebar. Workspace owners can invite Matrix users and assign **Member** or **Owner** roles. Owners manage the workspace, its agents, runtimes, and actions; members use shared rooms. You cannot change your own ownership. Profile shows your authenticated identity and current access. Existing `/settings/workstations` bookmarks still open Runtime.
 
 On the action table, click a data-column heading to toggle ascending/descending order. Drag its right edge to resize; keyboard users can focus the separator and use Left/Right (Home resets). Unscheduled dates remain last. The pencil edits, the green play button invokes, and the red trash button confirms deletion. Stop active work before deleting. Deleted actions leave the board and cannot run again; stored run history and evidence remain available. Table sizing and sorting last until you leave the board.
+
+## Account display name
+
+Open the account menu at the bottom of navigation, then **Profile** to change
+your display name. It is shared by your account across workspaces; your role is
+still determined by the selected workspace. A blank name restores the existing
+account label. Names accept up to 64 Unicode scalar values after surrounding
+whitespace is trimmed, and are displayed as plain text.
+
+This changes only the displayed name. Matrix usernames/passwords, the owner key,
+workspace memberships, and agent profiles stay independent. Sessions using the
+same owner key represent the same owner account and share its display name.
+After an unconfirmed save, **Check saved profile** reads the saved name without
+repeating the write or discarding your current draft.
+
+Authenticated `GET /api/me` returns `{user, matrix, display_name}`. Self-only
+`PUT /api/me/profile` accepts exactly `{display_name: string | null}` and returns
+`{user, display_name}`. Empty text or `null` clears the name. Missing/unknown
+fields, control characters, and names above the limit are rejected before writes;
+existing authentication and origin checks apply. There is no target-user field.
 
 ## Projects, actions and collaboration
 

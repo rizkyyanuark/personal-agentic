@@ -1,10 +1,11 @@
-import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { Toast } from "@base-ui/react/toast";
-import { Check, CircleAlert, Info, LoaderCircle, X } from "lucide-react";
+import { Check, CircleAlert, Info, LoaderCircle } from "lucide-react";
+import { Toast as ResultToast, ToastClose, ToastContent, ToastPortal, ToastText, ToastTitle, ToastViewport } from "./components/ui/toast";
 import "./action-feedback.css";
 
 export type ActionResult = { kind: "success" | "warning" | "error"; message: string };
-type Result = ActionResult & { id: string; scope: string; viewKey: string };
+type Result = ActionResult & { id: string; scope: string; viewKey: string; announcedByToast: boolean };
 type ToastData = { kind: ActionResult["kind"] };
 class FeedbackStore {
   active = true;
@@ -32,7 +33,8 @@ export function ActionFeedbackProvider({ children }: { children: ReactNode }) {
 
 function FeedbackToasts() {
   const { toasts } = Toast.useToastManager<ToastData>();
-  return <Toast.Portal><Toast.Viewport className="action-toast-viewport" aria-label="Action notifications"
+  const visibleCount = Math.max(1, toasts.filter(toast => !toast.limited && toast.transitionStatus !== "ending").length);
+  return <ToastPortal><ToastViewport aria-label="Action notifications" style={{ "--toast-visible-count": visibleCount } as CSSProperties}
     render={(props) => <div {...props} onMouseLeave={(e) => {
       if (e.currentTarget.contains(document.activeElement)) return;
       props.onMouseLeave?.(e);
@@ -43,17 +45,17 @@ function FeedbackToasts() {
       }
     }} />}
   >
-    {toasts.map(toast => <Toast.Root key={toast.id} toast={toast} className="action-toast" swipeDirection={["right", "up"]}>
-      <Toast.Content className="action-toast-content">
+    {toasts.map(toast => <ResultToast key={toast.id} toast={toast}>
+      <ToastContent>
         <ResultIcon kind={toast.data?.kind ?? "success"} />
-        <Toast.Title className="action-toast-title" />
-        <Toast.Close className="action-toast-close" aria-label="Dismiss notification"><X size={16} aria-hidden="true" /></Toast.Close>
-      </Toast.Content>
-    </Toast.Root>)}
-  </Toast.Viewport></Toast.Portal>;
+        <ToastText><ToastTitle /></ToastText>
+        <ToastClose />
+      </ToastContent>
+    </ResultToast>)}
+  </ToastViewport></ToastPortal>;
 }
 
-export function useActionFeedback(scope: string, viewKey = scope) {
+export function useActionFeedback(scope: string, viewKey = scope, presentation: "toast" | "contextual" = "toast") {
   const store = useContext(FeedbackContext);
   if (!store) throw new Error("Action feedback requires the workspace provider");
   const owner = useRef({ mounted: true, viewKey });
@@ -83,11 +85,13 @@ export function useActionFeedback(scope: string, viewKey = scope) {
       store.listeners.forEach(listener => listener());
     }
     if (!outcome || !store.active) return;
-    const showToast = typeof options.toast === "function" ? options.toast(outcome) : options.toast;
-    if (showToast || !owner.current.mounted || owner.current.viewKey !== startedView) {
+    const sameView = owner.current.mounted && owner.current.viewKey === startedView;
+    const showToast = presentation === "toast" || !sameView || (typeof options.toast === "function" ? options.toast(outcome) : options.toast === true);
+    if (sameView) setResult({ ...outcome, id, scope, viewKey: startedView, announcedByToast: showToast });
+    if (showToast) {
       store.toast.add({ id, title: outcome.message, type: outcome.kind, data: { kind: outcome.kind }, timeout: outcome.kind === "success" ? 5000 : 0, priority: "low" });
-    } else setResult({ ...outcome, id, scope, viewKey: startedView });
-  }, [store, scope]);
+    }
+  }, [store, scope, presentation]);
   return { pending, result, clear, run, isPending: (action: string) => pending === action };
 }
 
@@ -103,10 +107,12 @@ function ResultIcon({ kind }: { kind: ActionResult["kind"] }) {
 }
 
 export function ActionStatus({ feedback, children }: { feedback: ActionFeedback; children?: ReactNode }) {
+  const result = feedback.result;
+  const inlineResult = result && !result.announcedByToast ? result : null;
   return <div className="action-status-area">
-    <div role={feedback.result?.kind === "error" ? "alert" : "status"} aria-atomic="true">
-      {feedback.result && <p key={feedback.result.id} className={`action-result ${feedback.result.kind}`}><ResultIcon kind={feedback.result.kind} /><span>{feedback.result.message}</span></p>}
+    <div role={result?.announcedByToast ? undefined : result?.kind === "error" ? "alert" : "status"} aria-atomic="true">
+      {inlineResult && <p key={inlineResult.id} className={`action-result ${inlineResult.kind}`}><ResultIcon kind={inlineResult.kind} /><span>{inlineResult.message}</span></p>}
     </div>
-    {feedback.result && children}
+    {children}
   </div>;
 }

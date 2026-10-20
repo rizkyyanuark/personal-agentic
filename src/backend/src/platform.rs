@@ -88,6 +88,7 @@ impl Platform {
             CREATE TABLE IF NOT EXISTS tenants(id TEXT PRIMARY KEY,name TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS members(tenant TEXT REFERENCES tenants(id),user TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('owner','member')),PRIMARY KEY(tenant,user));
             CREATE TABLE IF NOT EXISTS logins(token_hash TEXT PRIMARY KEY,user TEXT NOT NULL,expires INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS account_profiles(user TEXT PRIMARY KEY, display_name TEXT NOT NULL, updated_at TEXT NOT NULL);
             INSERT OR IGNORE INTO tenants(id,name) VALUES('default','My workspace');
             INSERT OR IGNORE INTO members VALUES('default','owner','owner');")?;
         let tenants = {
@@ -383,9 +384,89 @@ impl Platform {
                 .into_response());
         }
         if path == "/api/me" {
-            return Ok(
-                axum::Json(json!({"user":user,"matrix":self.homeserver.is_some()})).into_response(),
-            );
+            if method != Method::GET {
+                return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
+            }
+            let display_name: Option<String> = self.db(|db| {
+                let mut stmt =
+                    db.prepare("SELECT display_name FROM account_profiles WHERE user=?")?;
+                let mut rows = stmt.query([&user])?;
+                if let Some(row) = rows.next()? {
+                    Ok(Some(row.get(0)?))
+                } else {
+                    Ok(None)
+                }
+            })?;
+            return Ok(axum::Json(
+                json!({"user":user,"matrix":self.homeserver.is_some(),"display_name":display_name}),
+            )
+            .into_response());
+        }
+        if path == "/api/me/profile" {
+            if method != Method::PUT {
+                return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
+            }
+            let body_bytes = to_bytes(req.into_body(), 16384)
+                .await
+                .map_err(anyhow::Error::from)?;
+            let input: Value = serde_json::from_slice(&body_bytes)
+                .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "Invalid JSON".into()))?;
+            let obj = input
+                .as_object()
+                .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "Expected JSON object".into()))?;
+            for k in obj.keys() {
+                if k != "display_name" {
+                    return Err(ApiError(
+                        StatusCode::BAD_REQUEST,
+                        format!("Unknown field: {k}"),
+                    ));
+                }
+            }
+            let raw_val = obj.get("display_name").ok_or_else(|| {
+                ApiError(StatusCode::BAD_REQUEST, "Missing display_name field".into())
+            })?;
+            let new_name: Option<String> = match raw_val {
+                Value::Null => None,
+                Value::String(s) => {
+                    if s.chars().any(|c| c.is_control()) {
+                        return Err(ApiError(
+                            StatusCode::BAD_REQUEST,
+                            "Display name cannot contain control characters".into(),
+                        ));
+                    }
+                    let trimmed = s.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        if trimmed.chars().count() > 64 {
+                            return Err(ApiError(
+                                StatusCode::BAD_REQUEST,
+                                "Display name cannot exceed 64 characters".into(),
+                            ));
+                        }
+                        Some(trimmed.to_string())
+                    }
+                }
+                _ => {
+                    return Err(ApiError(
+                        StatusCode::BAD_REQUEST,
+                        "display_name must be a string or null".into(),
+                    ));
+                }
+            };
+            self.db(|db| {
+                if let Some(ref name) = new_name {
+                    db.execute(
+                        "INSERT INTO account_profiles(user, display_name, updated_at) VALUES(?1, ?2, datetime('now'))
+                         ON CONFLICT(user) DO UPDATE SET display_name=?2, updated_at=datetime('now')",
+                        rusqlite::params![&user, name],
+                    )?;
+                } else {
+                    db.execute("DELETE FROM account_profiles WHERE user=?", [&user])?;
+                }
+                Ok(())
+            })?;
+            return Ok(axum::Json(json!({"user": user, "display_name": new_name})).into_response());
         }
         if path == "/api/tenants" {
             if method == Method::GET {
@@ -403,7 +484,7 @@ impl Platform {
                 let name = input["name"].as_str().unwrap_or("").trim();
                 ensure!(
                     !name.is_empty() && name.len() <= 80,
-                    "Workspace name must contain 1–80 bytes"
+                    "Workspace name must contain 1-80 bytes"
                 );
                 let tenant = Tenant {
                     id: model::id(),

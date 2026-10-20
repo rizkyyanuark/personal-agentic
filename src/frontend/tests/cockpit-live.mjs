@@ -1,3 +1,4 @@
+import { expectValue, selectValue } from "./value-picker.mjs";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -44,7 +45,7 @@ try {
   await expect(page).toHaveURL(`${base}/organization/live-preview`);
   await expect(page.getByRole("heading", { name: "Live Preview", exact: true })).toBeVisible({ timeout: 20000 });
   await expect(page.locator(".live-preview-connection")).toHaveAttribute("data-connection", "live");
-  await expect(page.getByRole("combobox", { name: "Team", exact: true })).toHaveValue("");
+  await expectValue(page.getByRole("combobox", { name: "Team", exact: true }), "");
   await verifyOverlay(page);
   await verifyFocusTrap(page);
   assert.deepEqual((await call("/state")).runs.map(run => run.id).sort(), originalRuns, "Opening preview must never invoke a run");
@@ -76,14 +77,14 @@ try {
   const existingAgent = after.agents.find(agent => originalIds.includes(agent.id) && !agent.project_id);
   assert(existingAgent, "Workspace must have an existing Organization agent for mapping verification");
   await page.getByRole("button", { name: "Assign existing agents to cockpit roles", exact: true }).click();
-  await page.getByRole("combobox", { name: "Orion · Director", exact: true }).selectOption(existingAgent.id);
+  await selectValue(page.getByRole("combobox", { name: "Orion · Director", exact: true }), existingAgent.id);
   await page.getByRole("button", { name: "Save role mapping", exact: true }).click();
   await expect.poll(async () => (await call("/cockpit/state")).mapping.hq_lab_director).toBe(existingAgent.id);
   await expect(page.locator('.agent-card[data-role="hq_lab_director"] .agent-character-name')).toHaveText(existingAgent.name);
   await verifySnapshotUI(page, await call("/cockpit/state"));
   assert.deepEqual((await call("/state")).agents, after.agents, "Remapping preserves profiles and reporting lines");
   await page.getByRole("button", { name: "Assign existing agents to cockpit roles", exact: true }).click();
-  await page.getByRole("combobox", { name: "Orion · Director", exact: true }).selectOption(state.mapping.hq_lab_director);
+  await selectValue(page.getByRole("combobox", { name: "Orion · Director", exact: true }), state.mapping.hq_lab_director);
   await page.getByRole("button", { name: "Save role mapping", exact: true }).click();
   await expect.poll(async () => (await call("/cockpit/state")).mapping.hq_lab_director).toBe(state.mapping.hq_lab_director);
   await expect(page.getByRole("button", { name: "Configure Orion", exact: true })).toBeVisible();
@@ -94,16 +95,16 @@ try {
   await expect(page).toHaveURL(`${base}/organization/live-preview`);
   await expect(page.locator(".live-preview-connection")).toHaveAttribute("data-connection", "live");
   await waitForScene(page);
-  await page.getByRole("combobox", { name: "Team", exact: true }).selectOption("general");
+  await selectValue(page.getByRole("combobox", { name: "Team", exact: true }), "general");
   await expect(page).toHaveURL(`${base}/organization/live-preview?group=general`);
   await expect(page.locator(".live-preview-connection")).toHaveAttribute("data-connection", "live");
   assert.equal((await call("/cockpit/state?group_id=general")).group_id, "general");
   await verifySnapshotUI(page, await call("/cockpit/state?group_id=general"));
   await page.reload();
   await waitForScene(page);
-  await expect(page.getByRole("combobox", { name: "Team", exact: true })).toHaveValue("general");
+  await expectValue(page.getByRole("combobox", { name: "Team", exact: true }), "general");
   await expect(page.locator(".live-preview-connection")).toHaveAttribute("data-connection", "live");
-  await page.getByRole("combobox", { name: "Team", exact: true }).selectOption("");
+  await selectValue(page.getByRole("combobox", { name: "Team", exact: true }), "");
 
   await context.setOffline(true);
   await expect(page.locator(".live-preview-connection")).toHaveAttribute("data-connection", "offline", { timeout: 15000 });
@@ -139,7 +140,7 @@ try {
   await closePreview(page);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.reload();
-  await page.getByRole("combobox", { name: "Workspace", exact: true }).selectOption(other.id);
+  await selectValue(page.getByRole("combobox", { name: "Workspace", exact: true }), other.id);
   await page.goto("/organization/live-preview");
   await expect(page.locator(".live-preview-connection")).toHaveAttribute("data-connection", "live");
   await page.getByLabel("Configure cockpit team", { exact: true }).click();

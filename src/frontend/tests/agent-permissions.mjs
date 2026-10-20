@@ -1,3 +1,4 @@
+import { expectValue, readOptions, selectValue } from "./value-picker.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -14,13 +15,13 @@ export async function verifyAgentPermissions({ page, request, call, state, until
   let agent = await call("/agents/ceo", { ...original, workdir: (await call("/workspaces/probe", { path: workspace })).workspace, model: catalog.models.find((m) => m.slug === "gpt-5.6-luna")?.slug ?? catalog.model, reasoning: "low", instructions: "Execute the owner's requested verification command exactly. Use your shell tool and report actual evidence. Do not delegate unless explicitly requested.", timeout_seconds: 240 }, "PUT");
   await page.goto("/organization/agents/ceo/workdir");
   const access = page.getByLabel("Access mode", { exact: true });
-  assert.deepEqual(await access.locator("option").evaluateAll((options) => options.map((o) => o.value)), ["read-only", "workspace-write", "danger-full-access"]);
+  assert.deepEqual((await readOptions(access)).map(option => option.value), ["read-only", "workspace-write", "danger-full-access"]);
   const setMode = async (permission) => {
-    await access.selectOption(permission);
+    await selectValue(access, permission);
     await page.getByRole("button", { name: "Change workdir", exact: true }).click();
     agent = await until(async () => { const a = (await state()).agents.find((a) => a.id === "ceo"); return a.permission === permission && a; }, 10000);
     await page.reload();
-    await expect(access).toHaveValue(permission);
+    await expectValue(access, permission);
   };
   const runFile = async (target, marker, permission) => {
     const ps = (s) => `'${s.replaceAll("'", "''")}'`;
@@ -72,7 +73,7 @@ export async function verifyAgentPermissions({ page, request, call, state, until
   await setMode("danger-full-access");
   for (const script of ["Stop", "Start"]) execFileSync("pwsh", ["-NoProfile", "-File", `../scripts/${script}.ps1`, "-Org", org], { stdio: "ignore", timeout: 25000 });
   await page.reload();
-  await expect(access).toHaveValue("danger-full-access");
+  await expectValue(access, "danger-full-access");
   const final = await state();
   assert.equal(final.agents.find((a) => a.id === readOnly.id).permission, "read-only");
   const materialized = JSON.parse(await readFile(path.join(org, "ceo/profile.json"), "utf8"));

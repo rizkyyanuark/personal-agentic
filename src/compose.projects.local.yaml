@@ -1,0 +1,24 @@
+# Opt-in local projects overlay for Docker Compose.
+# From src: node scripts/local-projects-compose.mjs -p agentic-projects-local <compose arguments>
+# Follow DEPLOYMENT.md for first-start Matrix provisioning before platform startup.
+# Required environment variable:
+#   AE_PROJECTS_DIR - Host directory containing local repositories (e.g. C:/Users/rizky/Documents/GitHub)
+services:
+  platform:
+    environment:
+      AE_LOCAL_PROJECTS_ROOT: "/projects"
+    volumes:
+      - type: bind
+        source: "${AE_PROJECTS_DIR:?Set AE_PROJECTS_DIR to your existing host projects directory}"
+        target: /projects
+        bind:
+          create_host_path: false
+
+  worker:
+    command: ["--worker", "--worker-state", "/data/worker", "--worker-root", "/projects"]
+    volumes:
+      - type: bind
+        source: "${AE_PROJECTS_DIR:?Set AE_PROJECTS_DIR to your existing host projects directory}"
+        target: /projects
+        bind:
+          create_host_path: false

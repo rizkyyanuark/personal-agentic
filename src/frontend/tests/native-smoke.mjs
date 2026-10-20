@@ -1,3 +1,4 @@
+import { expectValue, readOptions, selectValue } from "./value-picker.mjs";
 import assert from "node:assert/strict";
 import { readFile, writeFile, mkdir, mkdtemp, chmod, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -83,24 +84,43 @@ try {
     page.getByRole("heading", { name: "General", exact: true }),
   ).toBeVisible();
   const phase = process.argv[2] || "basic";
-  if (phase === "action-feedback" || phase === "action-feedback-core") {
+  if (phase === "value-controls") {
+    const { verifyValueControls } = await import("./value-controls.mjs");
+    proof.valueControls = await verifyValueControls({ page, request, call, state, until, org, directory, base });
+    console.log("PASS real value controls, committed mutations, required fields, persisted values and nested overlays");
+  } else if (phase === "schedule-calendar") {
+    const { verifyScheduleCalendar } = await import("./schedule-calendar.mjs");
+    proof.scheduleCalendar = await verifyScheduleCalendar({ page, request, call, state, until, finished, org, directory, base });
+    console.log("PASS schedule calendar/date-time editing and persisted UTC values");
+  } else if (phase === "action-board-calendar") {
+    const { verifyActionBoardCalendar } = await import("./action-board-calendar.mjs");
+    proof.actionBoardCalendar = await verifyActionBoardCalendar({ page, request, call, state, until, finished, org, directory, base });
+    console.log("PASS Action Board planned-start calendar, backlog restoration, bounds, DST and unattached invocation rejection");
+  } else if (phase === "action-feedback" || phase === "action-feedback-core") {
     const { verifyActionFeedback } = await import("./action-feedback.mjs");
     proof.actionFeedback = await verifyActionFeedback({ page, request, call, state, until, finished, org, directory, base, coreOnly: phase === "action-feedback-core" });
     console.log("PASS truthful action feedback, persisted agent saves, contextual recovery, motion and workspace boundaries");
-  } else if (["action-feedback-settings", "action-feedback-operations", "action-feedback-accessibility", "action-feedback-existing"].includes(phase)) {
+  } else if (["action-feedback-settings", "action-feedback-operations", "action-feedback-operations-core", "action-feedback-accessibility", "action-feedback-existing", "action-feedback-review"].includes(phase)) {
     const suite = {
       "action-feedback-settings": ["./action-feedback-settings.mjs", "verifyActionFeedbackSettings"],
       "action-feedback-operations": ["./action-feedback-operations.mjs", "verifyActionFeedbackOperations"],
+      "action-feedback-operations-core": ["./action-feedback-operations.mjs", "verifyActionFeedbackOperations"],
       "action-feedback-accessibility": ["./action-feedback-accessibility.mjs", "verifyActionFeedbackAccessibility"],
       "action-feedback-existing": ["./action-feedback-existing.mjs", "verifyActionFeedbackExisting"],
+      "action-feedback-review": ["./action-feedback-review-checks.mjs", "verifyActionFeedbackReviewChecks"],
     }[phase];
     const module = await import(suite[0]);
-    proof[phase] = await module[suite[1]]({ page, request, call, state, until, finished, org, directory, base });
+    proof[phase] = await module[suite[1]]({ page, request, call, state, until, finished, org, directory, base, noProvider: phase === "action-feedback-operations-core" });
     console.log(`PASS ${phase}`);
   } else if (phase === "workspace-navigation") {
     const { verifyWorkspaceNavigation } = await import("./workspace-navigation.mjs");
-    proof.workspaceNavigation = await verifyWorkspaceNavigation({ page, request, call, state, until, finished, org, directory, base });
-    console.log("PASS persisted sections, sort menu, archived restore, hidden deleted groups, mobile navigation, recorded model badges and real run activity");
+    proof.workspaceNavigation = await verifyWorkspaceNavigation({ page, request, call, state, until, finished, org, directory, base, noProvider: true });
+    console.log("PASS persisted sections, sort menu, archived restore, hidden deleted groups, sidebar resize/rail and responsive navigation; no provider execution");
+  } else if (phase === "account-profile") {
+    const { verifyAccountProfile } = await import("./account-profile.mjs");
+    const profilePhase = process.env.AE_TEST_PROFILE_PHASE || "prepare";
+    proof[`accountProfile-${profilePhase}`] = await verifyAccountProfile({ page, call, org, directory, base, ownerKey });
+    console.log(`PASS account-profile ${profilePhase}: real owner/Matrix browser sessions, profile validation, identity and workspace permissions`);
   } else if (phase === "message-files") {
     const { verifyMessageFiles } = await import("./message-files.mjs");
     proof.messageFiles = await verifyMessageFiles({ page, request, call, state, until, finished, org, directory, base });
@@ -124,7 +144,7 @@ try {
   } else if (phase === "group-scope") {
     const { verifyGroupScope } = await import("./group-scope.mjs");
     proof.groupScope = await verifyGroupScope({ page, request, call, state, until, finished, org, base, directory });
-    console.log("PASS level-scoped creation/editing, Position badges, private delegation, direct/mention guards, scheduled routing and restart");
+    console.log("PASS invitation membership UI, legacy API level scopes, Position badges, private delegation, direct/mention guards, scheduled routing and restart");
   } else if (phase === "private-network") {
     const { verifyPrivateNetwork } = await import("./private-network.mjs");
     proof.privateNetwork = await verifyPrivateNetwork({ page, request, call, state, until, org, base, directory });
@@ -565,16 +585,17 @@ try {
     await page
       .getByRole("button", { name: "Organization", exact: true })
       .click();
-    await page.getByLabel("Chat lead", { exact: true }).selectOption(lead.id);
+    await expect(page.getByLabel("Chat lead", { exact: true })).toHaveCount(0);
     assert.equal((await state()).chat_lead_id, lead.id);
     const invalidLead = await request.put("/api/organization/chat-lead", {
       data: { agent_id: worker.id },
     });
     assert.equal(
       invalidLead.status(),
-      400,
-      "A subordinate cannot become the owner's direct report implicitly",
+      404,
+      "The removed global chat-lead endpoint cannot change reporting relationships",
     );
+    assert.equal((await state()).agents.find(agent => agent.id === worker.id).reports_to, lead.id);
     await expect(page.locator(".org-resize-handle").first()).toHaveCSS(
       "opacity",
       "0",
@@ -857,7 +878,7 @@ try {
     execFileSync("git", ["init", workspace], { stdio: "ignore" });
     await page.getByRole("button", { name: "Workdir", exact: true }).click();
     await page.getByLabel("Absolute directory path").fill(workspace);
-    await page.getByLabel("Access mode").selectOption("read-only");
+    await selectValue(page.getByLabel("Access mode"), "read-only");
     await page
       .getByRole("button", { name: "Attach workdir", exact: true })
       .click();
@@ -1002,8 +1023,8 @@ try {
       .click();
     await page.getByRole("button", { name: "Add agent", exact: true }).click();
     if (process.env.AE_TEST_WORKSTATION_ID) {
-      await page.getByLabel("Harness", { exact: true }).selectOption("antigravity");
-      await page.getByLabel("Workstation", { exact: true }).selectOption(process.env.AE_TEST_WORKSTATION_ID);
+      await selectValue(page.getByLabel("Harness", { exact: true }), "antigravity");
+      await selectValue(page.getByLabel("Workstation", { exact: true }), process.env.AE_TEST_WORKSTATION_ID);
     }
     await page.getByLabel("Workdir", { exact: true }).fill(process.env.AE_TEST_WORKSTATION_ID ? process.env.AE_TEST_WORKDIR : proof.workspace);
     await page.getByLabel("Name", { exact: true }).fill("Engineer");
@@ -1021,9 +1042,9 @@ try {
       (a) => a.name === "Engineer",
     ).id;
     await page.getByRole("button", { name: "Workdir", exact: true }).click();
-    if (process.env.AE_TEST_WORKSTATION_ID) await page.getByLabel("Workstation", { exact: true }).selectOption("");
+    if (process.env.AE_TEST_WORKSTATION_ID) await selectValue(page.getByLabel("Workstation", { exact: true }), "");
     await page.getByLabel("Absolute directory path").fill(proof.workspace);
-    await page.getByLabel("Access mode").selectOption("workspace-write");
+    await selectValue(page.getByLabel("Access mode"), "workspace-write");
     await page
       .getByRole("button", { name: /^(Attach|Change) workdir$/ })
       .click();
@@ -1513,7 +1534,7 @@ try {
       .click();
     await page.getByRole("button", { name: /Search your workspace/ }).click();
     await page.getByLabel("Semantic document & image search").check();
-    await page.getByLabel("Search file type").selectOption("images");
+    await selectValue(page.getByLabel("Search file type"), "images");
     await page
       .getByLabel("Search query")
       .fill("a red circle on a white background");
@@ -1991,9 +2012,7 @@ try {
       await expect(
         page.getByLabel("Display name", { exact: true }),
       ).toHaveValue(agent.name);
-      await expect(page.getByLabel("Reports to", { exact: true })).toHaveValue(
-        agent.reports_to || "",
-      );
+      await expectValue(page.getByLabel("Reports to", { exact: true }), agent.reports_to || "");
       await expect(
         page.locator(`.org-card[data-agent-id="${agent.id}"]`),
       ).toHaveAttribute("data-selected", "true");
@@ -2191,11 +2210,10 @@ try {
         "This machine should expose different model reasoning capabilities",
       );
       await expect(page.getByLabel("Model", { exact: true })).toBeEnabled();
-      await page.getByLabel("Model", { exact: true }).selectOption(rich.slug);
-      await page
-        .getByLabel("Reasoning effort", { exact: true })
-        .selectOption("max");
-      await page.getByLabel("Reports to", { exact: true }).selectOption("ceo");
+      await selectValue(page.getByLabel("Model", { exact: true }), rich.slug);
+      await selectValue(page
+        .getByLabel("Reasoning effort", { exact: true }), "max");
+      await selectValue(page.getByLabel("Reports to", { exact: true }), "ceo");
       await page
         .getByRole("button", { name: "Save changes", exact: true })
         .click();
@@ -2215,12 +2233,8 @@ try {
         .getByRole("button", { name: "Configure Engineer", exact: true })
         .last()
         .click();
-      await expect(page.getByLabel("Model", { exact: true })).toHaveValue(
-        rich.slug,
-      );
-      await expect(page.getByLabel("Reports to", { exact: true })).toHaveValue(
-        "ceo",
-      );
+      await expectValue(page.getByLabel("Model", { exact: true }), rich.slug);
+      await expectValue(page.getByLabel("Reports to", { exact: true }), "ceo");
       await expect(
         page.locator(`.react-flow__edge[data-id="reports:${original.id}"]`),
       ).toHaveAttribute("aria-label", "Engineer reports to CEO");
@@ -2239,16 +2253,15 @@ try {
         ).status(),
         400,
       );
-      await page
-        .getByLabel("Model", { exact: true })
-        .selectOption(limited.slug);
-      await expect(
-        page.getByLabel("Reasoning effort", { exact: true }),
-      ).toHaveValue("");
-      await expect(
-        page.locator('#profile-reasoning option[value="max"]'),
-      ).toHaveCount(0);
-      await page.getByLabel("Model", { exact: true }).selectOption("");
+      await selectValue(page
+        .getByLabel("Model", { exact: true }), limited.slug);
+      if (limited.supported_reasoning_levels.length) {
+        await expectValue(page.getByLabel("Reasoning effort", { exact: true }), "");
+        assert.equal((await readOptions(page.locator("#profile-reasoning"))).filter(option => option.value === "max").length, 0);
+      } else {
+        await expect(page.getByLabel("Reasoning effort", { exact: true })).toHaveCount(0);
+      }
+      await selectValue(page.getByLabel("Model", { exact: true }), "");
       await page
         .getByRole("button", { name: "Save changes", exact: true })
         .click();

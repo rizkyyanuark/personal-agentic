@@ -4,6 +4,7 @@ import { LogIn, RotateCw, Settings2, X } from "lucide-react";
 import { mountCockpit, type CockpitHandle } from "@personal-agentic/cockpit";
 import "@personal-agentic/cockpit/styles.css";
 import { Button } from "./components/ui/button";
+import { ValuePicker } from "./ValuePicker";
 import { api, ApiFailure } from "./api";
 import type { Agent } from "./bindings/Agent";
 import type { Group } from "./bindings/Group";
@@ -246,7 +247,7 @@ export default function LivePreview({ workspaceId, workspaceName, role, groupId,
       {currentSnapshot && <div className="live-preview-mapping">
         {draft === null ? <Button variant="outline" onClick={() => setDraft({ ...currentSnapshot.mapping })}>Assign existing agents to cockpit roles</Button> : <form onSubmit={event => { event.preventDefault(); if (mappingValid) void configure("/cockpit/mapping", { mapping: draft }, "PUT"); }}>
           <p>Choose a different Organization agent for each role. Existing profiles and reporting lines are preserved.</p>
-          <div className="live-preview-role-selects">{slots.map(([key, label]) => <label key={key} htmlFor={`cockpit-role-${key}`}>{label}<select id={`cockpit-role-${key}`} value={draft[key] ?? ""} disabled={busy} onChange={event => setDraft(current => ({ ...current, [key]: event.target.value }))}><option value="">Choose Organization agent</option>{eligibleAgents.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>)}</div>
+          <div className="live-preview-role-selects">{slots.map(([key, label]) => <label key={key} htmlFor={`cockpit-role-${key}`}>{label}<ValuePicker id={`cockpit-role-${key}`} aria-label={label} searchable value={draft[key] ?? ""} disabled={busy} onValueChange={value => setDraft(current => ({ ...current, [key]: value }))} options={[{ value: "", label: "Choose Organization agent" }, ...eligibleAgents.map(agent => ({ value: agent.id, label: agent.name }))]} /></label>)}</div>
           {!mappingValid && <p>Choose five different agents before saving.</p>}
           <div className="live-preview-mapping-actions"><Button type="submit" disabled={busy || !mappingValid}>Save role mapping</Button><Button type="button" variant="outline" disabled={busy} onClick={() => setDraft(null)}>Cancel</Button></div>
         </form>}
@@ -272,10 +273,7 @@ export default function LivePreview({ workspaceId, workspaceName, role, groupId,
           </div>
           {role === "owner" && <div className="live-preview-controls">
             <label htmlFor="cockpit-team-filter"><span className="sr-only">Team</span>
-              <select id="cockpit-team-filter" value={groupId ?? ""} onChange={event => onFilter(event.target.value || null)}>
-                <option value="">All teams</option>
-                {groups.filter(group => !group.archived_at && !group.deleted_at).map(group => <option key={group.id} value={group.id}>{group.project ? "Project · " : "Group · "}{group.name}</option>)}
-              </select>
+              <ValuePicker id="cockpit-team-filter" aria-label="Team" searchable value={groupId ?? ""} onValueChange={value => onFilter(value || null)} options={[{ value: "", label: "All teams" }, ...groups.filter(group => !group.archived_at && !group.deleted_at).map(group => ({ value: group.id, label: `${group.project ? "Project · " : "Group · "}${group.name}` }))]} />
             </label>
             <p className={`live-preview-connection connection-${displayConnection} ${connectionWarning ? "live-preview-connection-warning" : "sr-only"}`} role="status" data-connection={displayConnection}>{displayConnection === "live" ? "Live" : displayMessage}</p>
             {displayConnection === "expired" ? <Button variant="outline" size="icon" className="live-preview-icon-button live-preview-refresh" aria-label="Sign in again" title="Sign in again" onClick={() => location.reload()}><LogIn size={18} /></Button> : <Button variant="outline" size="icon" className={`live-preview-icon-button live-preview-refresh ${refreshing ? "is-refreshing" : ""}`} aria-label="Refresh" title="Refresh" aria-busy={refreshing} disabled={busy || refreshing} onClick={refreshStatus}><RotateCw size={18} /></Button>}

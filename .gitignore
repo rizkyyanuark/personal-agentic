@@ -1,6 +1,7 @@
 # Organization records, native sessions, credentials, and attached codebases.
 /org/
 /workdir/
+/.state/
 
 # Local secrets and generated artifacts anywhere in the project.
 .env

@@ -44,11 +44,14 @@ import {
   Server,
   UserRound,
   Building2,
+  ChevronsUpDown,
 } from "lucide-react";
+import { Menu } from "@base-ui/react/menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -68,6 +71,7 @@ import { ProjectTeam } from "./ProjectTeam";
 import { RuntimeSelect, HarnessSelect } from "./RuntimeSettings";
 import { availableHarnesses, harnessNames, type RegisteredRuntime } from "./runtimeCatalog";
 import { NewAgentDialog } from "./NewAgentDialog";
+import { ValuePicker } from "./ValuePicker";
 import { WorkstationSelect } from "./WorkstationSelect";
 import { applicationEnvironmentLabel, sshWorkstationLabel } from "./workstationLabels";
 import { UserSettings } from "./UserSettings";
@@ -88,6 +92,7 @@ import type { Message } from "./bindings/Message";
 import type { Run } from "./bindings/Run";
 import type { Artifact } from "./bindings/Artifact";
 import type { Workspace } from "./bindings/Workspace";
+import type { GroupPreferences } from "./bindings/GroupPreferences";
 import type { StateView } from "./bindings/StateView";
 import type { Connection } from "./bindings/Connection";
 import { WorkstationStatus } from "./WorkstationStatus";
@@ -148,16 +153,111 @@ function chatMessagesPath(groupId: string, side: string | null, before?: string)
   if (before) query.set("before", before);
   return `/groups/${groupId}/messages?${query}`;
 }
-export default function App({role = "owner", controllerAccess = true, user = "owner", workspaceName = "My workspace", workspaceId = "default", workspaceSettings}: {role?: string; controllerAccess?: boolean; user?: string; workspaceName?: string; workspaceId?: string; workspaceSettings?: ReactNode}) {
+export default function App({
+  role = "owner",
+  controllerAccess = true,
+  user = "owner",
+  displayName = null,
+  onDisplayNameChange,
+  workspaceName = "My workspace",
+  workspaceId = "default",
+  workspaceSettings,
+}: {
+  role?: string;
+  controllerAccess?: boolean;
+  user?: string;
+  displayName?: string | null;
+  onDisplayNameChange?: (name: string | null) => void;
+  workspaceName?: string;
+  workspaceId?: string;
+  workspaceSettings?: ReactNode;
+}) {
   const [data, setData] = useState<StateView | null>(null);
   const activeApp = useRef(true);
   useLayoutEffect(() => { activeApp.current = true; return () => { activeApp.current = false; }; }, []);
   const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
-  const [navigationOpen, setNavigationOpen] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(`ae_sidebar_collapsed:v1:${user}:${workspaceId}`) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const setPersistedCollapsed = useCallback((val: boolean) => {
+    setSidebarCollapsed(val);
+    try {
+      localStorage.setItem(`ae_sidebar_collapsed:v1:${user}:${workspaceId}`, String(val));
+    } catch {
+      // ignore
+    }
+  }, [user, workspaceId]);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [acknowledgedPreferences, setAcknowledgedPreferences] = useState<GroupPreferences | null>(null);
+  const [preferencesNeedsRefresh, setPreferencesNeedsRefresh] = useState(false);
   const navigationPanel = useRef<PanelImperativeHandle | null>(null);
-  const edgePointer = useRef(0);
+  const edgePointer = useRef<number | null>(null);
+  const [displayNameDraft, setDisplayNameDraft] = useState(() => displayName ?? "");
+  const prevUser = useRef(user);
+  useEffect(() => {
+    if (prevUser.current !== user) {
+      prevUser.current = user;
+      setDisplayNameDraft(displayName ?? "");
+    }
+  }, [user, displayName]);
+  const accountProfileFeedback = useActionFeedback(`account-profile:${user}`, workspaceId);
+
+  const getSavedExpandedWidth = useCallback(() => {
+    const fromData = data?.panel_sizes.sidebar;
+    if (typeof fromData === "number" && fromData >= 180 && fromData <= 420) {
+      return fromData;
+    }
+    try {
+      const fromLocal = Number(localStorage.getItem(`ae_sidebar_expanded_width:v1:${user}:${workspaceId}`));
+      if (fromLocal >= 180 && fromLocal <= 420) return fromLocal;
+    } catch {
+      // ignore
+    }
+    return 258;
+  }, [data?.panel_sizes.sidebar, user, workspaceId]);
+
+  const expandSidebar = useCallback(() => {
+    setPersistedCollapsed(false);
+    const target = getSavedExpandedWidth();
+    navigationPanel.current?.resize(target);
+    navigationPanel.current?.expand();
+  }, [getSavedExpandedWidth, setPersistedCollapsed]);
+
+  const collapseSidebar = useCallback(() => {
+    setPersistedCollapsed(true);
+    navigationPanel.current?.collapse();
+  }, [setPersistedCollapsed]);
+
+  const separatorRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = separatorRef.current;
+    if (!el) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (sidebarCollapsed) {
+          expandSidebar();
+        } else {
+          collapseSidebar();
+        }
+      }
+    };
+    el.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => el.removeEventListener("keydown", handleKeyDown, { capture: true });
+  }, [sidebarCollapsed, expandSidebar, collapseSidebar]);
+
+  const onSidebarPanelRef = useCallback((handle: PanelImperativeHandle | null) => {
+    navigationPanel.current = handle;
+    if (handle && sidebarCollapsed) {
+      handle.collapse();
+    }
+  }, [sidebarCollapsed]);
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
     const resize = () => setMobile(media.matches);
@@ -199,6 +299,13 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
   const setSelectedAgent = (id: string | null) =>
     go({ view: "Organization", agentId: id, section: "Profile", runId: null });
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  useLayoutEffect(() => {
+    if (authenticated && !mobile && navigationPanel.current) {
+      if (sidebarCollapsed) {
+        navigationPanel.current.collapse();
+      }
+    }
+  }, [authenticated, mobile, sidebarCollapsed]);
   const [ownerKey, setOwnerKey] = useState("");
   const [loadedMessages, setMessages] = useState<Message[]>([]);
   const [messagesScope, setMessagesScope] = useState("");
@@ -250,8 +357,8 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
   const [searchMedia, setSearchMedia] = useState("documents");
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [busy, setBusy] = useState(false);
-  const sendFeedback = useActionFeedback(`chat-send:${groupId}:${sideChatId ?? "main"}`, `${tab}:${groupId}:${sideChatId}`);
-  const uploadFeedback = useActionFeedback(`upload:${groupId}`, `${tab}:${groupId}:${sideChatId}`);
+  const sendFeedback = useActionFeedback(`chat-send:${groupId}:${sideChatId ?? "main"}`, `${tab}:${groupId}:${sideChatId}`, "contextual");
+  const uploadFeedback = useActionFeedback(`upload:${groupId}`, `${tab}:${groupId}:${sideChatId}`, tab === "Chat" ? "contextual" : "toast");
   const [connected, setConnected] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -262,9 +369,21 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
     null,
   );
   const groupRef = useRef({ groupId, sideChatId, tab });
+  const routeContextRef = useRef({ tab, groupId, newAgentProject });
+  const navLifetimeRef = useRef(0);
+  useEffect(() => {
+    const onNav = () => { navLifetimeRef.current += 1; };
+    window.addEventListener("popstate", onNav);
+    window.addEventListener("ae:navigate", onNav);
+    return () => {
+      window.removeEventListener("popstate", onNav);
+      window.removeEventListener("ae:navigate", onNav);
+    };
+  }, []);
   useLayoutEffect(() => {
     groupRef.current = { groupId, sideChatId, tab };
-  }, [groupId, sideChatId, tab]);
+    routeContextRef.current = { tab, groupId, newAgentProject };
+  }, [groupId, sideChatId, tab, newAgentProject]);
 
   const perform = useCallback(
     (work: () => Promise<void>, clearError = true) =>
@@ -541,81 +660,250 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
       </main>
     );
 
-  const navigation = (
-          <aside className="sidebar">
-            <div className="brand">
-              <img className="brand-mark" src="/agentic-enterprise-logo.png" alt="Agentic Enterprise logo" width={44} height={44} />
-              <div>
-                <strong>Agentic Enterprise</strong>
-                <span>{workspaceName}</span>
+  const renderAccountMenu = (inRail: boolean) => (
+    <Menu.Root>
+      <ActionTooltip
+        content={`Account: ${displayName || user} (${role === "owner" ? "Owner" : "Member"})`}
+        side={inRail ? "right" : "top"}
+        disabled={!inRail}
+      >
+        <Menu.Trigger
+          className={inRail ? "rail-account-trigger" : "account-menu-trigger"}
+          aria-label="Account menu"
+          title={`Account: ${displayName || user} (${role === "owner" ? "Owner" : "Member"})`}
+        >
+          <Avatar owner={role === "owner"} name={displayName || user} />
+          {!inRail && (
+            <>
+              <div className="account-menu-info">
+                <strong className="account-menu-name">{displayName || user}</strong>
+                <small className="account-menu-role">{role === "owner" ? "Owner" : "Member"}</small>
+              </div>
+              <ChevronsUpDown size={15} className="account-menu-chevron" aria-hidden="true" />
+            </>
+          )}
+        </Menu.Trigger>
+      </ActionTooltip>
+      <Menu.Portal>
+        <Menu.Positioner align="start" side="top" sideOffset={8} className="account-menu-positioner">
+          <Menu.Popup className="account-menu">
+            <div className="account-menu-header" role="none">
+              <Avatar owner={role === "owner"} name={displayName || user} />
+              <div className="account-menu-info">
+                <strong className="account-menu-name">{displayName || user}</strong>
+                <small className="account-menu-role">{role === "owner" ? "Platform administrator" : "Matrix member"}</small>
               </div>
             </div>
-            {role === "owner" && <button
-              className="search-button"
+            <div className="account-menu-separator" role="separator" />
+            <Menu.Item
+              className="account-menu-item"
+              onClick={() => {
+                if (mobile) setMobileNavigationOpen(false);
+                go({ view: "Profile", agentId: null, runId: null });
+              }}
+            >
+              <UserRound size={16} aria-hidden="true" />
+              <span>Profile</span>
+            </Menu.Item>
+            {controllerAccess && (
+              <Menu.Item
+                className="account-menu-item"
+                onClick={() => {
+                  if (mobile) setMobileNavigationOpen(false);
+                  go({ view: "User settings", agentId: null, runId: null });
+                }}
+              >
+                <Server size={16} aria-hidden="true" />
+                <span>Runtime settings</span>
+              </Menu.Item>
+            )}
+            {role === "owner" && (
+              <Menu.Item
+                className="account-menu-item"
+                onClick={() => {
+                  if (mobile) setMobileNavigationOpen(false);
+                  go({ view: "Workspace settings", agentId: null, runId: null });
+                }}
+              >
+                <Building2 size={16} aria-hidden="true" />
+                <span>Workspace settings</span>
+              </Menu.Item>
+            )}
+            {role === "owner" && (
+              <Menu.Item
+                className="account-menu-item"
+                onClick={() => {
+                  setArchiveOpen(true);
+                }}
+              >
+                <Archive size={16} aria-hidden="true" />
+                <span>Archived groups</span>
+              </Menu.Item>
+            )}
+            <div className="account-menu-separator" role="separator" />
+            <Menu.Item
+              className="account-menu-item account-menu-item-danger"
+              onClick={() =>
+                void perform(async () => {
+                  await post("/logout");
+                  location.reload();
+                })
+              }
+            >
+              <LogOut size={16} aria-hidden="true" />
+              <span>Sign out</span>
+            </Menu.Item>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+
+  const navigation = (
+    <aside className="sidebar">
+      <div className="brand">
+        <img className="brand-mark" src="/agentic-enterprise-logo.png" alt="Agentic Enterprise logo" width={44} height={44} />
+        <div>
+          <strong>Agentic Enterprise</strong>
+          <span>{workspaceName}</span>
+        </div>
+        {!mobile && (
+          <button
+            className="sidebar-collapse-button"
+            aria-label="Collapse navigation"
+            title="Collapse navigation"
+            onClick={() => {
+              navigationPanel.current?.collapse();
+              setPersistedCollapsed(true);
+            }}
+          >
+            <PanelLeftClose size={18} />
+          </button>
+        )}
+      </div>
+      {role === "owner" && (
+        <button
+          className="search-button"
+          aria-label={group ? `Search #${group.name}` : "Search unavailable: select a group to search"}
+          title={group ? `Search #${group.name}` : "Select a group to search messages and documents"}
+          disabled={!group}
+          onClick={() => setSearchOpen(true)}
+        >
+          <Search size={16} /> <span>{group ? `Search #${group.name}` : "Select a group to search"}</span> {group && <kbd>⌕</kbd>}
+        </button>
+      )}
+      {data && (
+        <GroupList
+          readOnly={role !== "owner"}
+          groups={data.groups}
+          preferences={data.group_preferences}
+          acknowledged={acknowledgedPreferences}
+          needsRefresh={preferencesNeedsRefresh}
+          onAcknowledgedChange={setAcknowledgedPreferences}
+          onNeedsRefreshChange={setPreferencesNeedsRefresh}
+          selected={["Organization", "Live Preview", "Action board", "User settings", "Profile", "Workspace settings"].includes(tab) ? null : groupId}
+          running={data.runs.filter(active).map((r) => r.group_id)}
+          onCreate={() => setGroupEditor({ id: "", name: "", description: "", member_ids: [], human_ids: [], project:null, scope_levels: null, chat_lead_id: null, archived_at: null, deleted_at: null })}
+          onCreateProject={() => setGroupEditor({ id:"", name:"", description:"", project:{workdir:{path:"",canonical_path:"",git_root:null,ssh_host:null},members:[]},scope_levels:null,chat_lead_id:null,archived_at:null,deleted_at:null })}
+          onSave={async (preferences) => {
+            await put("/preferences/groups", preferences);
+          }}
+          onRefresh={refresh}
+          onSelect={(id) => {
+            go({ groupId: id, view: "Chat", agentId: null, runId: null });
+            setReply(null);
+            setAttachments([]);
+          }}
+        />
+      )}
+      <div className="sidebar-bottom">
+        {role === "owner" && (
+          <nav className="sidebar-shortcuts" aria-label="Workspace tools">
+            <button
+              className={`organization-button ${tab === "Action board" || tab === "Actions" ? "selected" : ""}`}
+              onClick={() => go({ view: "Action board", agentId: null, runId: null })}
+            >
+              <ListChecks size={18} />
+              <span>Action board</span>
+              <ChevronRight size={15} />
+            </button>
+            <button
+              className={`organization-button ${tab === "Organization" || tab === "Live Preview" ? "selected" : ""}`}
+              onClick={() => {
+                go({ view: "Organization", agentId: null, runId: null });
+              }}
+            >
+              <Network size={18} />
+              <span>Organization</span>
+              <ChevronRight size={15} />
+            </button>
+          </nav>
+        )}
+        <div className="owner-row">
+          {renderAccountMenu(false)}
+        </div>
+      </div>
+    </aside>
+  );
+
+  const railNavigation = (
+    <aside className="sidebar rail" aria-label="Workspace navigation">
+      <div className="rail-top">
+        <ActionTooltip content="Expand navigation" side="right">
+          <button
+            className="rail-toggle-button"
+            aria-label="Expand navigation"
+            title="Expand navigation"
+            onClick={expandSidebar}
+          >
+            <PanelLeftOpen size={20} />
+          </button>
+        </ActionTooltip>
+        {role === "owner" && (
+          <ActionTooltip
+            content={group ? `Search #${group.name}` : "Select a group to search messages and documents"}
+            side="right"
+          >
+            <button
+              className={`rail-action-button ${!group ? "disabled" : ""}`}
+              aria-label={group ? `Search #${group.name}` : "Search unavailable: select a group to search"}
+              title={group ? `Search #${group.name}` : "Select a group to search messages and documents"}
+              disabled={!group}
               onClick={() => setSearchOpen(true)}
             >
-              <Search size={16} /> Search your workspace <kbd>⌕</kbd>
-            </button>}
-            {data && (
-              <GroupList
-                readOnly={role !== "owner"}
-                groups={data.groups}
-                preferences={data.group_preferences}
-                selected={["Organization", "Live Preview", "Action board", "User settings", "Profile", "Workspace settings"].includes(tab) ? null : groupId}
-                running={data.runs.filter(active).map((r) => r.group_id)}
-                onCreate={() => setGroupEditor({ id: "", name: "", description: "", member_ids: [], human_ids: [], project:null, scope_levels: null, chat_lead_id: null, archived_at: null, deleted_at: null })}
-                onCreateProject={() => setGroupEditor({ id:"", name:"", description:"", project:{workdir:{path:"",canonical_path:"",git_root:null,ssh_host:null},members:[]},scope_levels:null,chat_lead_id:null,archived_at:null,deleted_at:null })}
-                onSave={async (preferences) => {
-                  await put("/preferences/groups", preferences);
-                  await refresh();
-                }}
-                onSelect={(id) => {
-                  go({ groupId: id, view: "Chat", agentId: null, runId: null });
-                  setReply(null);
-                  setAttachments([]);
-                }}
-              />
-            )}
-            <div className="sidebar-bottom">
-              {role === "owner" && <nav className="sidebar-shortcuts" aria-label="Workspace tools">
-                <button className={`organization-button ${tab === "Action board" ? "selected" : ""}`} onClick={() => go({view:"Action board",agentId:null,runId:null})}><ListChecks size={18}/><span>Action board</span><ChevronRight size={15}/></button>
-                <button
-                  className={`organization-button ${tab === "Organization" || tab === "Live Preview" ? "selected" : ""}`}
-                  onClick={() => {
-                    go({ view: "Organization", agentId: null, runId: null });
-                  }}
-                >
-                  <Network size={18} />
-                  <span>Organization</span>
-                  <ChevronRight size={15} />
-                </button>
-              </nav>}
-              <div className="owner-row">
-                <Avatar owner />
-                <button className="owner-settings" aria-label="User settings" title={`User settings · ${user}`} onClick={() => go({ view: "Profile", agentId: null, runId: null })}>
-                  <strong>{user}</strong>
-                </button>
-                {role === "owner" && <button
-                  aria-label="Archived groups"
-                  title="Archived groups"
-                  onClick={() => setArchiveOpen(true)}
-                >
-                  <Archive size={17} />
-                </button>}
-                <button
-                  aria-label="Sign out"
-                  onClick={() =>
-                    void perform(async () => {
-                      await post("/logout");
-                      location.reload();
-                    })
-                  }
-                >
-                  <LogOut size={16} />
-                </button>
-              </div>
-            </div>
-          </aside>
+              <Search size={18} />
+            </button>
+          </ActionTooltip>
+        )}
+      </div>
+      {role === "owner" && (
+        <nav className="rail-shortcuts" aria-label="Workspace tools">
+          <ActionTooltip content="Action board" side="right">
+            <button
+              className={`rail-action-button ${tab === "Action board" || tab === "Actions" ? "selected" : ""}`}
+              aria-label="Action board"
+              title="Action board"
+              onClick={() => go({ view: "Action board", agentId: null, runId: null })}
+            >
+              <ListChecks size={18} />
+            </button>
+          </ActionTooltip>
+          <ActionTooltip content="Organization" side="right">
+            <button
+              className={`rail-action-button ${tab === "Organization" || tab === "Live Preview" ? "selected" : ""}`}
+              aria-label="Organization"
+              title="Organization"
+              onClick={() => go({ view: "Organization", agentId: null, runId: null })}
+            >
+              <Network size={18} />
+            </button>
+          </ActionTooltip>
+        </nav>
+      )}
+      <div className="rail-bottom">
+        {renderAccountMenu(true)}
+      </div>
+    </aside>
   );
 
   return (
@@ -627,13 +915,29 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
           if (meta.isUserInteraction) {
             // Keyboard layout commits precede ResizeObserver; measure after React paints.
             requestAnimationFrame(() => {
+              const sidebarEl = panelGroup.current?.querySelector(".sidebar");
+              if (sidebarEl && !mobile) {
+                const currentWidth = Math.round(sidebarEl.getBoundingClientRect().width);
+                if (currentWidth <= 60 && !sidebarCollapsed) {
+                  setPersistedCollapsed(true);
+                } else if (currentWidth >= 180 && sidebarCollapsed) {
+                  setPersistedCollapsed(false);
+                }
+              }
               const widths: Record<string, number> = {};
               for (const name of ["sidebar", "inspector"]) {
                 const panel = panelGroup.current?.querySelector(`.${name}`);
-                if (panel && !mobile && panel.getBoundingClientRect().width >= (name === "sidebar" ? 180 : 300))
-                  widths[name] = Math.round(
-                    panel.getBoundingClientRect().width,
-                  );
+                if (panel && !mobile && panel.getBoundingClientRect().width >= (name === "sidebar" ? 180 : 300)) {
+                  const width = Math.round(panel.getBoundingClientRect().width);
+                  widths[name] = width;
+                  if (name === "sidebar" && width >= 180 && width <= 420) {
+                    try {
+                      localStorage.setItem(`ae_sidebar_expanded_width:v1:${user}:${workspaceId}`, String(width));
+                    } catch {
+                      // ignore
+                    }
+                  }
+                }
               }
               if (Object.keys(widths).length)
                 void perform(async () => {
@@ -645,32 +949,38 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
       >
         {!mobile && <Panel
           id="sidebar"
-          panelRef={navigationPanel}
+          panelRef={onSidebarPanelRef}
           collapsible
-          collapsedSize={0}
-          onResize={(size) => setNavigationOpen(size.inPixels > 0)}
-          defaultSize={data?.panel_sizes.sidebar ?? 258}
+          collapsedSize={56}
+          defaultSize={getSavedExpandedWidth()}
           minSize={180}
           maxSize={420}
         >
-          {navigationOpen && navigation}
+          {sidebarCollapsed ? railNavigation : navigation}
         </Panel>}
         {!mobile && <Separator
+          elementRef={separatorRef}
           className="panel-separator navigation-separator"
           aria-label="Resize main navigation"
-          title="Click to hide or show navigation. Drag to resize."
+          title="Click to toggle navigation rail. Drag to resize."
           onPointerDownCapture={(event) => { edgePointer.current = event.clientX; }}
+          onMouseDownCapture={(event) => { edgePointer.current = event.clientX; }}
           onClick={(event) => {
-            if (Math.abs(event.clientX - edgePointer.current) < 4) {
-              if (navigationPanel.current?.isCollapsed()) navigationPanel.current.expand();
-              else navigationPanel.current?.collapse();
+            const start = edgePointer.current;
+            edgePointer.current = null;
+            if (start === null || Math.abs(event.clientX - start) < 8) {
+              if (sidebarCollapsed) {
+                expandSidebar();
+              } else {
+                collapseSidebar();
+              }
             }
           }}
         />}
         <Panel id="content" minSize={mobile && (agent || selectedRun || preview) ? 0 : 220}>
           <main className={`main-panel${preview ? " has-file-preview" : ""}`} inert={mobile && !!(agent || selectedRun || preview)}>
-            {(mobile || !navigationOpen) && <div className="navigation-toolbar">
-              <button aria-label="Show navigation" onClick={() => mobile ? setMobileNavigationOpen(true) : navigationPanel.current?.expand()}><PanelLeftOpen size={20} /><span>Workspace</span></button>
+            {mobile && <div className="navigation-toolbar">
+              <button aria-label="Show navigation" onClick={() => setMobileNavigationOpen(true)}><PanelLeftOpen size={20} /><span>Workspace</span></button>
             </div>}
             {tab === "NotFound" && (
               <div className="empty-state">
@@ -1207,7 +1517,114 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
                 <Button variant={tab === "User settings" ? "secondary" : "ghost"} aria-current={tab === "User settings" ? "page" : undefined} onClick={()=>go({view:"User settings",agentId:null,runId:null})}><Server size={16}/>Runtime</Button>
                 <Button variant={tab === "Workspace settings" ? "secondary" : "ghost"} aria-current={tab === "Workspace settings" ? "page" : undefined} onClick={()=>go({view:"Workspace settings",agentId:null,runId:null})}><Building2 size={16}/>Workspace</Button>
               </nav></header>
-            {tab === "Profile" && <section className="user-settings"><div className="settings-page"><header className="settings-page-heading"><p className="settings-kicker">ACCOUNT</p><h1>Profile</h1><p>Your signed-in account and workspace access.</p></header><section className="settings-card"><div className="settings-section-title"><UserRound size={20}/><h2>{user}</h2></div><dl className="profile-details"><dt>Account</dt><dd>{user === "owner" ? "Platform administrator" : "Matrix account"}</dd><dt>Workspace</dt><dd>{workspaceName}</dd><dt>Role</dt><dd>{role === "owner" ? "Owner" : "Member"}</dd></dl></section></div></section>}
+            {tab === "Profile" && (
+              <section className="user-settings">
+                <div className="settings-page">
+                  <header className="settings-page-heading">
+                    <p className="settings-kicker">ACCOUNT</p>
+                    <h1>Profile</h1>
+                    <p>Your signed-in account and workspace access.</p>
+                  </header>
+                  <section className="settings-card">
+                    <div className="settings-section-title">
+                      <UserRound size={20} />
+                      <h2>{displayName || user}</h2>
+                    </div>
+                    <form
+                      className="form-stack profile-form"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void accountProfileFeedback.run(
+                          "save-profile",
+                          async () => {
+                            const hasControl = Array.from(displayNameDraft).some(c => {
+                              const code = c.charCodeAt(0);
+                              return code < 32 || (code >= 127 && code <= 159);
+                            });
+                            if (hasControl) {
+                              return { kind: "error", message: "Display name cannot contain control characters." };
+                            }
+                            const trimmed = displayNameDraft.trim();
+                            if (Array.from(trimmed).length > 64) {
+                              return { kind: "error", message: "Display name cannot exceed 64 characters." };
+                            }
+                            const payload = { display_name: trimmed === "" ? null : trimmed };
+                            const res = await put<{ user: string; display_name: string | null }>("/me/profile", payload);
+                            if (!activeApp.current) return;
+                            onDisplayNameChange?.(res.display_name);
+                            setDisplayNameDraft(res.display_name ?? "");
+                            return { kind: "success", message: "Profile saved." };
+                          },
+                          { errorMessage: "Could not save profile. Your draft has been kept." }
+                        );
+                      }}
+                    >
+                      <div className="form-field">
+                        <Label htmlFor="account-display-name">Display name</Label>
+                        <Input
+                          id="account-display-name"
+                          name="display_name"
+                          placeholder={user}
+                          value={displayNameDraft}
+                          onChange={(e) => setDisplayNameDraft(e.target.value)}
+                          disabled={accountProfileFeedback.pending !== null}
+                        />
+                        <p className="hint">Plain text up to 64 characters. Leave blank to use your account username.</p>
+                      </div>
+                      <div className="form-actions">
+                        <Button
+                          type="submit"
+                          disabled={accountProfileFeedback.pending !== null || displayNameDraft === (displayName ?? "")}
+                        >
+                          <PendingIcon pending={accountProfileFeedback.pending !== null} />
+                          Save profile
+                        </Button>
+                      </div>
+                      <ActionStatus feedback={accountProfileFeedback}>
+                        {accountProfileFeedback.result?.kind === "error" && (
+                          <Button
+                            variant="outline"
+                            type="button"
+                            disabled={accountProfileFeedback.pending !== null}
+                            onClick={() =>
+                              void accountProfileFeedback.run(
+                                "check-profile",
+                                async () => {
+                                  const me = await api<{ user: string; display_name?: string | null }>("/me");
+                                  if (!activeApp.current) return;
+                                  onDisplayNameChange?.(me.display_name ?? null);
+                                  const savedName = me.display_name ?? "";
+                                  const isMatching = savedName === displayNameDraft.trim();
+                                  return {
+                                    kind: "success",
+                                    message: isMatching
+                                      ? `Saved display name matches your draft (${savedName || "account default"}).`
+                                      : `Saved display name is: "${savedName || "account default"}". Your unsaved draft "${displayNameDraft}" is retained.`,
+                                  };
+                                },
+                                { errorMessage: "Could not check saved profile." }
+                              )
+                            }
+                          >
+                            Check saved profile
+                          </Button>
+                        )}
+                      </ActionStatus>
+                    </form>
+                    <dl className="profile-details">
+                      <dt>Account</dt>
+                      <dd>{user === "owner" ? "Platform administrator" : "Matrix account"}</dd>
+                      <dt>Username</dt>
+                      <dd>{user}</dd>
+                      <dt>Workspace</dt>
+                      <dd>{workspaceName}</dd>
+                      <dt>Role</dt>
+                      <dd>{role === "owner" ? "Owner" : "Member"}</dd>
+                    </dl>
+                  </section>
+                </div>
+              </section>
+            )}
             {tab === "Workspace settings" && <section className="user-settings"><div className="settings-page"><header className="settings-page-heading"><p className="settings-kicker">SETTINGS</p><h1>Workspace</h1><p>Manage your workspace, people, and their access.</p></header>{workspaceSettings}</div></section>}
             {tab === "User settings" && <UserSettings role={role} user={user} controllerAccess={controllerAccess} workstations={data?.workstations ?? []} onRefresh={refresh} enrollmentToken={enrollmentToken} onEnrollmentTokenChange={setEnrollmentToken}/>}
             </section>}
@@ -1368,10 +1785,19 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
       </Dialog>
       {newAgent && <NewAgentDialog agents={organizationAgents} groups={data?.groups ?? []} projectId={newAgentProject}
         controllerAccess={controllerAccess} workstations={data?.workstations ?? []} onClose={() => setNewAgent(false)}
-        onCreated={async agent => {
-          await refresh(); setNewAgent(false);
-          if (agent.project_id) { setProjectTeamOpen(true); go({ groupId: agent.project_id, view: "Structure", agentId: agent.id, section: "Profile", runId: null }); }
-          else setSelectedAgent(agent.id);
+        getNavigationLifetime={() => navLifetimeRef.current}
+        onCreated={async (agent, submitLifetime) => {
+          await refresh();
+          setNewAgent(false);
+          if (submitLifetime !== undefined && navLifetimeRef.current !== submitLifetime) {
+            return;
+          }
+          if (agent.project_id) {
+            setProjectTeamOpen(true);
+            go({ groupId: agent.project_id, view: "Structure", agentId: agent.id, section: "Profile", runId: null });
+          } else {
+            setSelectedAgent(agent.id);
+          }
         }} />}
       {groupEditor && <GroupDialog controllerAccess={controllerAccess} key={`${groupEditor.id}:${groupEditor.archived_at}:${groupEditor.deleted_at}`}
         group={data?.groups.find((g) => g.id === groupEditor.id) ?? groupEditor}
@@ -1421,14 +1847,12 @@ export default function App({role = "owner", controllerAccess = true, user = "ow
               Semantic document & image search
             </label>
             {semantic && (
-              <select
+              <ValuePicker
                 aria-label="Search file type"
                 value={searchMedia}
-                onChange={(e) => setSearchMedia(e.target.value)}
-              >
-                <option value="documents">Documents</option>
-                <option value="images">Images</option>
-              </select>
+                onValueChange={setSearchMedia}
+                options={[{ value: "documents", label: "Documents" }, { value: "images", label: "Images" }]}
+              />
             )}
             <Button type="submit">
               <Search size={15} /> Search
@@ -1668,6 +2092,17 @@ function AgentInspector({
   const [runtimes, setRuntimes] = useState<RegisteredRuntime[]>([]);
   const remote = Boolean(sshHost);
   const [probe, setProbe] = useState("");
+  const [refreshTarget, setRefreshTarget] = useState<"profile" | "script" | null>(null);
+  const [validatingWorkdir, setValidatingWorkdir] = useState(false);
+  const currentWorkdirKey = `${path}::${runtimeId}::${remote ? sshHost.trim() : ""}::${edited.harness}`;
+  const [workdirDiagnosis, setWorkdirDiagnosis] = useState<{
+    key: string;
+    kind: "success" | "error";
+    origin?: "validate" | "attach";
+    gitStatus?: string;
+    message?: string;
+  } | null>(null);
+  const activeWorkdirDiagnosis = workdirDiagnosis?.key === currentWorkdirKey ? workdirDiagnosis : null;
   const [filePath, setFilePath] = useState("");
   const [fileView, setFileView] = useState<FileView | null>(null);
   const [scriptScope, setScriptScope] = useState(false);
@@ -1724,7 +2159,7 @@ function AgentInspector({
     setBaseline(next); setEdited(next); setLegacyPending(Boolean(value.agents_md.trim()));
     setPath(next.workdir?.path ?? ""); setSshHost(next.workdir?.ssh_host ?? "");
     setRuntimeId(projectWorkdir?.runtime_id ?? next.runtime_id ?? next.workdir?.runtime_id ?? "");
-    setProbe(""); setNeedsReview(false); setReviewed(null); setRetrySave(false);
+    setProbe(""); setNeedsReview(false); setReviewed(null); setRetrySave(false); setRefreshTarget(null);
   }, [projectWorkdir?.runtime_id]);
   useEffect(() => {
     if (agent.revision <= accepted.current.revision || feedback.pending || needsReview) return;
@@ -1749,7 +2184,11 @@ function AgentInspector({
       }
       adoptProfile(result);
       try { await onSaved(); }
-      catch { return { kind: "warning", message: `${agent.name}: configuration saved, but the view could not refresh. Retry refresh without saving again.` }; }
+      catch {
+        setRefreshTarget("profile");
+        return { kind: "warning", message: `${agent.name}: configuration saved, but the view could not refresh. Retry refresh without saving again.` };
+      }
+      setRefreshTarget(null);
       return { kind: "success", message: action === "restore" ? `${agent.name}: configuration restored as a new revision. Applies to the next run.` : `${agent.name}: changes saved. Instructions apply to the next run.` };
   }
   async function save(next = edited, action = "save") {
@@ -1869,23 +2308,15 @@ function AgentInspector({
               onChange={(e) => setEdited({ ...edited, role: e.target.value })}
             />
             <Label htmlFor="profile-manager">Reports to</Label>
-            <select
+            <ValuePicker searchable
               id="profile-manager"
-              disabled={!!agent.project_id}
+              disabled={profileLocked || !!agent.project_id}
               value={edited.reports_to ?? ""}
-              onChange={(event) =>
-                setEdited({ ...edited, reports_to: event.target.value || null })
+              onValueChange={(value) =>
+                setEdited({ ...edited, reports_to: value || null })
               }
-            >
-              <option value="">Organization owner</option>
-              {agents
-                .filter((a) => canManage(a, agent, agents))
-                .map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-            </select>
+              options={[{ value: "", label: "Organization owner" }, ...agents.filter(a => canManage(a, agent, agents)).map(a => ({ value: a.id, label: a.name }))]}
+            />
             <details className="organization-knowledge">
               <summary>Organization knowledge</summary>
               <p className="hint">
@@ -1917,59 +2348,37 @@ function AgentInspector({
             }} />
             <p className="hint">Each harness keeps its own resumable sessions. Switching back resumes that harness’s conversation.</p>
             <Label htmlFor="profile-model">Model</Label>
-            <select
+            <ValuePicker searchable
               id="profile-model"
               value={edited.model}
-              disabled={!models}
-              onChange={(e) =>
-                setEdited({ ...edited, model: e.target.value, reasoning: "" })
+              disabled={profileLocked || !models}
+              onValueChange={(value) =>
+                setEdited({ ...edited, model: value, reasoning: "" })
               }
-            >
-              <option value="">
-                {models
+              options={[
+                { value: "", label: models
                   ? `Use ${harnessNames[edited.harness]} setting (${models.model})`
-                  : modelError ? "Model catalog unavailable" : "Loading models…"}
-              </option>
-              {edited.model &&
-                !models?.models.some((m) => m.slug === edited.model) && (
-                  <option value={edited.model} disabled>
-                    {edited.model} (unavailable)
-                  </option>
-                )}
-              {models?.models.map((m) => (
-                <option key={m.slug} value={m.slug}>
-                  {m.display_name}{edited.harness === "opencode" ? ` · ${m.slug.split("/")[0]}` : ""}
-                </option>
-              ))}
-            </select>
+                  : modelError ? "Model catalog unavailable" : "Loading models…" },
+                ...(edited.model && !models?.models.some(m => m.slug === edited.model) ? [{ value: edited.model, label: `${edited.model} (unavailable)`, disabled: true }] : []),
+                ...(models?.models.map(m => ({ value: m.slug, label: `${m.display_name}${edited.harness === "opencode" ? ` · ${m.slug.split("/")[0]}` : ""}` })) ?? []),
+              ]}
+            />
             {Boolean(selectedModel?.supported_reasoning_levels.length) && <><Label htmlFor="profile-reasoning">{edited.harness === "opencode" ? "Model variant" : "Reasoning effort"}</Label>
-            <select
+            <ValuePicker
               id="profile-reasoning"
               value={edited.reasoning}
-              disabled={!selectedModel}
-              onChange={(e) =>
-                setEdited({ ...edited, reasoning: e.target.value })
+              disabled={profileLocked || !selectedModel}
+              onValueChange={(value) =>
+                setEdited({ ...edited, reasoning: value })
               }
-            >
-              <option value="">
-                {inheritedReasoning
+              options={[
+                { value: "", label: inheritedReasoning
                   ? `Use default (${inheritedReasoning})`
-                  : "Use model default"}
-              </option>
-              {edited.reasoning &&
-                !selectedModel?.supported_reasoning_levels.some(
-                  (r) => r.effort === edited.reasoning,
-                ) && (
-                  <option value={edited.reasoning} disabled>
-                    {edited.reasoning} (unavailable)
-                  </option>
-                )}
-              {selectedModel?.supported_reasoning_levels.map((r) => (
-                <option key={r.effort} value={r.effort} title={r.description}>
-                  {r.effort.charAt(0).toUpperCase() + r.effort.slice(1)}
-                </option>
-              ))}
-            </select>
+                  : "Use model default" },
+                ...(edited.reasoning && !selectedModel?.supported_reasoning_levels.some(r => r.effort === edited.reasoning) ? [{ value: edited.reasoning, label: `${edited.reasoning} (unavailable)`, disabled: true }] : []),
+                ...(selectedModel?.supported_reasoning_levels.map(r => ({ value: r.effort, label: r.effort.charAt(0).toUpperCase() + r.effort.slice(1), title: r.description })) ?? []),
+              ]}
+            />
             </>}
             <div className="model-source">
               <span>{edited.harness === "opencode" ? "From your OpenCode CLI · refresh after adding providers or models" : `From your ${harnessNames[edited.harness]} settings`}</span>
@@ -2046,7 +2455,7 @@ function AgentInspector({
               this folder’s .env file when they start. Edit the file in your
               codebase; changes apply to the next execution.
             </p>
-            <p className="hint">Runtime: {runtimes.find(runtime => runtime.id === runtimeId)?.name ?? (runtimeId ? "Selected in Profile" : "Controller / SSH")}. <button type="button" onClick={() => onSectionChange("Profile")}>Change in Profile</button></p>
+            <p className="hint">Runtime: {runtimes.find(runtime => runtime.id === runtimeId)?.name ?? (runtimeId ? "Selected in Profile" : "Controller / SSH")}. {runtimeId ? "Uses runtime root or registered paths." : "In Docker execution, paths are Linux container paths (such as /projects/<repository> for mounted host projects)."} <button type="button" onClick={() => onSectionChange("Profile")}>Change in Profile</button></p>
             {controllerAccess && !runtimeId && <WorkstationSelect id="workstation-host" value={sshHost} workstations={workstations} onChange={host => { setSshHost(host); setPath(""); setProbe(""); }}/> }
             <Label htmlFor="workdir-path">Absolute directory path</Label>
             <Button variant="outline" disabled={!runtimeId && (!controllerAccess || (remote && !sshHost.trim()))} onClick={() => setFolderPicker(true)}>
@@ -2056,43 +2465,72 @@ function AgentInspector({
             <Input
               id="workdir-path"
               value={path}
-              onChange={(e) => setPath(e.target.value)}
+              aria-describedby={activeWorkdirDiagnosis?.kind === "error" ? "workdir-diagnosis" : undefined}
+              onChange={(e) => {
+                setPath(e.target.value);
+                setWorkdirDiagnosis(null);
+              }}
               placeholder={remote ? "/home/you/project" : "F:\\Engineering\\my-project"}
             />
             <Button
               variant="outline"
+              disabled={validatingWorkdir}
               onClick={() =>
-                void perform(async () => {
-                  const result = await post<{
-                    workspace: Workspace;
-                    git_status: string;
-                  }>("/workspaces/probe", { path, harness: edited.harness, runtime_id: runtimeId || null, ssh_host: remote ? sshHost.trim() : null });
-                  setEdited({ ...edited, runtime_id: result.workspace.runtime_id, workdir: result.workspace });
-                  setProbe(result.git_status);
-                })
+                void (async () => {
+                  setValidatingWorkdir(true);
+                  try {
+                    const result = await post<{
+                      workspace: Workspace;
+                      git_status: string;
+                    }>("/workspaces/probe", {
+                      path,
+                      harness: edited.harness,
+                      runtime_id: runtimeId || null,
+                      ssh_host: remote ? sshHost.trim() : null,
+                    });
+                    setEdited({ ...edited, runtime_id: result.workspace.runtime_id, workdir: result.workspace });
+                    setWorkdirDiagnosis({ key: currentWorkdirKey, kind: "success", origin: "validate", gitStatus: result.git_status });
+                  } catch (error) {
+                    setWorkdirDiagnosis({
+                      key: currentWorkdirKey,
+                      kind: "error",
+                      origin: "validate",
+                      message: error instanceof Error ? error.message : "Workdir validation failed.",
+                    });
+                  } finally {
+                    setValidatingWorkdir(false);
+                  }
+                })()
               }
             >
               <FolderOpen size={15} /> Validate workdir
             </Button>
-            {probe && <pre className="probe-result">{probe}</pre>}
+            {activeWorkdirDiagnosis?.kind === "success" && activeWorkdirDiagnosis.gitStatus && (
+              <pre className="probe-result">{activeWorkdirDiagnosis.gitStatus}</pre>
+            )}
+            {activeWorkdirDiagnosis?.kind === "error" && activeWorkdirDiagnosis.message && (
+              <p
+                id="workdir-diagnosis"
+                {...(activeWorkdirDiagnosis.origin === "validate" ? { role: "alert" } : {})}
+                className="workdir-diagnosis error"
+              >
+                {activeWorkdirDiagnosis.message}
+              </p>
+            )}
             <Label htmlFor="workdir-access">Access mode</Label>
-            <select
+            <ValuePicker
               id="workdir-access"
               value={edited.permission}
-              onChange={(e) =>
-                setEdited({ ...edited, permission: e.target.value })
+              disabled={profileLocked}
+              onValueChange={(value) =>
+                setEdited({ ...edited, permission: value })
               }
-            >
-              <option value="read-only">
-                Read only — inspect the codebase
-              </option>
-              <option value="workspace-write">
-                Workspace write — make requested changes
-              </option>
-              <option value="danger-full-access">
-                YOLO — full access, no approvals
-              </option>
-            </select>
+              options={[
+                { value: "read-only", label: "Read only - inspect the codebase" },
+                { value: "workspace-write", label: "Workspace write - make requested changes" },
+                { value: "danger-full-access", label: "YOLO - full access, no approvals" },
+              ]}
+            />
             {edited.harness === "opencode" && edited.permission !== "danger-full-access" && <p className="hint">OpenCode tool permissions: shell commands are disabled in restricted modes. Workspace write allows file edits inside the workdir. These controls are not an operating-system sandbox. Some free providers reject restricted runs; the selected permissions stay in effect when a run fails.</p>}
             {edited.permission === "danger-full-access" && (
               <p className="hint">
@@ -2102,13 +2540,30 @@ function AgentInspector({
             <Button
               onClick={() =>
                 void feedback.run("attach", async () => {
-                  const result = await post<{ workspace: Workspace }>(
-                    "/workspaces/probe",
-                    { path, harness: edited.harness, runtime_id: runtimeId || null, ssh_host: remote ? sshHost.trim() : null },
-                  );
+                  let result: { workspace: Workspace };
+                  try {
+                    result = await post<{ workspace: Workspace }>(
+                      "/workspaces/probe",
+                      { path, harness: edited.harness, runtime_id: runtimeId || null, ssh_host: remote ? sshHost.trim() : null },
+                    );
+                    setWorkdirDiagnosis({ key: currentWorkdirKey, kind: "success", origin: "attach" });
+                  } catch (error) {
+                    const probeDetail = error instanceof Error ? error.message : "Workdir probe failed.";
+                    const toastMessage = `Attach failed: could not access directory ${path || "path"}.`;
+                    setWorkdirDiagnosis({
+                      key: currentWorkdirKey,
+                      kind: "error",
+                      origin: "attach",
+                      message: `Folder access probe: ${probeDetail}. Verify the path exists and is accessible to the selected runtime.`,
+                    });
+                    return {
+                      kind: "error",
+                      message: toastMessage,
+                    };
+                  }
                   const changedSshHost = (result.workspace.ssh_host ?? null) !== (agent.workdir?.ssh_host ?? null);
                   return persistProfile({ ...edited, runtime_id: result.workspace.runtime_id, workdir: result.workspace, ...(changedSshHost ? {model:"", reasoning:""} : {}) }, "attach");
-                }, { errorMessage: "Workdir attachment could not be confirmed. Check the saved profile before trying again." })
+                })
               }
               disabled={needsReview || externalChange}
               aria-busy={feedback.isPending("attach")}
@@ -2245,7 +2700,11 @@ function AgentInspector({
                         content: scriptContent,
                       });
                       try { await loadFile("", true); }
-                      catch { return { kind: "warning", message: `${agent.name}: script saved, but the file list could not refresh.` }; }
+                      catch {
+                        setRefreshTarget("script");
+                        return { kind: "warning", message: `${agent.name}: script saved, but the file list could not refresh.` };
+                      }
+                      setRefreshTarget(null);
                       return { kind: "success", message: `${agent.name}: script saved. It has not been executed.` };
                     }, { errorMessage: `${agent.name}: script save not confirmed. Filename and content are kept; check the file before trying again.` })
                   }
@@ -2353,7 +2812,7 @@ function AgentInspector({
           </Button>
         )}
         {["Profile", "Instructions", "Workdir", "History", "Code"].includes(section) && <><ActionStatus feedback={feedback}>
-          {feedback.result?.kind === "warning" && !needsReview && <Button variant="outline" disabled={profileLocked} onClick={() => void feedback.run("refresh", async () => { if (section === "Code") await loadFile("", true); else await onSaved(); return { kind: "success", message: `${agent.name}: view refreshed.` }; }, { errorMessage: "The view could not refresh. Previously acknowledged changes remain saved." })}>Retry refresh</Button>}
+          {Boolean(refreshTarget) && !needsReview && <Button variant="outline" disabled={profileLocked} onClick={() => void feedback.run("refresh", async () => { if (refreshTarget === "script") await loadFile("", true); else await onSaved(); setRefreshTarget(null); return { kind: "success", message: `${agent.name}: view refreshed.` }; }, { errorMessage: "The view could not refresh. Previously acknowledged changes remain saved." })}>Retry refresh</Button>}
         </ActionStatus>{dirty && ["Profile", "Instructions"].includes(section) && <p className="hint" data-draft-status="unsaved">Unsaved changes</p>}</>}
         {section === "Profile" && (
           <Button
@@ -2374,6 +2833,7 @@ function AgentInspector({
           onSelect={(selected) => {
             setPath(selected);
             setProbe("");
+            setWorkdirDiagnosis(null);
             setFolderPicker(false);
           }}
           onClose={() => setFolderPicker(false)}

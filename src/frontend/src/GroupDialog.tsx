@@ -96,7 +96,7 @@ export function GroupDialog({ controllerAccess, group, agents, workstations, onC
           <PendingIcon pending={feedback.isPending(confirm)} size={16}/>{feedback.isPending(confirm) ? confirm === "delete" ? "Deleting group…" : "Archiving group…" : confirm === "delete" ? "Delete group" : "Archive group"}
         </Button>
       </div> : <>
-        <form className="form-stack" onChangeCapture={() => { feedback.clear(); setDetail(""); }} onSubmit={(e) => { e.preventDefault(); if (!closed && !busy && !acknowledged) void perform("save", () => post<Group>("/groups", !group.id && draft.project ? { ...draft, project: { ...draft.project, members: [] }, chat_lead_id: null, scope_levels: null } : { ...draft, member_ids: draft.project ? undefined : [...selected], scope_levels:null, chat_lead_id:null })); }}>
+        <form className="form-stack" onChangeCapture={event => { if (event.currentTarget.contains(event.target as Node)) { feedback.clear(); setDetail(""); } }} onSubmit={(e) => { e.preventDefault(); if (!closed && !busy && !acknowledged) void perform("save", () => post<Group>("/groups", !group.id && draft.project ? { ...draft, project: { ...draft.project, members: [] }, chat_lead_id: null, scope_levels: null } : { ...draft, member_ids: draft.project ? undefined : [...selected], scope_levels:null, chat_lead_id:null })); }}>
           <Label htmlFor="group-name">Name</Label>
           <Input id="group-name" value={draft.name} disabled={locked} required maxLength={80}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
@@ -104,16 +104,16 @@ export function GroupDialog({ controllerAccess, group, agents, workstations, onC
           <Input id="group-description" value={draft.description} disabled={locked}
             onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
           {draft.project && <>
-            <RuntimeSelect disabled={locked} allowController={controllerAccess} required={!controllerAccess} value={draft.project.workdir.runtime_id ?? ""} onChange={id=>setDraft({...draft,project:{...draft.project!,workdir:{...draft.project!.workdir,runtime_id:id||undefined,ssh_host:null,path:"",canonical_path:""}}})}/>
+            <RuntimeSelect disabled={locked} allowController={controllerAccess} required={!controllerAccess} value={draft.project.workdir.runtime_id ?? ""} onChange={id=>{ feedback.clear(); setDetail(""); setDraft({...draft,project:{...draft.project!,workdir:{...draft.project!.workdir,runtime_id:id||undefined,ssh_host:null,path:"",canonical_path:""}}}); }}/>
             {controllerAccess && !draft.project.workdir.runtime_id && <WorkstationSelect id="project-host" value={draft.project.workdir.ssh_host ?? ""} workstations={workstations} disabled={locked}
-              onChange={host => setDraft({ ...draft, project: { ...draft.project!, workdir: { ...draft.project!.workdir, ssh_host: host || null, path: "", canonical_path: "", git_root: null } } })}/> }
+              onChange={host => { feedback.clear(); setDetail(""); setDraft({ ...draft, project: { ...draft.project!, workdir: { ...draft.project!.workdir, ssh_host: host || null, path: "", canonical_path: "", git_root: null } } }); }}/> }
             <Label htmlFor="project-workdir">Project workdir</Label>
             <div className="project-workdir-row"><Input id="project-workdir" required value={draft.project.workdir.path} disabled={locked} onChange={e=>setDraft({...draft,project:{...draft.project!,workdir:{...draft.project!.workdir,path:e.target.value}}})}/><Button type="button" variant="outline" disabled={locked||(!draft.project.workdir.runtime_id&&!controllerAccess)} onClick={()=>setFolderOpen(true)}><FolderOpen size={15}/>Browse</Button></div>
             <p className="hint">Every project run uses this workdir and workstation, overriding each agent's default. Sessions remain separate from other chats.</p>
             <p className="hint">{group.id ? "Manage agents and reporting lines in the project's Structure tab." : "Your project starts with an empty team. Next, configure agents in the Structure tab."}</p>
           </>}
           <GroupInvites agents={draft.project ? [] : available} people={people} memberIds={[...selected]} humanIds={draft.human_ids}
-            disabled={locked} onChange={(member_ids, human_ids) => setDraft({...draft, member_ids, human_ids, scope_levels:null, chat_lead_id:null})}/>
+            disabled={locked} onChange={(member_ids, human_ids) => { feedback.clear(); setDetail(""); setDraft({...draft, member_ids, human_ids, scope_levels:null, chat_lead_id:null}); }}/>
           {!closed && <Button type="submit" disabled={busy || !!acknowledged || draft.scope_levels?.length === 0} aria-busy={feedback.isPending("save")}><PendingIcon pending={feedback.isPending("save")} size={16}/>{feedback.isPending("save") ? draft.project ? "Saving project…" : "Saving group…" : draft.project ? group.id ? "Save project" : "Create project" : "Save group"}</Button>}
         </form>
         {!!group.id && <div className="group-lifecycle-actions">

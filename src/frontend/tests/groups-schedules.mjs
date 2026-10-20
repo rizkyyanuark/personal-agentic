@@ -1,3 +1,5 @@
+import { selectValue } from "./value-picker.mjs";
+import { fillScheduleDateTime } from "./schedule-calendar.mjs";
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -199,7 +201,7 @@ export async function verifyGroupsSchedules({
       .toISOString()
       .slice(0, 19);
   }, future(8000));
-  await dialog.locator('input[type="datetime-local"]').fill(local);
+  await fillScheduleDateTime(page, local);
   await dialog.getByRole("button", { name: "Save task", exact: true }).click();
   const task = await until(
     async () =>
@@ -298,7 +300,7 @@ export async function verifyGroupsSchedules({
   await dialog
     .getByLabel("Custom message", { exact: true })
     .fill("Updated custom message");
-  await dialog.getByLabel("Repeat", { exact: true }).selectOption("custom");
+  await selectValue(dialog.getByLabel("Repeat", { exact: true }), "custom");
   await dialog
     .getByLabel("Minutes between messages", { exact: true })
     .fill("30");

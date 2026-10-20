@@ -1,3 +1,4 @@
+import { expectValue, readOptions, readValue, selectValue } from "./value-picker.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -42,10 +43,9 @@ async function openDialog() {
   await expect(dialog()).toBeVisible();
 }
 async function choose(harness, settings) {
-  await page.locator("#agent-harness").selectOption(harness);
+  await selectValue(page.locator("#agent-harness"), harness);
   await expect(page.locator("#agent-model")).toBeEnabled();
-  await expect(page.locator("#agent-model option")).toHaveCount(settings.models.length);
-  assert.deepEqual(await page.locator("#agent-model option").evaluateAll(options => options.map(option => [option.value, option.textContent])), settings.models.map(model => [model.slug, model.display_name]));
+  await expect.poll(async () => (await readOptions(page.locator("#agent-model"))).map(option => [option.value, option.label])).toEqual(settings.models.map(model => [model.slug, model.display_name]));
   await expect(dialog().getByRole("alert")).toHaveCount(0);
 }
 try {
@@ -60,7 +60,7 @@ try {
   const missing = await context.request.get(`/api/harness/settings?harness=${missingHarness}`);
   assert(missing.status() >= 400, "Use a candidate where the selected failure harness is unavailable");
   await openDialog();
-  await page.locator("#agent-harness").selectOption(missingHarness);
+  await selectValue(page.locator("#agent-harness"), missingHarness);
   await expect(dialog().getByRole("alert")).toContainText(/catalog|models_cache|Codex|OpenCode|executable|sign in/i);
   await expect(dialog().getByRole("button", { name: "Create agent", exact: true })).toBeDisabled();
   await expect(page.locator(".banner.error")).toHaveCount(0);
@@ -70,7 +70,7 @@ try {
   const harness = process.env.AE_TEST_LOCAL_HARNESS || "antigravity";
   const local = await call(`/harness/settings?harness=${harness}${primaryHost ? `&ssh_host=${encodeURIComponent(primaryHost)}` : ""}`);
   assert(local.models.length > 0);
-  if (primaryHost) await page.locator("#new-agent-workstation").selectOption(primaryHost);
+  if (primaryHost) await selectValue(page.locator("#new-agent-workstation"), primaryHost);
   await choose(harness, local);
   assert(catalogRequests.some(url => url.searchParams.get("harness") === harness && (url.searchParams.get("ssh_host") || "") === primaryHost && !url.searchParams.has("runtime_id")));
   await page.getByRole("button", { name: "Refresh models", exact: true }).click();
@@ -94,15 +94,15 @@ try {
       observeDelivered();
     } else await route.continue();
   });
-  await page.locator("#new-agent-workstation").selectOption("");
-  await page.locator("#agent-harness").selectOption(missingHarness);
+  await selectValue(page.locator("#new-agent-workstation"), "");
+  await selectValue(page.locator("#agent-harness"), missingHarness);
   await observed;
-  if (primaryHost) await page.locator("#new-agent-workstation").selectOption(primaryHost);
+  if (primaryHost) await selectValue(page.locator("#new-agent-workstation"), primaryHost);
   await choose(harness, local);
   releaseDelayed();
   await delivered;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  await expect.poll(() => page.locator("#agent-model").inputValue()).toBe(local.models.some(model => model.slug === local.model) ? local.model : local.models[0].slug);
+  await expect.poll(() => readValue(page.locator("#agent-model"))).toBe(local.models.some(model => model.slug === local.model) ? local.model : local.models[0].slug);
   await page.unroute("**/api/harness/settings?**");
   await expect(dialog().getByRole("alert")).toHaveCount(0);
   results.push({ scenario: "late failure from previous harness", status: "Passed", payloadMocks: 0, faultInjection: "delay the actual HTTP failure response" });
@@ -121,11 +121,12 @@ try {
   assert.equal(created.workdir.ssh_host, primaryHost || null);
   await page.goto(`/organization/agents/${created.id}/profile`, { waitUntil: "domcontentloaded" });
   await expect(page.locator("#profile-model")).toBeEnabled();
-  await expect(page.locator("#profile-model")).toHaveValue(created.model);
-  await page.locator("#profile-harness").selectOption(process.env.AE_TEST_PROFILE_MISSING_HARNESS || missingHarness);
+  await expectValue(page.locator("#profile-model"), created.model);
+  await selectValue(page.locator("#profile-harness"), process.env.AE_TEST_PROFILE_MISSING_HARNESS || missingHarness);
   await expect(page.locator("#profile-model")).toBeDisabled();
   await expect(page.locator(".inspector .error")).toContainText(/catalog|models_cache|Codex|OpenCode|executable|sign in/i);
-  await expect(page.locator("#profile-model option")).toHaveCount(1);
+  await expectValue(page.locator("#profile-model"), "", "Model catalog unavailable");
+  assert.equal((await state()).agents.find(agent => agent.id === created.id).model, created.model, "A failed unsaved catalog cannot replace the persisted model");
   await page.getByRole("button", { name: "Close agent settings", exact: true }).click();
   assert.deepEqual((await state()).agents.find(agent => agent.id === created.id), created, "Unsaved harness selection must preserve the saved profile");
   assert.deepEqual(await call("/sessions"), sessionsBefore, "Catalog discovery must not create native sessions");
@@ -134,7 +135,7 @@ try {
   const project = await call("/groups", { id: "", name: `Catalog project ${crypto.randomUUID().slice(0, 8)}`, description: "Disposable catalog acceptance", project: { workdir: created.workdir, members: [] } }, "POST");
   groups.push(project.id);
   await openDialog();
-  await page.locator("#agent-project").selectOption(project.id);
+  await selectValue(page.locator("#agent-project"), project.id);
   await choose(harness, local);
   await expect(page.locator("#agent-workdir")).toHaveValue(created.workdir.path);
   await expect(page.locator("#agent-workdir")).toHaveAttribute("readonly", "");
@@ -142,12 +143,12 @@ try {
   if (process.env.AE_TEST_RUNTIME_ID && process.env.AE_TEST_EXPECT_WORKER_CATALOG === "unavailable") {
     const workerFolder = await call("/workspaces/probe", { path: "/workdir/catalog-acceptance", runtime_id: process.env.AE_TEST_RUNTIME_ID, harness: "codex", ssh_host: null }, "POST");
     await call("/groups", { ...project, project: { ...project.project, workdir: workerFolder.workspace } }, "POST");
-    await expect(page.getByRole("combobox", { name: "Registered runtime", exact: true })).toHaveValue(process.env.AE_TEST_RUNTIME_ID);
+    await expectValue(page.getByRole("combobox", { name: "Registered runtime", exact: true }), process.env.AE_TEST_RUNTIME_ID);
     await expect(page.locator("#agent-model")).toBeDisabled();
     await expect(dialog().getByRole("button", { name: "Create agent", exact: true })).toBeDisabled();
     await expect(dialog().getByRole("alert")).toContainText("available harness");
     await call("/groups", project, "POST");
-    await expect(page.getByRole("combobox", { name: "Registered runtime", exact: true })).toHaveValue("");
+    await expectValue(page.getByRole("combobox", { name: "Registered runtime", exact: true }), "");
     await choose(harness, local);
     results.push({ scenario: "project runtime changed while creation dialog is open", status: "Passed", controllerCatalogInvalidated: true });
   }
@@ -159,7 +160,7 @@ try {
     const sshHarness = process.env.AE_TEST_SSH_HARNESS || harness;
     const ssh = await call(`/harness/settings?harness=${sshHarness}&ssh_host=${encodeURIComponent(sshHost)}`);
     await openDialog();
-    await page.locator("#new-agent-workstation").selectOption(sshHost);
+    await selectValue(page.locator("#new-agent-workstation"), sshHost);
     await choose(sshHarness, ssh);
     assert(catalogRequests.some(url => url.searchParams.get("ssh_host") === sshHost && url.searchParams.get("harness") === sshHarness));
     await page.screenshot({ path: path.join(proofDir, "ssh-catalog.png") });
@@ -173,7 +174,7 @@ try {
     assert(runtime?.online && !runtime.revoked);
     const workerHarness = process.env.AE_TEST_WORKER_HARNESS || harness;
     await openDialog();
-    await page.getByRole("combobox", { name: "Registered runtime", exact: true }).selectOption(runtimeId);
+    await selectValue(page.getByRole("combobox", { name: "Registered runtime", exact: true }), runtimeId);
     if (process.env.AE_TEST_EXPECT_WORKER_CATALOG === "unavailable") {
       assert(!Object.values(runtime.capabilities || {}).some(Boolean), "Use a real worker without any signed-in catalog");
       const worker = await context.request.get(`/api/harness/settings?harness=${workerHarness}&runtime_id=${encodeURIComponent(runtimeId)}`);
@@ -197,7 +198,7 @@ try {
   const offline = await context.request.get(`/api/harness/settings?harness=${harness}&runtime_id=${offlineRuntime.id}`);
   assert(offline.status() >= 400);
   await openDialog();
-  await page.getByRole("combobox", { name: "Registered runtime", exact: true }).selectOption(offlineRuntime.id);
+  await selectValue(page.getByRole("combobox", { name: "Registered runtime", exact: true }), offlineRuntime.id);
   await expect(dialog().getByRole("alert")).toContainText("Connect this runtime");
   await expect(page.locator("#agent-model")).toBeDisabled();
   await expect(dialog().getByRole("button", { name: "Create agent", exact: true })).toBeDisabled();
@@ -221,8 +222,10 @@ try {
     assert(saved?.model, "Supply an isolated saved-model fixture");
     await page.goto(`/organization/agents/${unavailableId}/profile`, { waitUntil: "domcontentloaded" });
     await expect(page.locator("#profile-model")).toBeEnabled();
-    await expect(page.locator("#profile-model")).toHaveValue(saved.model);
-    await expect(page.locator(`#profile-model option[value="${saved.model}"]`)).toContainText("(unavailable)");
+    await expectValue(page.locator("#profile-model"), saved.model);
+    const unavailable = (await readOptions(page.locator("#profile-model"))).find(option => option.value === saved.model);
+    assert(unavailable?.disabled && unavailable.selected, "The saved unavailable model remains selected and cannot be chosen anew");
+    assert.match(unavailable.label, /\(unavailable\)/);
     await page.getByRole("button", { name: "Refresh models", exact: true }).click();
     await expect(page.locator("#profile-model")).toBeEnabled();
     assert.deepEqual((await state()).agents.find(agent => agent.id === unavailableId), saved);

@@ -69,9 +69,18 @@ export function FolderPicker({
         <DialogHeader>
           <DialogTitle>Choose a workdir</DialogTitle>
           <DialogDescription>
-            Browse folders on {runtimeId ? "the selected runtime" : sshHost || "this machine"}, then select the codebase your agent
-            will use.
+            Browse folders on {runtimeId ? "the selected runtime" : sshHost ? `${sshHost} workstation` : "the controller"}. In Docker execution, paths are Linux container paths (such as /projects/&lt;repository&gt; for mounted host projects). Windows host paths are not directly accessible inside Linux containers.
           </DialogDescription>
+          {!loading && !error && view?.local_projects && (
+            <div className={`local-projects-status status-${view.local_projects.status}`}>
+              <div className="status-header">
+                <span className="status-badge">{view.local_projects.status}</span>
+                <span className="status-path">{view.local_projects.path ?? "Not configured"}</span>
+              </div>
+              <p className="status-diagnosis">{view.local_projects.diagnosis}</p>
+              <p className="status-setup-step">{view.local_projects.setup_step}</p>
+            </div>
+          )}
         </DialogHeader>
         <div className="folder-toolbar">
           <Button

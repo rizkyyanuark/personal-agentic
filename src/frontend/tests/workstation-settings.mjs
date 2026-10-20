@@ -1,3 +1,4 @@
+import { expectValue, selectValue } from "./value-picker.mjs";
 // Real browser, SQLite, native SSH and Codex acceptance. Never use the owner's org.
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -23,18 +24,18 @@ try {
   await page.goto("/");await page.getByRole("button",{name:"Add group or section",exact:true}).click();await page.getByRole("menuitem",{name:"Create project",exact:true}).click();
   const modal=page.getByRole("dialog");await expect(modal.getByRole("heading",{name:"Create a project"})).toBeVisible();
   assert.equal(await modal.getByRole("checkbox").count(),0);assert.equal(await modal.getByText("Project team and reporting structure",{exact:true}).count(),0);
-  await modal.getByLabel("Name",{exact:true}).fill(`Structure acceptance ${Date.now()}`);await modal.getByLabel("Project workdir",{exact:true}).fill(folder);await modal.getByRole("button",{name:"Create project",exact:true}).click();
+  await modal.getByLabel("Name",{exact:true}).fill(`Structure acceptance ${Date.now()}`);await modal.getByLabel("Project workdir",{exact:true}).fill(process.env.AE_TEST_PROJECT_WORKDIR || process.env.AE_TEST_WORKDIR || folder);await modal.getByRole("button",{name:"Create project",exact:true}).click();
   await expect(page).toHaveURL(/\/projects\/.*\/structure$/);await expect(page.getByText("No agents yet. Add your first team member to begin.")).toBeVisible();
   const project=(await state()).groups.filter(g=>g.project&&g.name.startsWith("Structure acceptance")).at(-1);assert(project);assert.deepEqual(project.project.members,[]);assert.equal(project.chat_lead_id,null);
   await page.screenshot({path:path.join(dir,"project-empty-structure.png")});
-  await page.getByLabel("Organization agent",{exact:true}).selectOption("ceo");await page.getByRole("button",{name:"Add to team",exact:true}).click();await page.getByRole("button",{name:"Save team",exact:true}).click();
+  await selectValue(page.getByLabel("Organization agent",{exact:true}), "ceo");await page.getByRole("button",{name:"Add to team",exact:true}).click();await page.getByRole("button",{name:"Save team",exact:true}).click();
   await until(async()=>(await state()).groups.find(g=>g.id===project.id).project.members.length===1);
   await page.getByRole("button",{name:"Create project agent",exact:true}).click();await page.getByLabel("Name",{exact:true}).fill("Project Specialist");await page.getByLabel("Position",{exact:true}).fill("Engineer");await page.getByRole("button",{name:"Create agent",exact:true}).click();
   await expect(page).toHaveURL(/\/projects\/.*\/structure\?agent=/);await page.getByRole("button",{name:"Close agent settings"}).click();await expect(page).toHaveURL(/\/projects\/.*\/structure$/);
-  await page.getByLabel("Project manager for Project Specialist").selectOption("ceo");await page.getByRole("button",{name:"Save team",exact:true}).click();
+  await selectValue(page.getByLabel("Project manager for Project Specialist", { exact: true }), "ceo");await page.getByRole("button",{name:"Save team",exact:true}).click();
   const specialist=await until(async()=>{const s=await state();return s.agents.find(a=>a.name==="Project Specialist"&&a.project_id===project.id&&a.reports_to==="ceo");});assert.equal(specialist.project_id,project.id);
-  await page.reload();await expect(page.getByLabel("Project manager for Project Specialist")).toHaveValue("ceo");
-  await page.getByLabel("Project manager for CEO").selectOption(specialist.id);await page.getByRole("button",{name:"Save team",exact:true}).click();await expect(page.getByRole("alert")).toContainText("cycle");await page.reload();
+  await page.reload();await expectValue(page.getByLabel("Project manager for Project Specialist", { exact: true }), "ceo");
+  await selectValue(page.getByLabel("Project manager for CEO", { exact: true }), specialist.id);await page.getByRole("button",{name:"Save team",exact:true}).click();await expect(page.getByRole("alert")).toContainText("cycle");await page.reload();
   await page.getByRole("button",{name:"Manage project",exact:true}).click();assert.equal(await page.getByRole("dialog").getByRole("checkbox").count(),0);await page.keyboard.press("Escape");
   await page.screenshot({path:path.join(dir,"project-team-desktop.png")});
   await page.locator(".org-chart-canvas").scrollIntoViewIfNeeded();await expect(page.locator(".react-flow__node")).toHaveCount(3);
@@ -50,7 +51,7 @@ try {
    await page.getByRole("button",{name:"Test connection",exact:true}).click();await expect(page.getByRole("status").filter({hasText:"Connected"})).toBeVisible({timeout:60000});
   }
   await page.screenshot({path:path.join(dir,"workstation-settings-desktop.png")});
-  await page.goto("/organization/agents/ceo/workdir");await page.getByLabel("Workstation",{exact:true}).selectOption("linux-example");assert.equal(await page.getByLabel("SSH host alias",{exact:true}).count(),0);
+  await page.goto("/organization/agents/ceo/workdir");await selectValue(page.getByLabel("Workstation",{exact:true}), "linux-example");assert.equal(await page.getByLabel("SSH host alias",{exact:true}).count(),0);
   await page.getByRole("button",{name:"Browse folders",exact:true}).click();await page.getByRole("button",{name:"Select folder",exact:true}).click();await page.getByRole("button",{name:/^(Attach|Change) workdir$/}).click();
   const ceo=await until(async()=>(await state()).agents.find(a=>a.id==="ceo"&&a.workdir?.ssh_host==="linux-example"));assert(ceo.workdir.path.startsWith("/"));
   const terminal=await call("/agents/ceo/terminal",{id:crypto.randomUUID(),command:"pwd"});const result=await until(async()=>{const r=await call(`/agents/ceo/terminal/${terminal.id}`);return r.status!=="running"&&r;});assert.equal(result.status,"completed",result.error);assert(result.output.includes(ceo.workdir.path));
@@ -83,7 +84,7 @@ try {
   try{
    const credential=await until(async()=>{try{return JSON.parse(await fs.readFile(fixture,"utf8"));}catch(e){if(e.code==="ENOENT")return null;throw e;}});
    await page.goto("/settings/workstations");await page.getByRole("button",{name:"Add workstation",exact:true}).click();
-   await page.getByLabel("Display name",{exact:true}).fill("Password acceptance");await page.getByLabel("Hostname",{exact:true}).fill("localhost");await page.getByLabel("Host IP (optional)",{exact:true}).fill("127.0.0.1");await page.getByLabel("SSH port",{exact:true}).fill(String(credential.port));await page.getByLabel("Username",{exact:true}).fill("acceptance");await page.getByLabel("Authentication",{exact:true}).selectOption("password");await page.getByLabel("Password",{exact:true}).fill(credential.password);await page.getByRole("button",{name:"Save workstation",exact:true}).click();
+   await page.getByLabel("Display name",{exact:true}).fill("Password acceptance");await page.getByLabel("Hostname",{exact:true}).fill("localhost");await page.getByLabel("Host IP (optional)",{exact:true}).fill("127.0.0.1");await page.getByLabel("SSH port",{exact:true}).fill(String(credential.port));await page.getByLabel("Username",{exact:true}).fill("acceptance");await selectValue(page.getByLabel("Authentication",{exact:true}), "password");await page.getByLabel("Password",{exact:true}).fill(credential.password);await page.getByRole("button",{name:"Save workstation",exact:true}).click();
    host=await until(async()=>(await state()).workstations.find(h=>h.name==="Password acceptance"));assert(host.secret_saved);
    const untrusted=await context.request.post(`/api/workstations/${host.id}/test`);assert.equal(untrusted.status(),400);assert.match(await untrusted.text(),/Host key verification failed|No .*host key.*known/);
    await page.getByRole("button",{name:"Review host keys",exact:true}).click();await expect(page.getByRole("button",{name:"Trust these host keys",exact:true})).toBeVisible({timeout:30000});

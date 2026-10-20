@@ -1,3 +1,4 @@
+import { expectValue, readOptions, readValue, selectValue } from "./value-picker.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -38,7 +39,7 @@ async function call(route, body, method = body === undefined ? "GET" : "POST") {
 }
 const state = () => call("/state");
 const saveHost = host => call("/workstations", { workstation: host, secret: null, clear_secret: false });
-const selectedGroup = locator => locator.locator("option:checked").evaluate(option => option.parentElement.label || "direct");
+const selectedGroup = async locator => (await readOptions(locator)).find(option => option.selected)?.group;
 async function openSettings() {
   await page.goto("/settings/workstations", { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "SSH workstations", exact: true }).click();
@@ -51,11 +52,12 @@ async function openAgent() {
   await expect(page.getByRole("dialog", { name: "Add your agent" })).toBeVisible();
 }
 async function expectGroups(selector, remoteId, unclassifiedId) {
-  assert.equal(await selector.locator(`option[value="${hostId}"]`).evaluate(option => option.parentElement.label), "Local");
-  assert.equal(await selector.locator(`option[value="${remoteId}"]`).evaluate(option => option.parentElement.label), "Remote");
-  assert.equal(await selector.locator(`option[value="${unclassifiedId}"]`).evaluate(option => option.parentElement.label), "Saved SSH");
-  await expect(selector.locator('option[value=""]')).toHaveText("Application environment");
-  await expect(selector.locator(`option[value="${hostId}"]`)).toContainText("SSH");
+  const options = await readOptions(selector);
+  assert.equal(options.find(option => option.value === hostId)?.group, "Local");
+  assert.equal(options.find(option => option.value === remoteId)?.group, "Remote");
+  assert.equal(options.find(option => option.value === unclassifiedId)?.group, "Saved SSH");
+  assert.equal(options.find(option => option.value === "")?.label, "Application environment");
+  assert.match(options.find(option => option.value === hostId)?.label ?? "", /SSH/);
 }
 try {
   assert.equal((await context.request.get("/api/state")).status(), 401);
@@ -71,14 +73,14 @@ try {
     assert.deepEqual(before.groups.find(group => group.id === saved.project.id), saved.project);
     assert.equal(before.workstations.find(item => item.id === saved.legacyHostId).location, "unspecified");
     await openSettings();
-    await expect(page.locator("#host-location")).toHaveValue("local_host");
+    await expectValue(page.locator("#host-location"), "local_host");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator("#host-location").scrollIntoViewIfNeeded();
     await expect(page.locator("#host-location")).toBeInViewport();
     await page.screenshot({ path: path.join(proofDir, "settings-mobile.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(`/organization/agents/${saved.agent.id}/workdir`, { waitUntil: "domcontentloaded" });
-    await expect(page.locator("#workstation-host")).toHaveValue(hostId);
+    await expectValue(page.locator("#workstation-host"), hostId);
     assert.equal(await selectedGroup(page.locator("#workstation-host")), "Local");
     const catalog = await call(`/harness/settings?harness=antigravity&ssh_host=${encodeURIComponent(hostId)}`);
     assert(catalog.models.length > 0);
@@ -94,19 +96,20 @@ try {
     results.push({ scenario: "legacy read, invalid enum and anonymous write", status: "Passed", anonymousStatus: 401, invalidStatus: 422 });
 
     await openSettings();
-    await expect(page.locator("#host-location")).toHaveValue("unspecified");
+    await expectValue(page.locator("#host-location"), "unspecified");
     await page.locator("#host-location").focus();
-    await page.keyboard.press("Home");
     await expect(page.locator("#host-location")).toBeFocused();
     await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Home");
+    await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
-    await expect(page.locator("#host-location")).toHaveValue("local_host");
+    await expectValue(page.locator("#host-location"), "local_host");
     await page.getByRole("button", { name: "Save workstation", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Workstation saved" })).toBeVisible();
     await page.reload();
     await page.getByRole("button", { name: "SSH workstations", exact: true }).click();
     await page.getByRole("navigation", { name: "Saved workstations" }).getByRole("button", { name: /Workspace/ }).click();
-    await expect(page.locator("#host-location")).toHaveValue("local_host");
+    await expectValue(page.locator("#host-location"), "local_host");
     const local = (await state()).workstations.find(item => item.id === hostId);
     assert.deepEqual({ ...local, location: "unspecified" }, host);
     await page.screenshot({ path: path.join(proofDir, "settings-desktop.png"), fullPage: true });
@@ -122,23 +125,24 @@ try {
     await openAgent();
     const selector = page.locator("#new-agent-workstation");
     await expectGroups(selector, remote.id, unclassified.id);
-    await expect(selector).toHaveValue("");
+    await expectValue(selector, "");
     await selector.focus();
-    await page.keyboard.press("Home");
+    await page.keyboard.press("ArrowDown");
+    await page.locator('[data-slot="combobox-input"]').fill(local.name);
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
-    await expect(selector).toHaveValue(hostId);
-    await page.locator("#agent-harness").selectOption("antigravity");
+    await expectValue(selector, hostId);
+    await selectValue(page.locator("#agent-harness"), "antigravity");
     await expect(page.locator("#agent-model")).toBeEnabled();
-    await expect(page.locator("#agent-model option")).toHaveCount(catalog.models.length);
+    assert.equal((await readOptions(page.locator("#agent-model"))).length, catalog.models.length);
     await page.locator("#agent-workdir").fill(workdir);
-    const model = await page.locator("#agent-model").inputValue();
+    const model = await readValue(page.locator("#agent-model"));
     await saveHost({ ...local, location: "remote" });
-    await expect(selector.locator(`option[value="${hostId}"]`)).toHaveCount(1);
+    await expect.poll(async () => (await readOptions(selector)).filter(option => option.value === hostId).length).toBe(1);
     await expect.poll(() => selectedGroup(selector)).toBe("Remote");
-    await expect(selector).toHaveValue(hostId);
+    await expectValue(selector, hostId);
     await expect(page.locator("#agent-workdir")).toHaveValue(workdir);
-    await expect(page.locator("#agent-model")).toHaveValue(model);
+    await expectValue(page.locator("#agent-model"), model);
     await saveHost(local);
     await expect.poll(() => selectedGroup(selector)).toBe("Local");
     await expect(page.locator("#agent-workdir")).toHaveValue(workdir);
@@ -158,7 +162,7 @@ try {
     await page.goto(`/organization/agents/${created.id}/workdir`, { waitUntil: "domcontentloaded" });
     const profileSelector = page.locator("#workstation-host");
     await expectGroups(profileSelector, remote.id, unclassified.id);
-    await expect(profileSelector).toHaveValue(hostId);
+    await expectValue(profileSelector, hostId);
     await expect(page.locator("#workdir-path")).toHaveValue(workdir);
     await page.getByRole("button", { name: "Validate workdir", exact: false }).click();
     await expect(page.locator(".probe-result")).toContainText(hostId);
@@ -170,7 +174,7 @@ try {
     await page.getByRole("menuitem", { name: "Create project", exact: true }).click();
     const projectDialog = page.getByRole("dialog", { name: "Create a project" });
     await expectGroups(page.locator("#project-host"), remote.id, unclassified.id);
-    await page.locator("#project-host").selectOption(hostId);
+    await selectValue(page.locator("#project-host"), hostId);
     await projectDialog.getByLabel("Name", { exact: true }).fill("Location acceptance project");
     await page.locator("#project-workdir").fill(workdir);
     await projectDialog.getByRole("button", { name: "Create project", exact: true }).click();
@@ -179,8 +183,8 @@ try {
     assert.equal(project.project.workdir.ssh_host, hostId);
     assert.equal(project.project.workdir.path, workdir);
     await openAgent();
-    await page.locator("#agent-project").selectOption(project.id);
-    await page.locator("#agent-harness").selectOption("antigravity");
+    await selectValue(page.locator("#agent-project"), project.id);
+    await selectValue(page.locator("#agent-harness"), "antigravity");
     await expect(page.locator("#agent-workdir")).toHaveValue(workdir);
     await expect(page.locator("#agent-workdir")).toHaveAttribute("readonly", "");
     await expect(page.locator("#new-agent-workstation")).toHaveCount(0);
@@ -190,9 +194,9 @@ try {
 
     const legacy = await call("/agents", { ...created, id: "", name: "Historical SSH alias", workdir: { ...created.workdir, ssh_host: alias } });
     await page.goto(`/organization/agents/${legacy.id}/workdir`, { waitUntil: "domcontentloaded" });
-    await expect(page.locator("#workstation-host")).toHaveValue(alias);
+    await expectValue(page.locator("#workstation-host"), alias);
     assert.equal(await selectedGroup(page.locator("#workstation-host")), "Saved SSH");
-    await expect(page.locator(`#workstation-host option[value="${alias}"]`)).toContainText("Existing SSH alias");
+    assert.match((await readOptions(page.locator("#workstation-host"))).find(option => option.value === alias)?.label ?? "", /Existing SSH alias/);
     const direct = await call("/workspaces/probe", { path: "/workdir", harness: "antigravity", ssh_host: null });
     assert.equal(direct.workspace.ssh_host, null);
     const missing = await context.request.post("/api/workspaces/probe", { data: { path: workdir, harness: "antigravity", ssh_host: "ws-location-unavailable" } });
@@ -202,8 +206,8 @@ try {
     results.push({ scenario: "legacy alias, direct execution and unavailable target retain their semantics", status: "Passed", missingTargetStatus: missing.status(), failedCatalogStatus: failed.status() });
 
     await openAgent();
-    await page.locator("#new-agent-workstation").selectOption(remote.id);
-    await page.locator("#agent-harness").selectOption("antigravity");
+    await selectValue(page.locator("#new-agent-workstation"), remote.id);
+    await selectValue(page.locator("#agent-harness"), "antigravity");
     await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
     await expect(page.getByRole("dialog").getByRole("button", { name: "Create agent", exact: true })).toBeDisabled();
     await page.keyboard.press("Escape");
