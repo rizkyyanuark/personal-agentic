@@ -43,6 +43,20 @@ export function HarnessSelect({id,value,onChange,runtimeId,runtimes,allowControl
 export function RuntimeSettings({enrollmentToken,onEnrollmentTokenChange}:{enrollmentToken:string;onEnrollmentTokenChange:(token:string)=>void}){
   const [runtimes,setRuntimes]=useState<RegisteredRuntime[]>([]);
   const [name,setName]=useState("");
+  const [controllerUrl,setControllerUrl]=useState(location.origin);
+  const [installerPlatform,setInstallerPlatform]=useState("windows-x64");
+  let controllerOrigin = "";
+  let loopbackController = false;
+  try {
+    const parsed = new URL(controllerUrl);
+    if (["http:","https:"].includes(parsed.protocol) && /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])$/.test(parsed.hostname) && !parsed.username && !parsed.password && parsed.pathname === "/" && !parsed.search && !parsed.hash) {
+      loopbackController = ["localhost","127.0.0.1","[::1]"].includes(parsed.hostname);
+      if (parsed.protocol === "https:" || loopbackController) controllerOrigin = parsed.origin;
+    }
+  } catch { /* The URL field displays validation below. */ }
+  const installerCommand = !controllerOrigin ? "" : installerPlatform === "windows-x64"
+    ? `pwsh -NoProfile -File ./setup-worker.ps1 -Controller '${controllerOrigin}'`
+    : `AE_CONTROLLER_URL='${controllerOrigin}' bash ./setup-worker.sh`;
   const token=enrollmentToken;
   const setToken=onEnrollmentTokenChange;
   const [error,setError]=useState("");
@@ -93,7 +107,22 @@ export function RuntimeSettings({enrollmentToken,onEnrollmentTokenChange}:{enrol
       <form className="settings-inline-form" onSubmit={e=>{e.preventDefault();void act("register",async()=>{const r=await post<{enrollment_token:string}>("/runtimes",{name:name.trim()});setToken(r.enrollment_token);setCopied(false);setName("");},`${name.trim()} registered. Its temporary key is available in Runtime to connect its worker.`);}}><label htmlFor="runtime-name">Runtime name<Input id="runtime-name" required maxLength={80} disabled={busy} placeholder="e.g. MacBook or build server" value={name} onChange={e=>{feedback.clear();setDetail("");setName(e.target.value);}}/></label><Button type="submit" disabled={busy||!name.trim()} aria-busy={feedback.isPending("register")}><PendingIcon pending={feedback.isPending("register")} size={16}/>{feedback.isPending("register")?"Registering runtime…":"Register runtime"}</Button></form>
     </section>
     {token&&<section className="settings-card runtime-enrollment" aria-label="Connect your worker"><div className="settings-section-title"><KeyRound size={20}/><h2>Connect your worker</h2></div><p className="settings-description">This key can be used once and expires in 15 minutes.</p><div className="runtime-token"><Input aria-label="Enrollment token" readOnly type="password" value={token}/><Button variant="outline" onClick={()=>{void feedback.run("copy",async()=>{try{await navigator.clipboard.writeText(token);setCopied(true);return {kind:"success",message:"Enrollment token copied to clipboard."};}catch{return {kind:"error",message:"Could not copy the enrollment token. Select the token field and copy it manually."};}});}}>{copied?<Check size={16}/>:<Copy size={16}/>} {copied?"Copied":"Copy token"}</Button></div>
-      <details className="runtime-instructions"><summary>Worker connection instructions</summary><p>On the worker machine, set <code>AE_ENROLLMENT_TOKEN</code> to this key, then run the installed worker:</p><pre>{`agentic-enterprise --worker --controller ${location.origin} --worker-state .ae-worker --worker-root /absolute/workdir`}</pre><p>Replace the workdir with your folder. For a different machine, use the platform’s reachable network address instead of localhost. Docker workers can mount a host folder at /workdir; persist /data to keep their registration.</p></details><Button variant="ghost" onClick={()=>{setToken("");setCopied(false);}}>Hide token</Button></section>}
+      <div className="runtime-instructions form-stack">
+        <label htmlFor="runtime-controller-url">Reachable controller URL</label>
+        <Input id="runtime-controller-url" value={controllerUrl} aria-invalid={!controllerOrigin} onChange={e=>setControllerUrl(e.target.value)}/>
+        {!controllerOrigin&&<p className="hint" role="alert">Enter an HTTPS origin with a valid hostname and no path, query, or credentials. HTTP is supported only for localhost.</p>}
+        {loopbackController&&<p className="hint">Localhost only works on this machine. For another device, enter the controller's reachable private HTTPS address first.</p>}
+        <label htmlFor="worker-install-platform">Worker device</label>
+        <ValuePicker id="worker-install-platform" value={installerPlatform} onValueChange={setInstallerPlatform} options={[{value:"windows-x64",label:"Windows x64"},{value:"linux-arm64",label:"Linux ARM64"}]}/>
+        <p>Download the installer here, transfer it to the worker device, and run it in that device's terminal. It asks for this token privately and your project folder, downloads a verified binary, and starts a persistent worker. No source build is needed for these platforms.</p>
+        <a href={`/api/worker-installers/${installerPlatform}`} download={installerPlatform==="windows-x64"?"setup-worker.ps1":"setup-worker.sh"}>Download {installerPlatform==="windows-x64"?"PowerShell":"Linux"} worker installer</a>
+        {installerCommand&&<><pre>{installerCommand}</pre><Button variant="outline" type="button" onClick={()=>void feedback.run("copy-instructions",async()=>{
+          try { await navigator.clipboard.writeText(installerCommand); return {kind:"success",message:"Worker setup command copied. Enter the token only at the hidden prompt."}; }
+          catch { return {kind:"error",message:"Could not copy the command. Select it and copy manually."}; }
+        })}>Copy setup command</Button></>}
+        <p>Enrolled means the identity is saved. Online means the worker is connected. Missing harness catalogs need separate CLI installation/login. After Online, select this runtime and a folder inside its root in the agent or project settings.</p>
+        <details><summary>Direct-run, source and Docker alternatives</summary><p>An already installed worker can run with <code>--worker --controller URL --worker-state STATE --worker-root FOLDER</code>; provide the token through its environment, never a copied command. Direct-run stops with the terminal. Linux x64 and macOS currently use explicit source installation. Docker source setup builds the worker, mounts the chosen host folder at <code>/workdir</code>, and must persist <code>/data</code> for registration. See the deployment guide for prerequisites and service startup limitations.</p></details>
+      </div><Button variant="ghost" onClick={()=>{setToken("");setCopied(false);}}>Hide token</Button></section>}
     {runtimes.some(r=>r.revoked)&&<details className="runtime-history"><summary>Revoked runtimes ({runtimes.filter(r=>r.revoked).length})</summary>{runtimes.filter(r=>r.revoked).map(r=><div className="settings-person" key={r.id}><strong>{r.name}</strong><span className="settings-badge">Revoked</span></div>)}</details>}
   </div>;
 }

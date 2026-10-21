@@ -16,7 +16,7 @@ After=network-online.target
 [Service]
 ExecStart="$binary" --worker --worker-state "$state" --worker-root "$workdir"
 Environment="PATH=$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
-Restart=on-failure
+Restart=always
 RestartSec=5
 [Install]
 WantedBy=default.target

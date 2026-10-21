@@ -30,6 +30,9 @@ mod security;
 mod skills;
 mod store;
 mod terminal;
+#[cfg(test)]
+mod worker_onboarding_tests;
+mod worker_packages;
 mod workspaces;
 mod workstations;
 

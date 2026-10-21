@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-command -v gh >/dev/null || { echo 'Install GitHub CLI and sign in with gh auth login for this private repository.' >&2; exit 1; }
+if { [ "${1:-}" = --worker ] || [ -n "${AE_CONTROLLER_URL:-}" ]; } && [ "${AE_INSTALL_MODE:-prebuilt}" != source ]; then
+    exec bash "$(dirname "$0")/scripts/setup-worker.sh"
+fi
+if [ "${1:-}" = --worker ] && [ "${AE_INSTALL_MODE:-prebuilt}" = source ] && [ -z "${AE_CONTROLLER_URL:-}" ]; then
+    echo 'Explicit source worker installation requires AE_CONTROLLER_URL. Omit AE_INSTALL_MODE=source for guided prebuilt setup.' >&2
+    exit 1
+fi
+command -v git >/dev/null || { echo 'Install Git and authenticate access to the source repository before source installation.' >&2; exit 1; }
 install_root="${AE_INSTALL_DIR:-$HOME/.local/share/agentic-enterprise}"
 ref="${AE_REF:-main}"
 case "$(uname -s)" in
@@ -30,9 +37,9 @@ if ! node -e 'if(Number(process.versions.node.split(".")[0])<22) process.exit(1)
     tar -xJf "$node_tmp/$node_file" -C "$HOME/.local" --strip-components=1
 fi
 rustup toolchain install 1.94.1 --profile minimal
-if [ ! -d "$install_root/.git" ]; then git -c credential.helper= -c 'credential.https://github.com.helper=!gh auth git-credential' clone https://github.com/Owner-ir/personal-agentic-enterprise.git "$install_root"; fi
+if [ ! -d "$install_root/.git" ]; then git clone "${AE_SOURCE_REPO:-https://gitlab.tugasakhir.space/rizkyyanuark/personal-agentic.git}" "$install_root"; fi
 git -C "$install_root" diff --quiet && git -C "$install_root" diff --cached --quiet || { echo 'Installation checkout has local changes; preserve them before updating.' >&2; exit 1; }
-git -C "$install_root" -c credential.helper= -c 'credential.https://github.com.helper=!gh auth git-credential' fetch origin "$ref"
+git -C "$install_root" fetch origin "$ref"
 git -C "$install_root" checkout --detach FETCH_HEAD
 cd "$install_root/src"
 export PROTOC="$(command -v protoc)"

@@ -1,5 +1,41 @@
 # Verification
 
+## Worker onboarding
+
+Use a disposable local controller, workspace, runtime state and project folder.
+Do not use production, Yunesa, cloud runners or agent tasks for acceptance, and do
+not copy provider credentials or invoke providers. Build/package on the development machine; test install without a
+compiler on the target. Configure a complete two-platform local package directory
+with `AE_WORKER_PACKAGE_DIR`. A package generated from a header fixture is only a
+contract test, never native executable or Online proof.
+
+Run package contract tests with `python -B infra/ci/tests/worker_packages_test.py`
+from the repository root and backend checks with
+`cargo test --workspace --locked worker_onboarding` from `src`. Use real native
+Windows x64 and a local Linux ARM64 VM/emulator for service acceptance. Record the
+emulator/platform and do not label missing service-manager coverage as passed.
+
+Required proof: UI Register, hidden token setup, real service startup, fresh worker
+heartbeat, UI Online, root browsing, denied outside-root access, no-harness catalog,
+token-free restart, controller interruption/recovery, revoked replacement with
+preserved state, expired/used token failure, unavailable package/architecture,
+tampered archive/file hashes and no secrets in logs or service/task configuration.
+Read-only self-status must leave `last_seen`, heartbeat and queued job state intact;
+only the genuine worker poll produces the new heartbeat. Record zero agent runs.
+Preserve prior agent/project bindings and existing local stack state.
+
+Keep screenshots and receipts in ignored `.state` paths. Publish or provision CI
+executors only after separate authorization; local recipe validation is not proof
+that the Windows release executor exists or that packages were published.
+
+For the Runtime UI origin/command regression, start a disposable controller on a
+loopback URL and set `AE_TEST_URL`, `AE_TEST_ORG` (its organization directory),
+and `AE_TEST_OUTPUT` (an ignored evidence directory). From `src`, run
+`node frontend/tests/worker-onboarding.mjs`. It uses installed Chrome and real
+login/Register/revoke APIs, verifies masked enrollment and safe token-free
+commands, and rejects shell metacharacters, remote HTTP and credential-bearing
+URLs. It creates no agent task and revokes only its own unused registration.
+
 Run the static and package checks from `src`:
 
 ```powershell
