@@ -10,11 +10,60 @@ stages:
   - image
   - smoke
   - deploy
+  - worker-package
 
 default:
   tags:
     - personal-agentic-ci
   interruptible: true
+
+.worker_release_rules:
+  rules:
+    - if: '$AE_WORKER_RELEASE == "1" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+
+worker_windows_package:
+  extends: .worker_release_rules
+  stage: worker-package
+  tags: [worker-windows-x64]
+  dependencies: []
+  script:
+    - '$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"'
+    - 'Set-Location src'
+    - '$env:PROTOC = (Get-Command protoc -ErrorAction Stop).Source'
+    - 'cargo build --locked --jobs 1 --bin agentic-enterprise'
+    - 'if ($LASTEXITCODE) { throw "Windows worker build failed" }'
+    - '& target/debug/agentic-enterprise.exe --version'
+    - 'if ($LASTEXITCODE) { throw "Windows executable failed" }'
+    - 'Set-Location ..'
+    - '$vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products "*" -property installationPath'
+    - '$runtime = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT\vcruntime140.dll" | Sort-Object FullName -Descending | Select-Object -First 1'
+    - 'if (-not $runtime) { throw "Microsoft x64 redistributable runtime is required for packaging" }'
+    - 'python infra/ci/worker_packages.py --binary src/target/debug/agentic-enterprise.exe --library $runtime.FullName --platform windows-x64 --release $env:CI_COMMIT_SHA --output worker-packages'
+    - 'if ($LASTEXITCODE) { throw "Worker packaging failed" }'
+  artifacts:
+    expire_in: 7 days
+    paths: [worker-packages/]
+
+worker_linux_package:
+  extends: .worker_release_rules
+  stage: worker-package
+  image: python:3.12-slim
+  dependencies: [backend]
+  script:
+    - python -c "import lzma,pathlib; p=pathlib.Path('src/ci-artifacts/agentic-enterprise.xz'); p.with_suffix('').write_bytes(lzma.decompress(p.read_bytes()))"
+    - python infra/ci/worker_packages.py --binary src/ci-artifacts/agentic-enterprise --platform linux-arm64 --release "$CI_COMMIT_SHA" --output worker-packages
+  artifacts:
+    expire_in: 7 days
+    paths: [worker-packages/]
+
+worker_publish:
+  extends: .worker_release_rules
+  stage: worker-package
+  image: python:3.12-slim
+  needs: [worker_linux_package, worker_windows_package]
+  resource_group: worker-release
+  script:
+    - python infra/ci/publish-worker-packages.py
 
 variables:
   PUPPETEER_SKIP_DOWNLOAD: "true"
@@ -73,9 +122,11 @@ production_config:
   script:
     - python -B infra/production/tests/release_test.py
     - python -B infra/ci/tests/deploy_test.py
+    - python -B infra/ci/tests/worker_packages_test.py
     - python -B infra/ops/tests/maintenance_test.py
     - python -B infra/ops/tests/measure_test.py
     - bash -n infra/production/bootstrap.sh infra/ci/build-backend.sh infra/ci/smoke-image.sh
+    - bash -n src/install.sh src/install-docker.sh src/scripts/setup-worker.sh src/scripts/install-worker.sh
     - sh -n infra/production/deploy-command.sh infra/ci/buildkit-runc.sh infra/ci/publish-image.sh
   
 .image_rules:

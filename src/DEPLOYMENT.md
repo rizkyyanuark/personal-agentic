@@ -22,34 +22,27 @@ They are source installers, so the first build requires several GB of disk and R
 Linux x64/ARM64, Apple Silicon and Windows x64 include ONNX Runtime for knowledge
 indexing. Intel macOS workers run natively; controller knowledge indexing needs a
 manually supplied ONNX 1.24.4 library or Docker because upstream has no Intel Mac binary.
-Use `AE_REF` to select a reviewed branch, commit or tag. The commands below install
-this development branch. Switch both the API `ref` and `AE_REF` to a release or `main`
-after the changes are merged. This repository is private: install the GitHub CLI and
-sign in with `gh auth login` using an account with repository access before running
-these commands. The installers use that login without changing global Git credentials.
+Source installation remains available from a reviewed checkout of this project.
+Authenticate Git access to the canonical GitLab repository first. Use `AE_REF` to
+select a reviewed commit/ref; source installation clones/builds into its own
+installation directory and refuses to discard changes there.
 
-Windows (PowerShell, Git, Node 22+, Rust 1.94+, Visual Studio C++ Build Tools):
+Windows (PowerShell 7, Git, Node 22+, Rust 1.94+, Visual Studio C++ Build Tools):
 
 ```powershell
-$env:AE_REF='codex/decentralized-workspaces'; gh api -H 'Accept: application/vnd.github.raw' 'repos/Owner-ir/personal-agentic-enterprise/contents/src/install.ps1?ref=codex/decentralized-workspaces' | Out-String | iex
+pwsh -NoProfile -File src/install.ps1 -Source
 ```
 
-Linux (Debian/Ubuntu; sudo for native build dependencies):
+Linux Debian/Ubuntu or macOS with Homebrew/Xcode command-line tools:
 
 ```sh
-gh api -H 'Accept: application/vnd.github.raw' 'repos/Owner-ir/personal-agentic-enterprise/contents/src/install.sh?ref=codex/decentralized-workspaces' | AE_REF=codex/decentralized-workspaces bash
+AE_INSTALL_MODE=source bash src/install.sh
 ```
 
-macOS (Homebrew and Xcode command line tools):
+Docker (Docker Compose, Git, OpenSSL; builds on this device):
 
 ```sh
-gh api -H 'Accept: application/vnd.github.raw' 'repos/Owner-ir/personal-agentic-enterprise/contents/src/install.sh?ref=codex/decentralized-workspaces' | AE_REF=codex/decentralized-workspaces bash
-```
-
-Docker (Docker Compose, Git, OpenSSL):
-
-```sh
-gh api -H 'Accept: application/vnd.github.raw' 'repos/Owner-ir/personal-agentic-enterprise/contents/src/install-docker.sh?ref=codex/decentralized-workspaces' | AE_REF=codex/decentralized-workspaces bash
+bash src/install-docker.sh
 ```
 
 The Docker installer provisions Synapse, a private bridge identity and the platform.
@@ -101,6 +94,170 @@ Rooms are not end-to-end encrypted: the trusted homeserver and agent bridge can 
 content. Do not enable room encryption in another client; encrypted events are not supported.
 
 ## Register a runtime
+
+### Guided prebuilt worker setup
+
+Windows x64 and Linux ARM64 can use the guided worker installer when the controller
+has a complete compatible worker release configured. This installs only the
+worker binary and its required runtime libraries, not a controller, frontend,
+Matrix server, source checkout, Rust, or a C++ toolchain. Harness installation and
+provider login are separate; a worker without them can be Online but cannot run
+an agent. Setup never sends a provider prompt or changes project assignments.
+Git must be installed before attaching/probing project workdirs; root browsing and
+worker connection do not prove repository tooling or provider authentication.
+
+1. Select the workspace in **User settings → Runtime**, then register a runtime.
+2. In **Connect your worker**, set the reachable controller origin and select the
+   device platform. A localhost URL works only on the controller machine.
+3. Download the installer through the signed-in UI and transfer it to the device.
+   Review the script before running it. The copied command contains no token.
+4. Run the script in the device terminal, enter the enrollment token at its hidden
+   prompt, and select the absolute project folder. Folder creation requires approval.
+5. The installer downloads/verifies the package, enrolls, starts the managed worker,
+   and waits for a new controller heartbeat. Refresh Runtime to see **Online**.
+
+PowerShell 7 on Windows x64:
+
+```powershell
+pwsh -NoProfile -File ./setup-worker.ps1 -Controller 'https://controller.example'
+```
+
+If Windows blocks a downloaded script, review it first and unblock only that file
+with `Unblock-File ./setup-worker.ps1`; do not weaken machine-wide execution policy.
+
+Linux ARM64, with Bash, curl, jq, unzip/zipinfo, coreutils, a systemd user session,
+glibc 2.36+ and OpenSSL 3 runtime libraries:
+
+```sh
+AE_CONTROLLER_URL='https://controller.example' bash ./setup-worker.sh
+```
+
+The Windows package bundles the x64 `vcruntime140.dll` redistributable used by
+the build; Universal CRT and normal Windows system DLLs are OS prerequisites
+(Windows 10/11 x64). It does not bundle a Visual Studio installation.
+
+No global source build occurs. For automation use `AE_CONTROLLER_URL`,
+`AE_ENROLLMENT_TOKEN`, `AE_WORKDIR`, and optional `AE_INSTALL_DIR`; supply the token
+through a secret environment mechanism rather than typing it into shell history.
+Windows automation also accepts `-Controller`, `-Workdir`, and `-InstallDir`.
+Keep registration state private. Remote HTTP is rejected; loopback HTTP is allowed
+for development. TLS validation is never disabled. DNS/VPN/firewall/host allowlists
+must already permit the controller. Normal setup adds no resource quotas or users.
+
+The Linux user service restarts independently of the installer; startup before
+login requires an administrator-approved `loginctl enable-linger USER`. Windows
+uses a per-user Scheduled Task triggered at logon; it starts immediately at setup.
+Existing registrations are reused on reruns. Revoked or incompatible registration
+replacement requires confirmation (`AE_REPLACE_REGISTRATION=1` or Windows
+`-ReplaceRegistration` for explicit automation). Previous state and project files
+are retained. Customized/unowned services are not silently replaced. Use a new
+install directory rather than taking over a manual system service.
+
+Enrolled, service started and Online are separate outcomes. A 60-second Online
+timeout preserves state and prints diagnostics; rerun setup to verify/reconnect,
+not Register runtime again. Get a fresh token if enrollment expires after 15 minutes.
+Verified archive cache is reused. No native process stopping is implied by UI Revoke.
+
+### Controller package inventory and release
+
+Package delivery is disabled until an operator configures one trusted inventory.
+Set `AE_WORKER_PACKAGE_URL` to a pinned HTTPS GitLab Generic Package directory:
+`https://gitlab.example/api/v4/projects/PROJECT_ID/packages/generic/worker/FULL_COMMIT/`.
+Use optional `AE_WORKER_PACKAGE_TOKEN_FILE` for a server-side read-only package
+credential. It is never returned to devices or replaced by their enrollment tokens.
+No redirects, client-selected repository URLs, or arbitrary paths are fetched.
+For local acceptance/offline inventories use `AE_WORKER_PACKAGE_DIR` pointing to
+an operator-owned directory with the same four files. Do not put secrets in it.
+
+The inventory contains `windows-x64.json`, `linux-arm64.json`,
+`worker-windows-x64.zip`, and `worker-linux-arm64.zip`, with matching immutable
+40-character source release IDs, protocol 1, SHA-256, compressed sizes and per-file
+checksums/sizes. Both manifests must be present before either target is offered.
+Archives are bounded to 128 MiB; total expanded package data is bounded to 768 MiB.
+Checksums are authenticated through trusted HTTPS/controller metadata, not code signing.
+
+Installer package requests use `Authorization: Bearer TOKEN` against
+`GET /api/runtime/packages/{windows-x64|linux-arm64}/{manifest|archive}`. A valid
+unconsumed enrollment token permits download without consuming registration, or
+an existing worker token permits repair. Expired/revoked tokens are rejected.
+`GET /api/runtime/status` requires the saved worker credential and returns only
+its own identity, workspace, OS/root, Online, last_seen and heartbeat sequence.
+It never changes heartbeat or claims queued jobs. Installers require a new
+heartbeat after starting their service. Old controllers without these routes are
+incompatible with guided setup; retain source/direct-run mode or upgrade first.
+
+Release CI is explicitly selected with `AE_WORKER_RELEASE=1` on protected main.
+Worker packaging waits for the existing production stages to complete. Linux uses
+`dependencies` to retrieve the backend artifact without bypassing stage order; a
+missing Windows executor or a packaging failure cannot hold up production deploy.
+It reuses the backend ARM64 artifact, builds Windows on a runner tagged
+`worker-windows-x64`, and publishes only the complete verified pair using the
+CI job token. The Windows runner must provide PowerShell 7, Python 3.11+, Rust,
+Visual Studio C++ build tools and protoc on PATH. No Windows runner is provisioned
+by these scripts. Do not advertise release availability before that executor and
+clean-target acceptance are established. Normal production image/deploy jobs keep
+their existing rules and dependencies.
+
+Local packaging from compiled outputs (build machine only):
+
+```sh
+python infra/ci/worker_packages.py --binary PATH_TO_BINARY --platform linux-arm64 --release FULL_COMMIT --output worker-packages
+# Use --platform windows-x64 for a real Windows x64 executable;
+# add --library PATH_TO_DLL only for runtime DLLs actually needed by worker mode.
+```
+
+Package publication/CI triggering is separate from local implementation/testing.
+Rollback selects the previous immutable inventory and compatible installed version;
+retain `installation.previous.json` and the prior service/task export. Review the
+saved registration before switching: rollback must not revoke/re-enroll, delete
+project/session data, or replay commands automatically.
+
+For an installer-owned Windows task, restore only a previous configuration using
+the same controller, root and registration state. A state change needs an explicit
+recovery decision rather than blindly restoring an older identity:
+
+```powershell
+$homeDir = Join-Path $env:LOCALAPPDATA 'AgenticWorker'
+$current = Get-Content -Raw "$homeDir/installation.json" | ConvertFrom-Json
+$previous = Get-Content -Raw "$homeDir/installation.previous.json" | ConvertFrom-Json
+if ($current.state -ne $previous.state -or $current.root -ne $previous.root -or $current.controller -ne $previous.controller) { throw 'Review incompatible registration/root before rollback' }
+Stop-ScheduledTask -TaskName $current.task
+$deadline = [DateTime]::UtcNow.AddSeconds(15)
+do {
+    try {
+        $lock = [IO.File]::Open((Join-Path $current.state 'worker.lock'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $lock.Dispose()
+        break
+    } catch [IO.IOException] {
+        if ([DateTime]::UtcNow -gt $deadline) { throw 'Previous worker has not stopped; leave configuration unchanged' }
+        Start-Sleep -Milliseconds 200
+    }
+} while ($true)
+Register-ScheduledTask -TaskName $previous.task -Xml (Get-Content -Raw "$homeDir/task.previous.xml") -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -Force
+Copy-Item "$homeDir/installation.previous.json" "$homeDir/installation.json" -Force
+Start-ScheduledTask -TaskName $previous.task
+```
+
+For Linux, apply the same controller/root/state compatibility check to
+`installation.previous.json`, restore `service.previous` to the named user unit,
+restore the matching metadata, then run `systemctl --user daemon-reload` and
+`systemctl --user restart SERVICE`. Recheck `/api/runtime/status` with the saved
+worker credential without printing it; require a new heartbeat and the expected
+identity/root. Keep both versions until that check succeeds.
+
+### Explicit source, direct-run and Docker alternatives
+
+The commands below describe the existing source/direct paths. The source checkout
+must be this project (default GitLab URL, overridable with `AE_SOURCE_REPO`), with
+normal Git authentication configured. Native `install.sh --worker` or setting
+`AE_CONTROLLER_URL` selects prebuilt mode; set `AE_INSTALL_MODE=source` explicitly
+to retain the source-build path. Windows `install.ps1 -Worker` selects prebuilt;
+`-Source` retains source build. Linux x64/macOS use source mode for now. Source
+prerequisites and builds are still substantial and do not imply prebuilt coverage.
+
+Docker remains an explicit build-on-device alternative through
+`install-docker.sh`/`compose.worker.yaml`; persist `/data` and the chosen workdir.
+No implicit switch from prebuilt setup to Docker/source build is performed.
 
 1. Sign in to the native Codex or OpenCode CLI on the worker machine. Refresh its model
    catalog using the native CLI. Provider credentials are never uploaded to the controller.

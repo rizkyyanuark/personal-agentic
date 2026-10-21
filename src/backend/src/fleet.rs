@@ -63,6 +63,47 @@ pub fn register(app: &App, name: &str) -> Result<Value> {
     app.store.write(|db|put(db,&format!("runtime:{id}"),&json!({"id":id,"name":name,"enrollment":hash(&enrollment),"expires":chrono::Utc::now().timestamp()+900,"revoked":false})))?;
     Ok(json!({"id":id,"enrollment_token":enrollment,"expires_in":900}))
 }
+pub fn worker_identity(
+    apps: &[(String, App)],
+    token: &str,
+    pending: bool,
+) -> Result<Option<Value>> {
+    if token.is_empty() {
+        return Ok(None);
+    }
+    let digest = hash(token);
+    for (tenant, app) in apps {
+        if !app.enabled.load(Ordering::Relaxed) {
+            continue;
+        }
+        let found = app.store.read(|db| {
+            let mut q = db.prepare("SELECT value FROM metadata WHERE key LIKE 'runtime:%'")?;
+            for row in q.query_map([], |r| r.get::<_, String>(0))? {
+                let r: Value = serde_json::from_str(&row?)?;
+                if r["revoked"] != false {
+                    continue;
+                }
+                let enrolled = r["token"] == digest;
+                let enrollment = pending && r["enrollment"] == digest
+                    && r["expires"].as_i64().unwrap_or(0) > chrono::Utc::now().timestamp();
+                if enrolled || enrollment {
+                    return Ok(Some(json!({
+                        "id": r["id"], "workspace": tenant, "name": r["name"],
+                        "root": r["root"], "os": r["os"], "enrolled": enrolled,
+                        "heartbeat": r["heartbeat"].as_u64().unwrap_or(0),
+                        "last_seen": r["last_seen"],
+                        "online": enrolled && r["last_seen"].as_i64().unwrap_or(0) > chrono::Utc::now().timestamp() - 30,
+                    })));
+                }
+            }
+            Ok(None)
+        })?;
+        if found.is_some() {
+            return Ok(found);
+        }
+    }
+    Ok(None)
+}
 pub fn list(app: &App) -> Result<Vec<Value>> {
     app.store.read(|db| {
         let mut q = db.prepare("SELECT value FROM metadata WHERE key LIKE 'runtime:%'")?;
@@ -546,6 +587,7 @@ pub fn worker_request(
                 }
                 runtime["last_seen"]=chrono::Utc::now().timestamp().into();
                 if op=="poll" {
+                    runtime["heartbeat"] = runtime["heartbeat"].as_u64().unwrap_or(0).saturating_add(1).into();
                     runtime["capabilities"]=input["capabilities"].clone();runtime["os"]=input["os"].clone();runtime["root"]=input["root"].clone();put(db,&key,&runtime)?;
                     let job:Option<(String,String)>=db.query_row("SELECT id,request FROM fleet_jobs WHERE runtime=? AND state='queued' ORDER BY rowid LIMIT 1",[&id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
                     let mut response=json!({"job":null});

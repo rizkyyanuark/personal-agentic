@@ -9,7 +9,7 @@ import { RuntimeSelect } from "./RuntimeSettings";
 import { WorkstationSelect } from "./WorkstationSelect";
 import type { Workstation } from "./bindings/Workstation";
 import { FolderPicker } from "./FolderPicker";
-import { api, post } from "./api";
+import { api, post, ApiFailure } from "./api";
 import type { Group } from "./bindings/Group";
 import type { Agent } from "./bindings/Agent";
 import { ActionStatus, PendingIcon, useActionFeedback } from "./ActionFeedback";
@@ -55,7 +55,13 @@ export function GroupDialog({ controllerAccess, group, agents, workstations, onC
     await feedback.run(operation, async () => {
       let saved: Group;
       try { saved = await action(); }
-      catch (failure) { setDetail(failure instanceof Error ? failure.message : String(failure)); throw failure; }
+      catch (failure) {
+        if (failure instanceof ApiFailure && failure.status >= 400 && failure.status < 500) {
+          return { kind: "error", message: `${draft.name}: ${failure.message}` };
+        }
+        setDetail(failure instanceof Error ? failure.message : String(failure));
+        return { kind: "warning", message: `${draft.name}: the change could not be confirmed. Your draft is retained. Review the saved ${draft.project ? "project" : "group"} before trying again.` };
+      }
       setAcknowledged(saved); setDraft(saved);
       try { await onSaved(saved); }
       catch { return { kind: "warning", message: `${resultMessage(saved, operation)} The view could not refresh. Retry refresh without repeating the change.` }; }
@@ -96,7 +102,16 @@ export function GroupDialog({ controllerAccess, group, agents, workstations, onC
           <PendingIcon pending={feedback.isPending(confirm)} size={16}/>{feedback.isPending(confirm) ? confirm === "delete" ? "Deleting group…" : "Archiving group…" : confirm === "delete" ? "Delete group" : "Archive group"}
         </Button>
       </div> : <>
-        <form className="form-stack" onChangeCapture={event => { if (event.currentTarget.contains(event.target as Node)) { feedback.clear(); setDetail(""); } }} onSubmit={(e) => { e.preventDefault(); if (!closed && !busy && !acknowledged) void perform("save", () => post<Group>("/groups", !group.id && draft.project ? { ...draft, project: { ...draft.project, members: [] }, chat_lead_id: null, scope_levels: null } : { ...draft, member_ids: draft.project ? undefined : [...selected], scope_levels:null, chat_lead_id:null })); }}>
+        <form className="form-stack" onChangeCapture={event => { if (event.currentTarget.contains(event.target as Node)) { feedback.clear(); setDetail(""); } }} onSubmit={(e) => {
+          e.preventDefault();
+          if (!closed && !busy && !acknowledged) void perform("save", () => post<Group>("/groups", {
+            ...draft,
+            member_ids: draft.project ? undefined : [...selected],
+            project: draft.project ? { ...draft.project, members: group.id ? draft.project.members : [] } : draft.project,
+            scope_levels: null,
+            chat_lead_id: null,
+          }));
+        }}>
           <Label htmlFor="group-name">Name</Label>
           <Input id="group-name" value={draft.name} disabled={locked} required maxLength={80}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
@@ -113,7 +128,7 @@ export function GroupDialog({ controllerAccess, group, agents, workstations, onC
             <p className="hint">{group.id ? "Manage agents and reporting lines in the project's Structure tab." : "Your project starts with an empty team. Next, configure agents in the Structure tab."}</p>
           </>}
           <GroupInvites agents={draft.project ? [] : available} people={people} memberIds={[...selected]} humanIds={draft.human_ids}
-            disabled={locked} onChange={(member_ids, human_ids) => { feedback.clear(); setDetail(""); setDraft({...draft, member_ids, human_ids, scope_levels:null, chat_lead_id:null}); }}/>
+            disabled={locked} onChange={(member_ids, human_ids) => { feedback.clear(); setDetail(""); setDraft({...draft, member_ids: draft.project ? undefined : member_ids, human_ids, scope_levels:null, chat_lead_id:null}); }}/>
           {!closed && <Button type="submit" disabled={busy || !!acknowledged || draft.scope_levels?.length === 0} aria-busy={feedback.isPending("save")}><PendingIcon pending={feedback.isPending("save")} size={16}/>{feedback.isPending("save") ? draft.project ? "Saving project…" : "Saving group…" : draft.project ? group.id ? "Save project" : "Create project" : "Save group"}</Button>}
         </form>
         {!!group.id && <div className="group-lifecycle-actions">

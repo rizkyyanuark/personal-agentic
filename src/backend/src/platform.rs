@@ -225,6 +225,40 @@ impl Platform {
             return Ok(axum::Json(json!({"matrix":self.homeserver.is_some()})).into_response());
         }
         if let Some(op) = path.strip_prefix("/api/runtime/") {
+            if method == Method::GET && (op == "status" || op.starts_with("packages/")) {
+                ensure!(
+                    req.uri().query().is_none(),
+                    "Worker status/package requests do not accept query parameters"
+                );
+                let token = credential(&req).unwrap_or("");
+                let apps: Vec<_> = self
+                    .apps
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("Workspace registry unavailable"))?
+                    .iter()
+                    .map(|(id, app)| (id.clone(), app.clone()))
+                    .collect();
+                let identity = crate::fleet::worker_identity(&apps, token, op != "status")?
+                    .ok_or_else(|| {
+                        ApiError(
+                            StatusCode::UNAUTHORIZED,
+                            "Runtime token is invalid, expired or revoked".into(),
+                        )
+                    })?;
+                if op == "status" {
+                    return Ok(axum::Json(identity).into_response());
+                }
+                let (target, kind) = op
+                    .strip_prefix("packages/")
+                    .and_then(|s| s.split_once('/'))
+                    .context("Invalid worker package request")?;
+                ensure!(
+                    matches!(kind, "manifest" | "archive"),
+                    "Unknown worker package operation"
+                );
+                return crate::worker_packages::response(target, kind == "archive").await
+                    .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "Verified worker package unavailable; check controller release configuration".into()));
+            }
             if method != Method::POST {
                 return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
             }
@@ -631,6 +665,13 @@ impl Platform {
         let (mut app, role) = self
             .tenant(&tenant, &user)
             .map_err(|_| ApiError(StatusCode::FORBIDDEN, "Workspace access denied".into()))?;
+        if let Some(target) = path.strip_prefix("/api/worker-installers/") {
+            ensure!(
+                method == Method::GET && role == "owner",
+                "Workspace owner required"
+            );
+            return Ok(crate::worker_packages::bootstrap(target)?);
+        }
         if path == "/api/people" && method == Method::GET {
             return Ok(axum::Json(self.members(&tenant)?).into_response());
         }
