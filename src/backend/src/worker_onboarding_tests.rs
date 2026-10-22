@@ -13,7 +13,7 @@ use std::{
 };
 use tower::ServiceExt;
 
-fn app(root: PathBuf) -> Result<App> {
+pub(crate) fn app(root: PathBuf) -> Result<App> {
     Ok(App {
         workspace_id: "default".into(),
         identity: None,

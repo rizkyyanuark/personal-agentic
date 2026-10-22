@@ -384,6 +384,20 @@ pub fn validate(app: &App, w: &Workspace) -> Result<Workspace> {
     validated.runtime_id = Some(id.clone());
     Ok(validated)
 }
+pub fn usage(app: &App, id: &str) -> Result<crate::codex_usage::UsageReport> {
+    let runtimes = list(app)?;
+    let runtime = runtimes
+        .iter()
+        .find(|r| r["id"] == id && r["online"] == true)
+        .context("Runtime offline")?;
+    ensure!(
+        runtime["capabilities"]["read_operations"]["usage"] == 1,
+        "Worker usage capability unavailable"
+    );
+    serde_json::from_value(inspect(app, id, "", "usage", "usage")?)
+        .context("Unsupported usage response")
+}
+
 pub fn directories(app: &App, id: &str, path: &str) -> Result<crate::workspaces::DirectoryView> {
     serde_json::from_value(inspect(app, id, path, "directories", "directories")?)
         .map_err(Into::into)
@@ -593,7 +607,7 @@ pub fn worker_request(
                     let mut response=json!({"job":null});
                     if let Some((job,request))=job {
                         let request:Value=serde_json::from_str(&request)?;
-                        let active=if matches!(request["op"].as_str(),Some("probe" | "directories")){true}else{let run:crate::model::Run=store::get(db,"runs",request["run_id"].as_str().context("Run required")?)?;["starting","running"].contains(&run.status.as_str())};
+                        let active=if matches!(request["op"].as_str(),Some("probe" | "directories" | "usage")){true}else{let run:crate::model::Run=store::get(db,"runs",request["run_id"].as_str().context("Run required")?)?;["starting","running"].contains(&run.status.as_str())};
                         if !active{cancel_job(db,&job)?;}
                         else {db.execute("UPDATE fleet_jobs SET state='claimed' WHERE id=? AND state='queued'",[&job])?;response["job"]=json!({"id":job,"request":request});}
                     }
@@ -603,7 +617,7 @@ pub fn worker_request(
                     let job=input["job"].as_str().context("Job required")?;
                     let(state,request):(String,String)=db.query_row("SELECT state,request FROM fleet_jobs WHERE id=? AND runtime=?",[job,&id],|r|Ok((r.get(0)?,r.get(1)?))).context("Job is not owned by this runtime")?;
                     let request:Value=serde_json::from_str(&request)?;
-                    let active=if matches!(request["op"].as_str(),Some("probe" | "directories")){true}else{let run:crate::model::Run=store::get(db,"runs",request["run_id"].as_str().context("Run required")?)?;["starting","running"].contains(&run.status.as_str())};
+                    let active=if matches!(request["op"].as_str(),Some("probe" | "directories" | "usage")){true}else{let run:crate::model::Run=store::get(db,"runs",request["run_id"].as_str().context("Run required")?)?;["starting","running"].contains(&run.status.as_str())};
                     let frames=input["frames"].as_array().context("Frames required")?;ensure!(frames.len()<=256,"Too many frames");
                     let offset=input["offset"].as_i64().context("Offset required")?;ensure!(offset>=0,"Invalid offset");
                     let expected:i64=db.query_row("SELECT COALESCE(MAX(seq)+1,0) FROM fleet_frames WHERE job=?",[job],|r|r.get(0))?;ensure!(offset<=expected,"Outbox gap; resend unacknowledged frames");
@@ -776,7 +790,8 @@ pub fn worker(
             return Ok(());
         }
         if refreshed.elapsed() > Duration::from_secs(60) {
-            capabilities = json!({"codex":crate::codex_settings::read().ok()});
+            capabilities =
+                json!({"codex":crate::codex_settings::read().ok(),"read_operations":{"usage":1}});
             // OpenCode's native catalog can be exported by its CLI without a controller.
             if let Ok(output) = Command::new(
                 crate::opencode::executable().unwrap_or_else(|_| PathBuf::from("opencode")),
@@ -939,6 +954,20 @@ fn execute_job(
     outbox: &Path,
     cancel: &AtomicBool,
 ) -> Result<()> {
+    if request["op"] == "usage" {
+        let executable = std::env::var_os("AE_CODEX")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("codex"));
+        let report = crate::codex_usage::read_native(&executable, &directory.join("usage"))?;
+        append(
+            &outbox.join("frames.jsonl"),
+            &Frame {
+                stderr: false,
+                line: json!({"usage":report}).to_string(),
+            },
+        )?;
+        return Ok(());
+    }
     if request["op"] == "directories" {
         let view = crate::workspaces::browse_runtime(
             root,

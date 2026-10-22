@@ -6,10 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import type { Group } from "./bindings/Group";
-import type { GroupPreferences } from "./bindings/GroupPreferences";
+import type { GroupPreferenceState } from "./useGroupPreferences";
 import type { GroupSection } from "./bindings/GroupSection";
 import { requestId } from "./api";
-import { PendingIcon, useActionFeedback } from "./ActionFeedback";
+import { PendingIcon } from "./ActionFeedback";
 
 // The installed Base UI menu supplies keyboard navigation, focus return and touch handling.
 function MenuPopup({ children }: { children: ReactNode }) {
@@ -21,53 +21,27 @@ function MenuPopup({ children }: { children: ReactNode }) {
 export function GroupList({
   readOnly = false,
   groups,
-  preferences,
   selected,
   running,
-  acknowledged: acknowledgedProp,
-  needsRefresh: needsRefreshProp,
-  onAcknowledgedChange,
-  onNeedsRefreshChange,
+  persistence,
   onSelect,
-  onSave,
-  onRefresh,
   onCreate,
   onCreateProject,
 }: {
   readOnly?: boolean;
   groups: Group[];
-  preferences: GroupPreferences;
   selected: string | null;
   running: string[];
-  acknowledged?: GroupPreferences | null;
-  needsRefresh?: boolean;
-  onAcknowledgedChange?: (acknowledged: GroupPreferences | null) => void;
-  onNeedsRefreshChange?: (needsRefresh: boolean) => void;
+  persistence: GroupPreferenceState;
   onSelect: (id: string) => void;
-  onSave: (preferences: GroupPreferences) => Promise<void>;
-  onRefresh?: () => Promise<void>;
   onCreate: () => void;
   onCreateProject: () => void;
 }) {
-  const feedback = useActionFeedback("sidebar-preferences");
-  const busy = feedback.pending !== null;
-  const [localAcknowledged, setLocalAcknowledged] = useState<GroupPreferences | null>(null);
-  const [localNeedsRefresh, setLocalNeedsRefresh] = useState(false);
-  const acknowledged = acknowledgedProp !== undefined ? acknowledgedProp : localAcknowledged;
-  const needsRefresh = needsRefreshProp !== undefined ? needsRefreshProp : localNeedsRefresh;
-  const setAcknowledged = (value: GroupPreferences | null) => {
-    setLocalAcknowledged(value);
-    onAcknowledgedChange?.(value);
-  };
-  const setNeedsRefresh = (value: boolean) => {
-    setLocalNeedsRefresh(value);
-    onNeedsRefreshChange?.(value);
-  };
-  const effectivePreferences = acknowledged ?? preferences;
-  const mutationBlocked = busy || needsRefresh;
+  const { feedback, busy, needsRefresh, announcement, save, retry: retryRefresh } = persistence;
+  const effectivePreferences = persistence.preferences;
+  const mutationBlocked = needsRefresh;
   const [dragged, setDragged] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  const [announcement, setAnnouncement] = useState("");
   const [editing, setEditing] = useState<GroupSection | null>(null);
   const [name, setName] = useState("");
   const customSections = effectivePreferences.sections ?? [];
@@ -84,45 +58,8 @@ export function GroupList({
   const sections = [{ id: "pinned", name: "Pinned" }, ...customSections, { id: "all", name: "All groups" }];
   const arranged = sections.flatMap((section) => ordered.filter((g) => sectionFor(g.id) === section.id));
   const visible = arranged.filter((g) => !collapsed.includes(sectionFor(g.id)));
-  async function save(next: GroupPreferences, message: string) {
-    if (mutationBlocked) return false;
-    let ok = false;
-    setAnnouncement("");
-    await feedback.run("save", async () => {
-      try {
-        await onSave(next);
-        ok = true;
-        setAcknowledged(next);
-      } catch (error) {
-        return { kind: "error", message: error instanceof Error ? error.message : "Failed to save preferences." };
-      }
-      if (onRefresh) {
-        try {
-          await onRefresh();
-          setNeedsRefresh(false);
-          setAcknowledged(null);
-        } catch {
-          setNeedsRefresh(true);
-          setAnnouncement(message);
-          return { kind: "warning", message: `${message} Saved, but the view could not refresh.` };
-        }
-      }
-      setAnnouncement(message);
-      return { kind: "success", message };
-    }, { errorMessage: "Preferences could not be confirmed." });
-    return ok;
-  }
-  async function retryRefresh() {
-    if (!onRefresh) return;
-    setAnnouncement("");
-    await feedback.run("refresh", async () => {
-      await onRefresh();
-      setNeedsRefresh(false);
-      setAcknowledged(null);
-      return { kind: "success", message: "Group preferences refreshed." };
-    }, { errorMessage: "The view could not refresh. Group preferences remain saved." });
-  }
-  function placement(source: string, section: string): GroupPreferences {
+  function placement(source: string, section: string): typeof effectivePreferences {
+    if (sectionFor(source) === section) return effectivePreferences;
     return { ...effectivePreferences,
       pinned: section === "pinned" ? [...new Set([...effectivePreferences.pinned, source])] : effectivePreferences.pinned.filter((id) => id !== source),
       sections: customSections.map((s) => ({ ...s, groups: section === "pinned" ? s.groups
@@ -139,8 +76,8 @@ export function GroupList({
     void save({ ...placement(source, sectionFor(target)), sort: "custom", order }, "Group order saved.");
   }
   function edit(section?: GroupSection) {
-    if (mutationBlocked) return;
-    feedback.clear(); setAnnouncement(""); setEditing(section ?? { id: "", name: "", groups: [] }); setName(section?.name ?? "");
+    if (mutationBlocked || busy) return;
+    feedback.clear(); setEditing(section ?? { id: "", name: "", groups: [] }); setName(section?.name ?? "");
   }
   if (readOnly) return <><div className="section-label">YOUR ROOMS</div><nav aria-label="Groups" className="group-list">{ordered.map(g=><button key={g.id} className={`nav-item ${selected===g.id?"selected":""}`} aria-current={selected===g.id?"page":undefined} onClick={()=>onSelect(g.id)}>{g.project?<FolderKanban size={16}/>:<Hash size={16}/>}<span>{g.name}</span></button>)}{!ordered.length&&<p className="settings-description">No rooms shared with you yet. Ask your workspace owner for an invitation.</p>}</nav></>;
   return <>
@@ -153,20 +90,20 @@ export function GroupList({
               <span className="menu-check">{effectivePreferences.sort === value && <Check size={14} />}</span>{label}
             </Menu.Item>)}
           <Menu.Separator className="group-menu-separator" />
-          <Menu.Item disabled={mutationBlocked} onClick={() => edit()}><Plus size={14} /> Create section</Menu.Item>
+          <Menu.Item disabled={mutationBlocked || busy} onClick={() => edit()}><Plus size={14} /> Create section</Menu.Item>
         </MenuPopup>
       </Menu.Root>
       <Menu.Root><Menu.Trigger aria-label="Add group or section" title="Add group or section" disabled={busy}><Plus size={17} /></Menu.Trigger>
         <MenuPopup>
           <Menu.Item onClick={onCreate}><Hash size={14} /> Create group</Menu.Item>
           <Menu.Item onClick={onCreateProject}><FolderKanban size={14} /> Create project</Menu.Item>
-          <Menu.Item disabled={mutationBlocked} onClick={() => edit()}><Plus size={14} /> Create section</Menu.Item>
+          <Menu.Item disabled={mutationBlocked || busy} onClick={() => edit()}><Plus size={14} /> Create section</Menu.Item>
         </MenuPopup>
       </Menu.Root>
     </div></div>
     {needsRefresh && (
       <div className="group-list-recovery">
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => void retryRefresh()}>
+        <Button size="sm" variant="outline" disabled={busy || feedback.pending !== null} onClick={() => void retryRefresh()}>
           <PendingIcon pending={feedback.isPending("refresh")} size={14} />
           Retry refresh
         </Button>
@@ -185,10 +122,10 @@ export function GroupList({
               onClick={() => { if (mutationBlocked) return; void save({ ...effectivePreferences, collapsed: isCollapsed ? collapsed.filter((id) => id !== section.id) : [...collapsed, section.id] }, "Section visibility saved."); }}>
               {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}<span>{section.name}</span><small>{items.length}</small>
             </button>
-            {custom && <Menu.Root><Menu.Trigger aria-label={`Section options for ${section.name}`} disabled={mutationBlocked}><MoreHorizontal size={16} /></Menu.Trigger>
+            {custom && <Menu.Root><Menu.Trigger aria-label={`Section options for ${section.name}`} disabled={mutationBlocked || busy}><MoreHorizontal size={16} /></Menu.Trigger>
               <MenuPopup>
-                <Menu.Item disabled={mutationBlocked} onClick={() => edit(custom)}>Rename section</Menu.Item>
-                <Menu.Item disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; void save({ ...effectivePreferences, sections: customSections.filter((s) => s.id !== section.id), collapsed: collapsed.filter((id) => id !== section.id) }, "Section removed. Its groups are still available."); }}>Remove section</Menu.Item>
+                <Menu.Item disabled={mutationBlocked || busy} onClick={() => edit(custom)}>Rename section</Menu.Item>
+                <Menu.Item disabled={mutationBlocked || busy} onClick={() => { if (mutationBlocked || busy) return; void save({ ...effectivePreferences, sections: customSections.filter((s) => s.id !== section.id), collapsed: collapsed.filter((id) => id !== section.id) }, "Section removed. Its groups are still available.", true); }}>Remove section</Menu.Item>
               </MenuPopup>
             </Menu.Root>}
           </div>
@@ -225,14 +162,14 @@ export function GroupList({
         </section>;
       })}
     </nav>
-    <span className="sr-only" role={feedback.result && !feedback.result.announcedByToast ? "status" : undefined}>{feedback.result && !feedback.result.announcedByToast ? announcement : ""}</span>
+    <span className="sr-only" role="status">{!feedback.result?.announcedByToast ? announcement : ""}</span>
     <Dialog open={!!editing} onOpenChange={(open) => { if (!open && !mutationBlocked) setEditing(null); }}>
       <DialogContent><DialogHeader><DialogTitle>{editing?.id ? "Rename section" : "Create section"}</DialogTitle><DialogDescription>Organize groups in a collapsible section.</DialogDescription></DialogHeader>
         <form className="form-stack" onSubmit={(e) => { e.preventDefault(); if (!editing || !name.trim() || mutationBlocked) return;
           const saved = { ...editing, id: editing.id || requestId(), name: name.trim() };
-          void save({ ...effectivePreferences, sections: editing.id ? customSections.map((s) => s.id === editing.id ? saved : s) : [...customSections, saved] }, "Section saved.").then((ok) => { if (ok) setEditing(null); });
+          void save({ ...effectivePreferences, sections: editing.id ? customSections.map((s) => s.id === editing.id ? saved : s) : [...customSections, saved] }, "Section saved.", true).then((ok) => { if (ok) setEditing(null); });
         }}><Label htmlFor="section-name">Section name</Label><Input id="section-name" value={name} maxLength={80} required onChange={(e) => setName(e.target.value)} />
-          <Button type="submit" disabled={mutationBlocked || !name.trim()}>{busy ? "Saving…" : "Save section"}</Button>
+          <Button type="submit" disabled={mutationBlocked || busy || !name.trim()}>{busy ? "Saving…" : "Save section"}</Button>
         </form>
       </DialogContent>
     </Dialog>

@@ -44,6 +44,20 @@ auth() {
   printf 'header = "Authorization: Bearer %s"\n' "$credential" > "$temp/auth"
 }
 request() { curl --config "$temp/auth" --fail --silent --show-error --connect-timeout 10 --max-time 120 "$@"; }
+package_request() {
+  local url=$1 output=$2 code
+  if ! code=$(curl --config "$temp/auth" --silent --show-error --connect-timeout 10 --max-time 120 --max-filesize 134217728 --output "$output" --write-out '%{http_code}' "$url"); then
+    fail 'Worker package request could not reach the controller. Check DNS, TLS and network access; registration is unchanged.'
+  fi
+  case "$code" in
+    200) ;;
+    401) fail 'Runtime token rejected (HTTP 401): invalid, expired, consumed, or revoked. Use a fresh UI token, or explicitly replace a revoked saved registration.' ;;
+    403) fail 'Runtime access denied (HTTP 403). Check workspace permissions before retrying.' ;;
+    404) fail 'Worker package endpoint unavailable (HTTP 404). Check the controller URL and upgrade the controller.' ;;
+    503) fail 'Verified worker package unavailable (HTTP 503). The operator must publish and configure both Windows x64 and Linux ARM64 packages. Replacing your token will not fix package availability.' ;;
+    *) fail "Worker package request failed (HTTP $code). Check controller service health before retrying." ;;
+  esac
+}
 state="$home/state"
 if [[ -f $unit ]]; then
   [[ -f $meta ]] || fail 'Existing service is not owned by this installer; refusing takeover.'
@@ -81,7 +95,7 @@ if [[ -z $credential ]]; then
 fi
 unset AE_ENROLLMENT_TOKEN
 manifest="$temp/manifest.json"
-request "$controller/api/runtime/packages/linux-arm64/manifest" > "$manifest" || fail 'Verified package unavailable or token expired/revoked. Obtain a fresh UI token or check controller release configuration.'
+package_request "$controller/api/runtime/packages/linux-arm64/manifest" "$manifest"
 jq -e '.schema==1 and .protocol==1 and .platform=="linux-arm64" and (.release|test("^[0-9a-f]{40}$")) and .package.file=="worker-linux-arm64.zip" and (.package.sha256|test("^[0-9a-f]{64}$")) and .package.size>0 and .package.size<=134217728 and (.package.files|length)==1 and .package.files[0].name=="agentic-enterprise" and .package.files[0].size<=805306368' "$manifest" >/dev/null || fail 'Incompatible/unsafe worker manifest.'
 release=$(jq -r .release "$manifest")
 printf 'Selected verified release %s for Linux ARM64. Preparing binary package...\n' "$release"
@@ -89,7 +103,7 @@ digest=$(jq -r .package.sha256 "$manifest")
 cache="$home/cache/$digest.zip"
 mkdir -p "$home/cache" "$home/versions"
 if [[ ! -f $cache ]] || [[ $(sha256sum "$cache" | cut -d' ' -f1) != "$digest" ]]; then
-  request --max-filesize 134217728 --output "$temp/package.zip" "$controller/api/runtime/packages/linux-arm64/archive" || fail 'Package download interrupted. Rerun setup; saved registration is unchanged.'
+  package_request "$controller/api/runtime/packages/linux-arm64/archive" "$temp/package.zip"
   [[ $(sha256sum "$temp/package.zip" | cut -d' ' -f1) == "$digest" ]] || fail 'Worker package checksum mismatch.'
   mv -- "$temp/package.zip" "$cache"
 fi

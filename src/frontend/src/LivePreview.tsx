@@ -1,3 +1,4 @@
+import { useActionFeedback } from "./ActionFeedback";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { LogIn, RotateCw, Settings2, X } from "lucide-react";
@@ -69,7 +70,7 @@ export default function LivePreview({ workspaceId, workspaceName, role, groupId,
   const [busy, setBusy] = useState(false);
   const [refreshPulse, setRefreshPulse] = useState(false);
   const refreshPulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [actionError, setActionError] = useState("");
+  const feedback = useActionFeedback("cockpit-configuration", workspaceId);
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
   const [receivedScope, setReceivedScope] = useState("");
   const scope = `${workspaceId}:${groupId ?? "all"}:${revision}`;
@@ -206,7 +207,7 @@ export default function LivePreview({ workspaceId, workspaceName, role, groupId,
     actionRequest.current?.abort();
     actionRequest.current = controller;
     setBusy(true);
-    setActionError("");
+    let accepted = false;
     try {
       await api<CockpitState>(path, {
         method,
@@ -215,12 +216,13 @@ export default function LivePreview({ workspaceId, workspaceName, role, groupId,
         body: JSON.stringify(body),
       });
       if (controller.signal.aborted) return;
+      accepted = true;
       setDraft(null);
       setRevision(value => value + 1);
       await onRefresh();
     } catch (error) {
       if (!controller.signal.aborted)
-        setActionError(error instanceof Error ? error.message : String(error));
+        void feedback.run("configuration-error", async () => { if (accepted) return { kind: "warning", message: "Cockpit configuration saved, but the view could not refresh. Refresh without saving again." }; throw error; });
     } finally {
       if (!controller.signal.aborted) setBusy(false);
       if (actionRequest.current === controller) actionRequest.current = null;
@@ -282,7 +284,7 @@ export default function LivePreview({ workspaceId, workspaceName, role, groupId,
           <Dialog.Close ref={closeButton} className="live-preview-close" aria-label="Close Live Preview" title="Close Live Preview"><X size={20} /></Dialog.Close>
         </header>
         {role !== "owner" ? <p className="live-preview-access-error" role="alert">Workspace owner access is required to view the organization cockpit.</p> : <>
-          {actionError && <p className="live-preview-error" role="alert">{actionError}</p>}
+
           {sceneError && <p className="live-preview-error" role="alert">The 3D view could not start: {sceneError}. Current agent status is still available under Configure cockpit team.</p>}
           <div ref={setHost} className="live-preview-scene" data-testid="cockpit-host" />
         </>}
