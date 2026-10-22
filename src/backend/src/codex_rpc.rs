@@ -17,7 +17,17 @@ pub(crate) fn request(
     method: &str,
     params: Value,
 ) -> Result<Value> {
-    let mut command = Command::new(&app.codex);
+    request_native(&app.codex, home, cwd, method, params)
+}
+
+pub(crate) fn request_native(
+    executable: &Path,
+    home: &Path,
+    cwd: &Path,
+    method: &str,
+    params: Value,
+) -> Result<Value> {
+    let mut command = Command::new(executable);
     command
         .args([
             "app-server",
@@ -34,9 +44,11 @@ pub(crate) fn request(
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     #[cfg(windows)]
-    let (mut child, owner) = OwnedProcessTree::spawn_with_creation_flags(&mut command, 0x08000000)?;
+    let (mut child, owner) = OwnedProcessTree::spawn_with_creation_flags(&mut command, 0x08000000)
+        .context("Codex executable unavailable on this runtime")?;
     #[cfg(not(windows))]
-    let (mut child, owner) = OwnedProcessTree::spawn(&mut command)?;
+    let (mut child, owner) = OwnedProcessTree::spawn(&mut command)
+        .context("Codex executable unavailable on this runtime")?;
     let result = (|| {
         let mut input = child.stdin.take().context("Codex input pipe unavailable")?;
         let output = child

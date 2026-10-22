@@ -25,6 +25,11 @@ pub fn parse(body: &str) -> Result<Option<&'static str>> {
 pub async fn send(app: &App, mut input: SendInput) -> Result<Message> {
     validate_message_input(&mut input)?;
     let command = parse(&input.body)?.context("Chat command required")?;
+    let actor = app
+        .identity
+        .as_ref()
+        .map_or("owner", |identity| identity.user.as_str())
+        .to_owned();
     ensure!(
         input.recipients.is_empty() && input.artifacts.is_empty() && input.reply_to.is_none(),
         "Send chat commands without recipients, attachments or a quoted reply."
@@ -34,24 +39,70 @@ pub async fn send(app: &App, mut input: SendInput) -> Result<Message> {
         crate::api::validate_side_chat(conn, &input.group_id, input.side_chat_id.as_deref())?;
         existing_message(conn, &input, None)
     })? {
+        ensure!(old.sender == actor, "Message ID belongs to another sender");
         return Ok(old);
     }
-    let usage = if command == "usage" {
+    if command == "usage" {
         let app = app.clone();
-        let group = input.group_id.clone();
-        let side = input.side_chat_id.clone();
-        Some(
-            tokio::task::spawn_blocking(move || {
-                codex_usage::read_for_group(&app, &group, side.as_deref())
-            })
-            .await??,
-        )
-    } else {
-        None
-    };
-    app.store.write(|conn| record(conn, input, command, usage))
+        return tokio::task::spawn_blocking(move || {
+            let targets =
+                codex_usage::targets(&app, &input.group_id, input.side_chat_id.as_deref())?;
+            let report = codex_usage::pending(&targets, &input.id);
+            let request_id = input.id.clone();
+            let group = input.group_id.clone();
+            let side = input.side_chat_id.clone();
+            let (message, started) = app.store.write(|conn| {
+                if let Some(old) = existing_message(conn, &input, None)? {
+                    ensure!(old.sender == actor, "Message ID belongs to another sender");
+                    return Ok((old, false));
+                }
+                Ok((
+                    record_as(conn, input, command, Some(report.clone()), &actor)?,
+                    true,
+                ))
+            })?;
+            if started {
+                std::thread::spawn(move || {
+                    let mut report = report;
+                    for (index, target) in targets.iter().enumerate() {
+                        report.sources[index] =
+                            codex_usage::inspect(&app, target, &group, side.as_deref());
+                        if let Err(error) = update_usage(&app, &request_id, &report) {
+                            tracing::warn!("Persist usage progress: {error}");
+                        }
+                    }
+                    report.state = "complete".into();
+                    report.checked_at = now();
+                    if let Err(error) = update_usage(&app, &request_id, &report) {
+                        tracing::warn!("Persist usage completion: {error}");
+                    }
+                });
+            }
+            Ok(message)
+        })
+        .await?;
+    }
+    app.store
+        .write(|conn| record_as(conn, input, command, None, &actor))
 }
 
+fn update_usage(app: &App, request: &str, report: &codex_usage::UsageReport) -> Result<()> {
+    use rusqlite::OptionalExtension;
+    app.store.write(|conn| {
+        let saved: Option<String> = conn.query_row(
+            "SELECT data FROM messages WHERE json_extract(data,'$.usage_report.request_id')=? AND json_extract(data,'$.sender')='system'",
+            [request], |r| r.get(0)).optional()?;
+        if let Some(saved) = saved {
+            let mut message: Message = serde_json::from_str(&saved)?;
+            message.usage_report = Some(report.clone());
+            store::put(conn, "messages", &message.id, &message)?;
+            store::event(conn, "chat.command.updated", &json!({"message_id":message.id,"group_id":message.group_id}))?;
+        }
+        Ok(())
+    })
+}
+
+#[cfg(test)]
 fn record(
     conn: &Connection,
     input: SendInput,
@@ -69,6 +120,7 @@ pub(crate) fn record_as(
     actor: &str,
 ) -> Result<Message> {
     if let Some(old) = existing_message(conn, &input, None)? {
+        ensure!(old.sender == actor, "Message ID belongs to another sender");
         return Ok(old);
     }
     store::get::<Group>(conn, "groups", &input.group_id)?.ensure_active()?;

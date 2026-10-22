@@ -1,7 +1,8 @@
-import { useRef, useState, useImperativeHandle, type Ref } from "react";
+import { useEffect, useRef, useState, useImperativeHandle, type Ref } from "react";
 import { Gauge, RotateCcw, MessagesSquare, Bot } from "lucide-react";
 import type { Agent } from "./bindings/Agent";
 import type { UsageReport } from "./bindings/UsageReport";
+import { useActionFeedback } from "./ActionFeedback";
 import type { UsageWindow } from "./bindings/UsageWindow";
 
 const commands = [
@@ -13,7 +14,7 @@ const commands = [
   },
   {
     name: "/usage",
-    description: "Check harness usage and available account limits",
+    description: "Check usage from this conversation’s runtimes and harnesses",
     icon: Gauge,
   },
 ];
@@ -200,12 +201,35 @@ function windowName(window: UsageWindow | null, fallback: string) {
 }
 
 export function UsageCard({ report }: { report: UsageReport }) {
+  const feedback = useActionFeedback(`usage:${report.request_id ?? report.checked_at}`);
+  const notify = feedback.run;
+  const consume = feedback.consumeRequest;
+  useEffect(() => {
+    if (report.state && report.state !== "pending" && consume(report.request_id) && report.sources?.some(source => source.status !== "complete")) {
+      void notify("usage-result", async () => ({ kind: "warning", message: "Usage inspection finished with unavailable or failed sources. Review the attributed results." }));
+    }
+  }, [report.state, report.sources, report.request_id, notify, consume]);
+  if (report.sources?.length || report.state) return <section className="usage-card" aria-label="Harness usage">
+    <p className="usage-caption" role="status">{report.state === "pending" ? "Checking usage…" : report.state === "interrupted" ? "Usage inspection interrupted" : "Usage inspection complete"}</p>
+    {!report.sources?.length && <p>No enabled agent source is available in this conversation.</p>}
+    {report.sources?.map((source, index) => <section key={`${source.runtime_id ?? source.runtime_name}:${source.harness}:${index}`} aria-label={`${source.runtime_name} ${source.harness} usage`}>
+      <h4>{source.runtime_name} · {source.harness}</h4>
+      <p className="usage-caption">{source.scope} · {source.status} · {new Date(source.checked_at).toLocaleString()}</p>
+      {source.message && <p>{source.message}</p>}
+      {(source.buckets.length > 0 || source.opencode_usage) && <UsageLimits embedded report={{ checked_at: source.checked_at, buckets: source.buckets, opencode_usage: source.opencode_usage, sources: [], state: "", request_id: null }} />}
+    </section>)}
+    <p className="usage-caption">Send /usage again for a fresh inspection.</p>
+  </section>;
+  return <UsageLimits report={report} />;
+}
+
+function UsageLimits({ report, embedded = false }: { report: UsageReport; embedded?: boolean }) {
   return (
     <section className="usage-card" aria-label="Harness usage">
-      <p className="usage-caption">
+      {!embedded && <p className="usage-caption">
         {report.buckets.length > 0 ? "Codex account limits · " : ""}Checked{" "}
         {new Date(report.checked_at).toLocaleString()}
-      </p>
+      </p>}
       {report.buckets.map((bucket, index) => (
         <div className="usage-bucket" key={bucket.limitId ?? index}>
           <h4>
@@ -252,7 +276,7 @@ export function UsageCard({ report }: { report: UsageReport }) {
         </div>
       ))}
       {report.opencode_usage && <p>{report.opencode_usage}</p>}
-      <p className="usage-caption">Send /usage again to refresh.</p>
+      {!embedded && <p className="usage-caption">Send /usage again to refresh.</p>}
     </section>
   );
 }

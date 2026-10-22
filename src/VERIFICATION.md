@@ -2,6 +2,17 @@
 
 ## Worker onboarding
 
+For installer error regression on Windows, set `AE_TEST_BINARY` to a real built
+controller executable, `AE_TEST_OUTPUT` to a private ignored directory, and
+`AE_TEST_PWSH` to PowerShell 7. Run
+`python -B src/backend/tests/worker_installer_errors.py` from the repository root.
+It launches a real loopback controller/SQLite, renders production Compose using the
+Docker CLI without starting Docker, and checks invalid/expired credential 401
+versus valid-credential/package-unavailable 503. Windows executes the installer;
+Git Bash executes the exact Linux package HTTP function, not its systemd lifecycle.
+No enrollment, production access, provider invocation or agent run is performed.
+
+
 Use a disposable local controller, workspace, runtime state and project folder.
 Do not use production, Yunesa, cloud runners or agent tasks for acceptance, and do
 not copy provider credentials or invoke providers. Build/package on the development machine; test install without a
@@ -647,3 +658,46 @@ python backend/tests/ssh-timeout.py
 The script uses the source agent's harness, model, effective remote workdir and access mode. It creates its own agent, group and Action scheduled five seconds ahead. The real scheduler must dispatch a run that times out after ten seconds; the Action must become failed with the same timeout error. It also verifies explicit Stop and a successful short reply through chat, giving only the temporary agent a 60 second timeout for those two cases. After all runs finish, it soft-deletes its Action and agent and archives its group. JSON output records statuses, remote completion receipts and cleanup; no mocked providers are used. `AE_RUN_WAIT_SECONDS` optionally bounds each run, with a default of 120 seconds.
 
 The timeout and Stop prompts permit only `sleep 30`; they prohibit repository edits and training. Access mode stays identical to the source, including Antigravity's read-only plan mode. If the provider refuses the operation or finishes before the deadline, the script reports a failure; that result does not prove timeout behavior. Organization instructions and repository instructions remain part of the real harness, so choose a suitable workdir and inspect any failed result.
+
+## Runtime usage and action-feedback acceptance
+
+Use a disposable loopback controller and newly enrolled disposable worker states.
+Do not reuse a production registration or point these tests at a remote URL.
+`backend/tests/runtime_usage.py` requires `AE_TEST_OUTPUT`, `AE_TEST_BINARY` and
+`AE_TEST_CODEX` (the complete signed-in native CLI executable). Optionally set
+`AE_TEST_LEGACY_BINARY` to an older real binary, `AE_TEST_ANTIGRAVITY` to the native
+AGY executable, and `AE_TEST_BROWSER=1` to run the real browser acceptance after
+API checks. Browser tests use installed Chrome by default; override with
+`AE_TEST_BROWSER_EXECUTABLE`. All test processes and worker registrations belong
+to the disposable controller. Tokens are not written into receipts.
+
+From the repository root, run `python -X utf8 -B src/backend/tests/runtime_usage.py`.
+The fixture uses an unreadable-as-file `.env` directory in a disposable workdir;
+usage must succeed without entering ordinary task execution. It records source
+results, request deduplication, worker compatibility and zero provider/terminal
+runs. The browser runner is `frontend/tests/runtime-usage-feedback.mjs`, run from
+`src` with `node` and explicit `AE_TEST_URL`, `AE_TEST_ORG`, `AE_TEST_OUTPUT`.
+Network fault injection delays/aborts real requests; it does not return invented
+product responses or fake authentication.
+
+Routine sidebar changes are immediate, silently persisted and serialized. A
+no-op selection must send no PUT. Test rapid collapse/expand while holding the
+first real PUT, same sort/section, pin/unpin and keyboard/drag reorder. Inspect
+SQLite/API state after completion and reload. Rejected writes retain editable
+section drafts; uncertain writes require read reconciliation. Acknowledged saves
+with failed refresh keep a read-only Retry refresh action across hide/show.
+Explicit section create/rename/remove and recovery retain outcome feedback.
+
+Action failures/warnings have one Base UI toast owner, including entrypoint,
+chat and `/usage`. Field constraints remain at inputs. Passive polling errors,
+saved run/terminal output, indexing failures, workdir diagnoses and preview
+availability are durable contextual state; opening history must not emit toasts.
+Verify keyboard focus, zoom, reduced motion, rail and mobile navigation without
+changing the existing layout or Matrix/owner-key login order.
+
+The existing `action-feedback-review` suite can use `AE_TEST_MATRIX_USERNAME`,
+`AE_TEST_MATRIX_USER_ID` and `AE_TEST_MATRIX_PASSWORD` for dedicated accounts on
+an already configured local Synapse. Supply the password through a private test
+process environment, never in recorded commands. Configure the disposable
+controller's Matrix bot through its existing settings. This tests current login
+and membership enforcement; it does not implement invitation onboarding.

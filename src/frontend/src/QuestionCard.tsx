@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { useActionFeedback } from "./ActionFeedback";
 import { api, post } from "./api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -6,6 +7,7 @@ import type { QuestionRequest } from "./bindings/QuestionRequest";
 
 export function QuestionCard({ id, question, onRefresh }: { id: string; question?: QuestionRequest; onRefresh: () => Promise<void> }) {
   const instanceId = useId();
+  const feedback = useActionFeedback(`question:${id}`);
   const [loaded, setLoaded] = useState<QuestionRequest | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -16,17 +18,19 @@ export function QuestionCard({ id, question, onRefresh }: { id: string; question
     void api<QuestionRequest>(`/questions/${id}`).then(value => { if (!cancelled) setLoaded(value); }, reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason)); });
     return () => { cancelled = true; };
   }, [id, question]);
-  const request = question ?? loaded;
+  const current = loaded?.id === id ? loaded : null;
+  const request = question && question.status !== "pending" ? question : current ?? question;
   if (!request) return <p role="status">{error || "Loading question…"}</p>;
   const pending = request.status === "pending";
   async function submit() {
     if (!request) return;
     setBusy(true); setError("");
+    let accepted = false;
     try {
       const saved = await post<QuestionRequest>(`/questions/${id}/answer`, { answers: Object.fromEntries(request.questions.map(q => [q.id, { answers: [answers[q.id]] }])) });
-      setLoaded(saved);
+      accepted = true; setLoaded(saved);
       await onRefresh();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    } catch (reason) { void feedback.run("answer-error", async () => { if (accepted) return { kind: "warning", message: "Answer saved, but the view could not refresh. Refresh the conversation without sending again." }; throw reason; }); }
     finally { setBusy(false); }
   }
   return <form className="question-card" data-question-id={id} aria-label={`Question from ${request.agent_name}`} onSubmit={event => { event.preventDefault(); void submit(); }}>
@@ -49,7 +53,7 @@ export function QuestionCard({ id, question, onRefresh }: { id: string; question
       <Button type="button" variant="outline" disabled={busy} onClick={async () => {
         setBusy(true); setError("");
         try { await post(`/runs/${request.run_id}/cancel`); await onRefresh(); }
-        catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+        catch (reason) { void feedback.run("stop-error", async () => { throw reason; }); }
         finally { setBusy(false); }
       }}>Stop run</Button>
     </div>}

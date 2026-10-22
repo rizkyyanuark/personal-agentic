@@ -380,10 +380,11 @@ async function verifySidebarLayout(page, name) {
   await expect(menu.getByRole("menuitem", { name: "Profile", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(account).toBeFocused();
+  await expect(menu).toHaveCount(0);
   return { name, ...controls, menu: menuBox, viewport };
 }
 
-async function verifySidebarBounds({ page, state }) {
+export async function verifySidebarBounds({ page, state }) {
   const sidebar = page.locator("#sidebar");
   const edge = page.getByRole("separator", { name: "Resize main navigation", exact: true });
   const originalWidth = (await sidebar.boundingBox()).width;

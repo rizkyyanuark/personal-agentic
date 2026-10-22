@@ -450,7 +450,8 @@ export async function verifyActionFeedbackReviewChecks({ page, call, _state, org
     await expect(remountedPinBtnB).toBeEnabled();
     await remountedPinBtnB.click();
     const pinBToast = page.locator(".action-toast:not([data-ending-style])").filter({ hasText: `${groupB.name} pinned.` });
-    await expect(pinBToast).toHaveCount(1);
+    await expect(page.getByRole("navigation", { name: "Groups", exact: true })).toHaveAttribute("aria-busy", "false");
+    await expect(pinBToast).toHaveCount(0);
     assert.equal(pinPutCount, 2, "Pin B must increment PUT count to exactly 2 without duplicating PUT A");
     assert(lastPinPayload?.pinned?.includes(groupA.id), "PUT payload #2 must retain acknowledged Pin A");
     assert(lastPinPayload?.pinned?.includes(groupB.id), "PUT payload #2 must include Pin B");
@@ -919,8 +920,8 @@ export async function verifyActionFeedbackReviewChecks({ page, call, _state, org
   assert.equal(unauthenticatedRequest.status(), 401, "Unauthenticated tenant mutation is denied with 401");
 
   // Authenticated unauthorized Matrix user test against local Synapse homeserver
-  const matrixUser = "@matrix_member_test:matrix-invite.local";
-  const matrixPass = "testpassword123";
+  const matrixUser = process.env.AE_TEST_MATRIX_USER_ID ?? "@matrix_member_test:matrix-invite.local";
+  const matrixPass = process.env.AE_TEST_MATRIX_PASSWORD ?? "testpassword123";
 
   // Owner adds matrixUser as role="member" to uiWs
   await call(`/tenants/${uiWs.id}/members`, { user: matrixUser, role: "member" });
@@ -930,7 +931,7 @@ export async function verifyActionFeedbackReviewChecks({ page, call, _state, org
   try {
     const memberPage = await memberContext.newPage();
     const loginRes = await memberPage.request.post("/api/login", {
-      data: { username: "matrix_member_test", password: matrixPass }
+      data: { username: process.env.AE_TEST_MATRIX_USERNAME ?? "matrix_member_test", password: matrixPass }
     });
     assert.equal(loginRes.status(), 200, "Matrix login succeeds with 200");
     const loginData = await loginRes.json();

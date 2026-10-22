@@ -3,17 +3,24 @@ import { Toast } from "@base-ui/react/toast";
 import { Check, CircleAlert, Info, LoaderCircle } from "lucide-react";
 import { Toast as ResultToast, ToastClose, ToastContent, ToastPortal, ToastText, ToastTitle, ToastViewport } from "./components/ui/toast";
 import "./action-feedback.css";
+import { safeActionError } from "./actionErrors";
+
 
 export type ActionResult = { kind: "success" | "warning" | "error"; message: string };
 type Result = ActionResult & { id: string; scope: string; viewKey: string; announcedByToast: boolean };
 type ToastData = { kind: ActionResult["kind"] };
 class FeedbackStore {
   active = true;
+  epoch = 0;
+  scopeKey = "";
+  watchedRequests = new Set<string>();
   pending = new Map<string, string>();
   listeners = new Set<() => void>();
   toast = Toast.createToastManager<ToastData>();
   activate() { this.active = true; }
-  deactivate() { this.active = false; this.toast.close(); this.pending.clear(); }
+  setScope(key: string) { if (this.scopeKey !== key) { this.scopeKey = key; this.reset(); } }
+  reset() { this.epoch += 1; this.watchedRequests.clear(); this.toast.close(); this.pending.clear(); this.listeners.forEach(listener => listener()); }
+  deactivate() { this.active = false; this.reset(); }
 }
 const FeedbackContext = createContext<FeedbackStore | null>(null);
 
@@ -71,28 +78,38 @@ export function useActionFeedback(scope: string, viewKey = scope, presentation: 
   const result = storedResult?.scope === scope && storedResult.viewKey === viewKey ? storedResult : null;
   const clear = useCallback(() => setResult(null), []);
   const run = useCallback(async (action: string, work: () => Promise<ActionResult | void>, options: { toast?: boolean | ((result: ActionResult) => boolean); errorMessage?: string } = {}) => {
-    if (!store.active || store.pending.has(scope)) return;
+    if (!store.active || !owner.current.mounted || store.pending.has(scope)) return;
     const startedView = owner.current.viewKey;
+    const epoch = store.epoch;
     const id = crypto.randomUUID?.() ?? `${scope}:${Date.now()}:${Math.random()}`;
     store.pending.set(scope, action);
     store.listeners.forEach(listener => listener());
     setResult(null);
     let outcome: ActionResult | void;
     try { outcome = await work(); }
-    catch { outcome = { kind: "error", message: options.errorMessage ?? "The action could not be confirmed. Review its current state before trying again." }; }
+    catch (error) { outcome = { kind: "error", message: safeActionError(error, options.errorMessage) }; }
     finally {
-      store.pending.delete(scope);
-      store.listeners.forEach(listener => listener());
+      if (store.epoch === epoch) {
+        store.pending.delete(scope);
+        store.listeners.forEach(listener => listener());
+      }
     }
-    if (!outcome || !store.active) return;
+    if (!outcome || !store.active || store.epoch !== epoch) return;
+    outcome.message = safeActionError(new Error(outcome.message));
     const sameView = owner.current.mounted && owner.current.viewKey === startedView;
-    const showToast = presentation === "toast" || !sameView || (typeof options.toast === "function" ? options.toast(outcome) : options.toast === true);
+    const showToast = outcome.kind !== "success" || (options.toast !== false && (presentation === "toast" || !sameView || (typeof options.toast === "function" ? options.toast(outcome) : options.toast === true)));
     if (sameView) setResult({ ...outcome, id, scope, viewKey: startedView, announcedByToast: showToast });
     if (showToast) {
       store.toast.add({ id, title: outcome.message, type: outcome.kind, data: { kind: outcome.kind }, timeout: outcome.kind === "success" ? 5000 : 0, priority: "low" });
     }
   }, [store, scope, presentation]);
-  return { pending, result, clear, run, isPending: (action: string) => pending === action };
+  const setScope = useCallback((key: string) => store.setScope(key), [store]);
+  const watchRequest = useCallback((id: string) => {
+    if (store.watchedRequests.size >= 100) store.watchedRequests.delete(store.watchedRequests.values().next().value!);
+    store.watchedRequests.add(id);
+  }, [store]);
+  const consumeRequest = useCallback((id: string | null | undefined) => id ? store.watchedRequests.delete(id) : false, [store]);
+  return { pending, result, clear, run, setScope, watchRequest, consumeRequest, isPending: (action: string) => pending === action };
 }
 
 export type ActionFeedback = ReturnType<typeof useActionFeedback>;

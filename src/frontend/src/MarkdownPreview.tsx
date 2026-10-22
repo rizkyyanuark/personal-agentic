@@ -1,3 +1,4 @@
+import { useActionFeedback } from "./ActionFeedback";
 import { useEffect, useRef, useState } from "react";
 import { Check, Download, FileText, LibraryBig, PanelRightClose } from "lucide-react";
 import { MessageMarkdown, type MarkdownFile } from "./MessageMarkdown";
@@ -24,16 +25,16 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
   const [loadedResult, setLoadedResult] = useState<{ url: string; text: string; source: Blob } | null>(null);
   const [loadFailure, setLoadFailure] = useState<{ url: string; error: string } | null>(null);
   const [adding, setAdding] = useState(false);
-  const [addError, setAddError] = useState("");
+  const feedback = useActionFeedback("document-actions", file.url);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [documentResult, setDocumentResult] = useState<{ url: string; value: DocumentStatus } | null>(null);
   const [documentFailure, setDocumentFailure] = useState<{ url: string; error: string } | null>(null);
   const [recovering, setRecovering] = useState(false);
-  const [recoveryError, setRecoveryError] = useState("");
+
   const [exportOpen, setExportOpen] = useState(false);
   const [exportPath, setExportPath] = useState(`reports/${file.name}`);
   const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState("");
+
   const [exportedPath, setExportedPath] = useState("");
   const attachment = artifacts.find((artifact) => artifact.status !== "deleted" && file.url === `/api/artifacts/${artifact.id}`);
   const runId = file.runId ?? attachment?.source?.run_id ?? null;
@@ -85,36 +86,38 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
   async function recoverDocument() {
     if (!runId || !sourcePath || !documentUrl || !document?.can_import || recovering || readOnly) return;
     setRecovering(true);
-    setRecoveryError("");
+    let accepted = false;
     try {
       const artifact = await post<Artifact>(`/runs/${encodeURIComponent(runId)}/artifacts`, { path: sourcePath });
+      accepted = true;
       setDocumentResult({ url: documentUrl, value: { ...document, artifact, can_import: false } });
       const status = await api<DocumentStatus>(documentUrl);
       setDocumentResult({ url: documentUrl, value: status });
       await onRefresh();
-    } catch (error: unknown) { setRecoveryError(error instanceof Error ? error.message : String(error)); }
+    } catch (error: unknown) { void feedback.run("recover-error", async () => { if (accepted) return { kind: "warning", message: "Document recovered, but the view could not refresh. Reopen the preview without recovering again." }; throw error; }); }
     finally { setRecovering(false); }
   }
 
   async function exportDocument() {
     if (!snapshot || !document?.can_export || exporting || readOnly) return;
     setExporting(true);
-    setExportError("");
+
     setExportedPath("");
+    let accepted = false;
     try {
       const result = await post<{ path: string }>(`/artifacts/${encodeURIComponent(snapshot.id)}/export`, { path: exportPath });
-      setExportedPath(result.path);
+      accepted = true; setExportedPath(result.path);
       await onRefresh();
-    } catch (error: unknown) { setExportError(error instanceof Error ? error.message : String(error)); }
+    } catch (error: unknown) { void feedback.run("export-error", async () => { if (accepted) return { kind: "warning", message: "Document exported, but the view could not refresh. Reopen the preview without exporting again." }; throw error; }); }
     finally { setExporting(false); }
   }
 
   async function addToKnowledge() {
     if (!loaded || adding || readOnly) return;
     setAdding(true);
-    setAddError("");
+
     try { setSavedId((await onAddToKnowledge(file, loaded.source)).id); }
-    catch (error: unknown) { setAddError(error instanceof Error ? error.message : String(error)); }
+    catch (error: unknown) { void feedback.run("knowledge-error", async () => { throw error; }); }
     finally { setAdding(false); }
   }
 
@@ -133,7 +136,7 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
         {adding ? "Adding…" : saved?.status === "indexing" ? "Preparing knowledge…" : saved?.status === "indexed" ? "Added to knowledge" : saved?.status === "failed" ? "Retry indexing" : "Add to knowledge"}
       </Button>
       <span className="hint" role="status">{readOnly ? readOnlyReason : saved?.status === "indexed" ? `Searchable in ${groupName}.` : `Save to ${groupName}`}</span>
-      {(addError || saved?.status === "failed") && <p role="alert" className="error">{addError || `Saved, but indexing failed: ${saved?.error ?? "Please retry."}`}</p>}
+      {saved?.status === "failed" && <p role="status" className="error">Saved, but indexing failed: {saved.error ?? "Please retry."}</p>}
     </div>
     {(runId && sourcePath) && <div className="markdown-preview-storage">
       {origin ? <>
@@ -141,7 +144,7 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
         {origin.capture_kind === "historical_import" && <p className="hint">This copy may differ from the document when the original run finished.</p>}
         <p className="hint">Referenced images and local files are not included in this saved copy.</p>
         <Button variant="outline" size="sm" disabled={readOnly || !document?.can_export || exporting}
-          aria-expanded={exportOpen} onClick={() => { setExportOpen(!exportOpen); setExportError(""); }}>Export to workdir</Button>
+          aria-expanded={exportOpen} onClick={() => { setExportOpen(!exportOpen); }}>Export to workdir</Button>
         {readOnly ? <p className="hint">Export is unavailable. {readOnlyReason}</p>
           : document && !document.can_export && <p className="hint">Export is unavailable for this run’s workdir or permissions.</p>}
         {exportOpen && <form className="markdown-export-form" onSubmit={(event) => { event.preventDefault(); void exportDocument(); }}>
@@ -152,7 +155,7 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
           <p id="report-export-help" className="hint">Use a relative path. Existing files will not be overwritten.</p>
         </form>}
         {exportedPath && <p role="status" className="hint">Exported to {exportedPath}</p>}
-        {exportError && <p role="alert" className="error">{exportError}</p>}
+
       </> : document?.can_import ? <>
         <p className="hint">This document has no saved copy. Recover its current version from the workstation.</p>
         <Button variant="outline" size="sm" disabled={readOnly || recovering} onClick={() => void recoverDocument()}>{recovering ? "Saving current version…" : "Recover document"}</Button>
@@ -160,7 +163,7 @@ export function MarkdownPreview({ file, onClose, onPreview, onAddToKnowledge, on
       </> : !document && !documentError ? <p className="hint" role="status">Checking for a saved copy…</p> : null}
       {document?.error && (!loaded || !!origin) && <p className="hint">{document.error}</p>}
       {documentError && <p role="alert" className="error">Unable to check the saved copy: {documentError}</p>}
-      {recoveryError && <p role="alert" className="error">{recoveryError}</p>}
+
     </div>}
     <div className="inspector-body" aria-busy={loaded === null && !error}>
       {error ? <p role="alert" className="error">{error}</p>

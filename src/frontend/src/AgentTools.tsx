@@ -16,6 +16,9 @@ import type { Agent } from "./bindings/Agent";
 import type { TerminalRun } from "./bindings/TerminalRun";
 import type { SkillList } from "./bindings/SkillList";
 
+import { useActionFeedback } from "./ActionFeedback";
+import { safeActionError } from "./actionErrors";
+
 const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 function AttachWorkdir({ onWorkdir }: { onWorkdir: () => void }) {
@@ -44,7 +47,7 @@ export function AgentTerminal({
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<TerminalRun | null>(null);
   const [command, setCommand] = useState("");
-  const [error, setError] = useState("");
+  const feedback = useActionFeedback(`terminal:${agent.id}`);
   const [loadError, setLoadError] = useState("");
   const [sending, setSending] = useState(false);
   const [reload, setReload] = useState(0);
@@ -92,7 +95,6 @@ export function AgentTerminal({
   async function run() {
     if (sending || active || !command.trim()) return;
     setSending(true);
-    setError("");
     try {
       const result = await post<TerminalRun>(root, {
         id: requestId(),
@@ -104,7 +106,7 @@ export function AgentTerminal({
       followOutput.current = true;
       setReload((n) => n + 1);
     } catch (error) {
-      setError(`${message(error)}. Check command history before retrying.`);
+      void feedback.run("failure", async () => ({ kind: "error", message: `${safeActionError(error)} Check command history before retrying.` }));
     } finally {
       setSending(false);
     }
@@ -162,10 +164,9 @@ export function AgentTerminal({
               variant="outline"
               size="sm"
               onClick={() => {
-                setError("");
                 void post(`${root}/${active.id}/stop`).then(
                   () => setReload((n) => n + 1),
-                  (error: unknown) => setError(message(error)),
+                  (error: unknown) => { void feedback.run("stop-error", async () => { throw error; }); },
                 );
               }}
             >
@@ -189,9 +190,9 @@ export function AgentTerminal({
         Use unattended installer flags such as <code>--yes</code>. Interactive
         programs need an external terminal.
       </p>
-      {(error || loadError) && (
+      {loadError && (
         <p role="alert" className="tools-error">
-          {error || loadError}
+          {loadError}
         </p>
       )}
       <div className="terminal-output-panel">

@@ -834,8 +834,59 @@ def opencode_query(request):
         stop_group(process)
 
 
+def read_codex_usage():
+    executable = os.environ.get("AE_CODEX") or shutil.which("codex")
+    if not executable:
+        raise ValueError("Codex executable unavailable on this runtime")
+    process = subprocess.Popen(
+        [executable, "app-server", "--stdio", "-c", 'cli_auth_credentials_store="file"'],
+        cwd=str(Path.home()), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, start_new_session=True,
+    )
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        def send(value):
+            process.stdin.write((json.dumps(value) + "\n").encode())
+            process.stdin.flush()
+        send({"id": 0, "method": "initialize", "params": {"clientInfo": {"name": "agentic_enterprise", "version": "0.1.0"}}})
+        deadline = time.monotonic() + 20
+        received = 0
+        buffer = b""
+        while time.monotonic() < deadline:
+            if not selector.select(min(0.2, max(0, deadline - time.monotonic()))):
+                continue
+            chunk = os.read(process.stdout.fileno(), 8192)
+            if not chunk:
+                raise ValueError("Codex request disconnected; check native login")
+            received += len(chunk)
+            if received > 2 * 1024 * 1024:
+                raise ValueError("Unsupported Codex usage response size")
+            buffer += chunk
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                value = json.loads(line)
+                if "id" not in value:
+                    continue
+                if value.get("error"):
+                    raise ValueError("Codex request failed; check native sign-in")
+                if value["id"] == 0:
+                    send({"method": "initialized", "params": {}})
+                    send({"id": 1, "method": "account/rateLimits/read", "params": {}})
+                elif value["id"] == 1:
+                    result = value.get("result", {})
+                    return {k: result.get(k) for k in ("rateLimits", "rateLimitsByLimitId")}
+        raise ValueError("Codex request timed out")
+    finally:
+        selector.close()
+        stop_group(process)
+
+
 def main(request):
     op = request["op"]
+    if op == "usage":
+        emit(read_codex_usage())
+        return 0
     if op == "antigravity_settings":
         emit(antigravity_settings())
         return 0

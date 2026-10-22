@@ -18,6 +18,7 @@ services:
     environment:
       AE_PUBLIC_URL: "${AE_PUBLIC_URL:?Set the production HTTPS origin}"
       AE_INTERNAL_URL: "http://platform:8765"
+      AE_WORKER_PACKAGE_DIR: "${AE_WORKER_PACKAGE_DIR:-/data/worker-packages/current}"
       AE_MATRIX_HOMESERVER: "http://matrix:8008"
       AE_MATRIX_BOT_USERNAME: "${AE_MATRIX_BOT_USERNAME:-agentic}"
       AE_MATRIX_BOT_PASSWORD: "${AE_MATRIX_BOT_PASSWORD:?Set the production Matrix bridge password}"

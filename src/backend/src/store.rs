@@ -101,6 +101,21 @@ impl Store {
             )?;
             store.materialize(&agent)?;
         }
+        for mut message in store.list::<crate::model::Message>("messages")? {
+            if let Some(report) = &mut message.usage_report {
+                if report.state == "pending" {
+                    report.state = "interrupted".into();
+                    for source in &mut report.sources {
+                        if source.status == "pending" {
+                            source.status = "failed".into();
+                            source.code = Some("interrupted".into());
+                            source.message = Some("Controller restarted before usage was confirmed. Send a new /usage request.".into());
+                        }
+                    }
+                    store.put("messages", &message.id, &message)?;
+                }
+            }
+        }
         // No native tool call survives a service restart; retain its question as history.
         for mut question in store.list::<crate::questions::QuestionRequest>("questions")? {
             if question.status == "pending"

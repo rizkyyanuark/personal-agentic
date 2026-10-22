@@ -58,6 +58,25 @@ $registration = $null
 $headers = @{}
 $provisionalTask = $false
 $configuredTask = $false
+function Invoke-WorkerPackageRequest([string]$Url, [string]$OutFile = '') {
+    try {
+        if ($OutFile) {
+            Invoke-WebRequest $Url -Headers $headers -OutFile $OutFile -TimeoutSec 120 | Out-Null
+        } else {
+            Invoke-RestMethod $Url -Headers $headers -TimeoutSec 30
+        }
+    } catch {
+        $status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+        switch ($status) {
+            401 { throw 'Runtime token rejected (HTTP 401): it is invalid, expired, consumed, or revoked. Use a fresh UI enrollment token, or explicitly replace a revoked saved registration.' }
+            403 { throw 'Runtime access denied (HTTP 403). Check workspace permissions before retrying.' }
+            404 { throw 'Worker package endpoint unavailable (HTTP 404). Check the controller URL and upgrade the controller.' }
+            503 { throw 'Verified worker package unavailable (HTTP 503). The controller operator must publish and configure both Windows x64 and Linux ARM64 packages. Replacing your token will not fix package availability.' }
+            0 { throw 'Worker package request could not reach the controller. Check DNS, TLS and network access; registration is unchanged.' }
+            default { throw "Worker package request failed (HTTP $status). Check controller service health before retrying." }
+        }
+    }
+}
 try {
     if (Test-Path (Join-Path $state 'registration.json')) {
         $registration = Get-Content -Raw (Join-Path $state 'registration.json') | ConvertFrom-Json
@@ -85,7 +104,7 @@ try {
         $headers.Authorization = 'Bearer ' + $token
     }
     Remove-Item Env:AE_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
-    try { $manifest = Invoke-RestMethod "$Controller/api/runtime/packages/windows-x64/manifest" -Headers $headers -TimeoutSec 30 } catch { throw 'Verified package unavailable or token rejected. Check controller release configuration or obtain a fresh token.' }
+    $manifest = Invoke-WorkerPackageRequest "$Controller/api/runtime/packages/windows-x64/manifest"
     if ($manifest.schema -ne 1 -or $manifest.protocol -ne 1 -or $manifest.platform -ne 'windows-x64' -or $manifest.release -cnotmatch '^[0-9a-f]{40}$' -or $manifest.package.file -ne 'worker-windows-x64.zip' -or $manifest.package.sha256 -cnotmatch '^[0-9a-f]{64}$' -or $manifest.package.size -le 0 -or $manifest.package.size -gt 134217728) { throw 'Incompatible worker manifest.' }
     $cacheDir = Join-Path $InstallDir 'cache'; New-Item -ItemType Directory -Force $cacheDir | Out-Null
     Write-Output "Selected verified release $($manifest.release) for Windows x64. Preparing binary package..."
@@ -93,7 +112,7 @@ try {
     if (-not (Test-Path $cache) -or (Get-FileHash $cache -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.package.sha256) {
         $partial = "$cache.partial"
         try {
-            Invoke-WebRequest "$Controller/api/runtime/packages/windows-x64/archive" -Headers $headers -OutFile $partial -TimeoutSec 120 | Out-Null
+            Invoke-WorkerPackageRequest "$Controller/api/runtime/packages/windows-x64/archive" -OutFile $partial
             if ((Get-Item $partial).Length -ne $manifest.package.size -or (Get-FileHash $partial).Hash.ToLowerInvariant() -ne $manifest.package.sha256) { throw 'Worker package checksum/size mismatch.' }
             Move-Item -LiteralPath $partial -Destination $cache -Force
         } finally { if (Test-Path $partial) { Remove-Item -LiteralPath $partial } }

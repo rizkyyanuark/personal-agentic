@@ -62,7 +62,6 @@ export function RuntimeSettings({enrollmentToken,onEnrollmentTokenChange}:{enrol
   const [error,setError]=useState("");
   const feedback=useActionFeedback("runtimes");
   const busy=feedback.pending!==null;
-  const [detail,setDetail]=useState("");
   const [loading,setLoading]=useState(true);
   const [copied,setCopied]=useState(false);
   const [revoking,setRevoking]=useState("");
@@ -70,9 +69,9 @@ export function RuntimeSettings({enrollmentToken,onEnrollmentTokenChange}:{enrol
   async function refresh(){setRuntimes(await api<RegisteredRuntime[]>("/runtimes"));}
   useEffect(()=>{void api<RegisteredRuntime[]>("/runtimes").then(setRuntimes).catch(e=>setError(e instanceof Error?e.message:String(e))).finally(()=>setLoading(false));const t=setInterval(()=>void refresh().catch(e=>setError(e instanceof Error?e.message:String(e))),5000);return()=>clearInterval(t);},[]);
   async function act(action:string, work:()=>Promise<void>, message:string){
-    setError("");setDetail("");
+    setError("");
     await feedback.run(action,async()=>{
-      try{await work();}catch(failure){setDetail(failure instanceof Error?failure.message:String(failure));throw failure;}
+      await work();
       try{await refresh();}catch{
         if(action==="refresh")return {kind:"error",message:"Runtime list could not refresh. Retry refresh; existing registrations are unchanged by this read."};
         return {kind:"warning",message:`${message} The runtime list could not refresh. Refresh the list without repeating the change.`};
@@ -84,27 +83,26 @@ export function RuntimeSettings({enrollmentToken,onEnrollmentTokenChange}:{enrol
   return <div className="runtime-settings">
     {error&&<p className="banner error" role="alert">{error}</p>}
     <ActionStatus feedback={feedback}/>
-    {detail&&<p className="hint">{detail}</p>}
     <section className="settings-card">
       <div className="settings-section-title"><Server size={20}/><h2>Agent runtimes</h2><span className="settings-badge">{active.length} registered</span><Button variant="ghost" aria-label={feedback.isPending("refresh")?"Refreshing runtimes":"Refresh runtimes"} aria-busy={feedback.isPending("refresh")} disabled={busy} onClick={()=>void act("refresh",async()=>{},"Runtime list refreshed.")}><PendingIcon pending={feedback.isPending("refresh")} size={16}/>{!feedback.isPending("refresh")&&<RefreshCw size={16}/>}</Button></div>
       {loading?<p className="settings-description" role="status">Loading runtimes…</p>:active.length===0?<div className="runtime-empty"><span className="runtime-empty-icon"><Server size={28}/></span><h3>Connect your first machine</h3><p>Run agents on your computer, a server, or a Docker container. Register it below, then connect the worker.</p></div>:<div className="runtime-list">{active.map(r=><article className="runtime-row" key={r.id}>
         <span className="runtime-device"><Server size={20}/></span><div className="runtime-info"><strong>{r.name}</strong><span>{r.os||"Waiting for worker to connect"}</span>{r.root&&<code title={r.root}>{r.root}</code>}{r.description&&<span>{r.description}</span>}<span>{availableHarnesses(r).map(h=>harnessNames[h]).join(" · ")||"No harness catalog reported"}</span></div>
         <span className={`runtime-status ${r.online?"online":"offline"}`}><i/>{r.online?"Online":r.os?"Offline":"Not connected"}</span>
-        <Button variant="ghost" aria-label={`Edit ${r.name}`} disabled={busy} onClick={()=>{feedback.clear();setDetail("");setEditing(editing===r.id?"":r.id);}}>Edit</Button>
+        <Button variant="ghost" aria-label={`Edit ${r.name}`} disabled={busy} onClick={()=>{feedback.clear();setEditing(editing===r.id?"":r.id);}}>Edit</Button>
         {editing===r.id&&<form className="runtime-edit form-stack" onSubmit={event=>{
           event.preventDefault();const fields=new FormData(event.currentTarget);
           const metadata={name:String(fields.get("name")),description:String(fields.get("description"))};
           void act(`edit:${r.id}`,async()=>{await put(`/runtimes/${r.id}`,metadata);setRuntimes(values=>values.map(value=>value.id===r.id?{...value,...metadata}:value));setEditing("");},`${metadata.name} runtime settings saved.`);
-        }} onChangeCapture={()=>{feedback.clear();setDetail("");}}><label>Runtime name<Input name="name" defaultValue={r.name} disabled={busy} required maxLength={80}/></label><label>Description<Textarea name="description" defaultValue={r.description??""} disabled={busy} maxLength={2000}/></label>
+        }} onChangeCapture={()=>{feedback.clear();}}><label>Runtime name<Input name="name" defaultValue={r.name} disabled={busy} required maxLength={80}/></label><label>Description<Textarea name="description" defaultValue={r.description??""} disabled={busy} maxLength={2000}/></label>
           <p className="hint">Root folder, operating system and available harnesses are reported by the worker. Change those on its machine.</p>
           <div className="action-controls"><Button type="submit" disabled={busy} aria-busy={feedback.isPending(`edit:${r.id}`)}><PendingIcon pending={feedback.isPending(`edit:${r.id}`)} size={16}/>{feedback.isPending(`edit:${r.id}`)?"Saving runtime…":"Save runtime"}</Button><Button type="button" variant="outline" disabled={busy} onClick={()=>setEditing("")}>Cancel</Button></div>
         </form>}
-        {revoking===r.id?<div className="runtime-confirm"><p>Disconnect this runtime? Its saved registration will stop working.</p><Button variant="destructive" disabled={busy} aria-busy={feedback.isPending(`revoke:${r.id}`)} onClick={()=>void act(`revoke:${r.id}`,async()=>{await api(`/runtimes/${r.id}`,{method:"DELETE"});setRuntimes(values=>values.map(value=>value.id===r.id?{...value,revoked:true}:value));setRevoking("");},`${r.name} registration revoked. This does not confirm that native processes have stopped.`)}><PendingIcon pending={feedback.isPending(`revoke:${r.id}`)} size={16}/>{feedback.isPending(`revoke:${r.id}`)?"Revoking…":"Confirm revoke"}</Button><Button variant="ghost" disabled={busy} onClick={()=>setRevoking("")}>Cancel</Button></div>:<Button variant="ghost" disabled={busy} onClick={()=>{feedback.clear();setDetail("");setRevoking(r.id);}}>Revoke</Button>}
+        {revoking===r.id?<div className="runtime-confirm"><p>Disconnect this runtime? Its saved registration will stop working.</p><Button variant="destructive" disabled={busy} aria-busy={feedback.isPending(`revoke:${r.id}`)} onClick={()=>void act(`revoke:${r.id}`,async()=>{await api(`/runtimes/${r.id}`,{method:"DELETE"});setRuntimes(values=>values.map(value=>value.id===r.id?{...value,revoked:true}:value));setRevoking("");},`${r.name} registration revoked. This does not confirm that native processes have stopped.`)}><PendingIcon pending={feedback.isPending(`revoke:${r.id}`)} size={16}/>{feedback.isPending(`revoke:${r.id}`)?"Revoking…":"Confirm revoke"}</Button><Button variant="ghost" disabled={busy} onClick={()=>setRevoking("")}>Cancel</Button></div>:<Button variant="ghost" disabled={busy} onClick={()=>{feedback.clear();setRevoking(r.id);}}>Revoke</Button>}
       </article>)}</div>}
     </section>
     <section className="settings-card">
       <div className="settings-section-title"><Plus size={20}/><h2>Register a runtime</h2></div><p className="settings-description">Give the machine a recognizable name. You’ll get a temporary key to connect its worker.</p>
-      <form className="settings-inline-form" onSubmit={e=>{e.preventDefault();void act("register",async()=>{const r=await post<{enrollment_token:string}>("/runtimes",{name:name.trim()});setToken(r.enrollment_token);setCopied(false);setName("");},`${name.trim()} registered. Its temporary key is available in Runtime to connect its worker.`);}}><label htmlFor="runtime-name">Runtime name<Input id="runtime-name" required maxLength={80} disabled={busy} placeholder="e.g. MacBook or build server" value={name} onChange={e=>{feedback.clear();setDetail("");setName(e.target.value);}}/></label><Button type="submit" disabled={busy||!name.trim()} aria-busy={feedback.isPending("register")}><PendingIcon pending={feedback.isPending("register")} size={16}/>{feedback.isPending("register")?"Registering runtime…":"Register runtime"}</Button></form>
+      <form className="settings-inline-form" onSubmit={e=>{e.preventDefault();void act("register",async()=>{const r=await post<{enrollment_token:string}>("/runtimes",{name:name.trim()});setToken(r.enrollment_token);setCopied(false);setName("");},`${name.trim()} registered. Its temporary key is available in Runtime to connect its worker.`);}}><label htmlFor="runtime-name">Runtime name<Input id="runtime-name" required maxLength={80} disabled={busy} placeholder="e.g. MacBook or build server" value={name} onChange={e=>{feedback.clear();setName(e.target.value);}}/></label><Button type="submit" disabled={busy||!name.trim()} aria-busy={feedback.isPending("register")}><PendingIcon pending={feedback.isPending("register")} size={16}/>{feedback.isPending("register")?"Registering runtime…":"Register runtime"}</Button></form>
     </section>
     {token&&<section className="settings-card runtime-enrollment" aria-label="Connect your worker"><div className="settings-section-title"><KeyRound size={20}/><h2>Connect your worker</h2></div><p className="settings-description">This key can be used once and expires in 15 minutes.</p><div className="runtime-token"><Input aria-label="Enrollment token" readOnly type="password" value={token}/><Button variant="outline" onClick={()=>{void feedback.run("copy",async()=>{try{await navigator.clipboard.writeText(token);setCopied(true);return {kind:"success",message:"Enrollment token copied to clipboard."};}catch{return {kind:"error",message:"Could not copy the enrollment token. Select the token field and copy it manually."};}});}}>{copied?<Check size={16}/>:<Copy size={16}/>} {copied?"Copied":"Copy token"}</Button></div>
       <div className="runtime-instructions form-stack">

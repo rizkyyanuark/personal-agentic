@@ -63,6 +63,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { CommandInput, UsageCard, type CommandInputHandle } from "./ChatCommands";
 import { GroupList } from "./GroupList";
+import { useGroupPreferences } from "./useGroupPreferences";
+import { safeActionError } from "./actionErrors";
 import { ArchivedGroups } from "./ArchivedGroups";
 import { ChatActivity, MessageModelBadge } from "./ChatActivity";
 import { ReplyQuote } from "./ReplyQuote";
@@ -92,7 +94,6 @@ import type { Message } from "./bindings/Message";
 import type { Run } from "./bindings/Run";
 import type { Artifact } from "./bindings/Artifact";
 import type { Workspace } from "./bindings/Workspace";
-import type { GroupPreferences } from "./bindings/GroupPreferences";
 import type { StateView } from "./bindings/StateView";
 import type { Connection } from "./bindings/Connection";
 import { WorkstationStatus } from "./WorkstationStatus";
@@ -148,6 +149,17 @@ const time = (value: string) =>
   });
 const shortPath = (value: string) =>
   value.replace(/\\/g, "/").split("/").filter(Boolean).slice(-2).join("/");
+function NavigationPanel({ defaultSize, panelRef, children }: {
+  defaultSize: number;
+  panelRef: (handle: PanelImperativeHandle | null) => void;
+  children: ReactNode;
+}) {
+  // A server preference refresh must not reinitialize a panel during a drag.
+  const [initialSize] = useState(defaultSize);
+  return <Panel id="sidebar" panelRef={panelRef} collapsible collapsedSize={56}
+    defaultSize={initialSize} minSize={180} maxSize={420}>{children}</Panel>;
+}
+
 function chatMessagesPath(groupId: string, side: string | null, before?: string) {
   const query = new URLSearchParams(side ? { side_chat_id: side } : { main: "true" });
   if (before) query.set("before", before);
@@ -193,8 +205,6 @@ export default function App({
   }, [user, workspaceId]);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
-  const [acknowledgedPreferences, setAcknowledgedPreferences] = useState<GroupPreferences | null>(null);
-  const [preferencesNeedsRefresh, setPreferencesNeedsRefresh] = useState(false);
   const navigationPanel = useRef<PanelImperativeHandle | null>(null);
   const edgePointer = useRef<number | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState(() => displayName ?? "");
@@ -311,7 +321,6 @@ export default function App({
   const [messagesScope, setMessagesScope] = useState("");
   const messages = useMemo(() => messagesScope === `${groupId}:${sideChatId ?? "main"}` ? loadedMessages : [], [messagesScope, groupId, sideChatId, loadedMessages]);
   const latestMessageId = messages.at(-1)?.id;
-  const [error, setError] = useState("");
   const [deletedAgentsOpen, setDeletedAgentsOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [enrollmentToken, setEnrollmentToken] = useState("");
@@ -323,6 +332,7 @@ export default function App({
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
   const loadedScope = useRef("");
   const [runEvents, setRunEvents] = useState<Event[]>([]);
+  const [runEventsFailure, setRunEventsFailure] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<{ file: MarkdownFile; scope: string } | null>(null);
   const previewTrigger = useRef<{ element: HTMLElement; messageId?: string; href: string | null } | null>(null);
   const preview = tab === "Chat" && filePreview?.scope === `${groupId}:${sideChatId ?? "main"}` ? filePreview.file : null;
@@ -357,7 +367,7 @@ export default function App({
   const [searchMedia, setSearchMedia] = useState("documents");
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [busy, setBusy] = useState(false);
-  const sendFeedback = useActionFeedback(`chat-send:${groupId}:${sideChatId ?? "main"}`, `${tab}:${groupId}:${sideChatId}`, "contextual");
+  const sendFeedback = useActionFeedback(`chat-send:${groupId}:${sideChatId ?? "main"}`, `${tab}:${groupId}:${sideChatId}`);
   const uploadFeedback = useActionFeedback(`upload:${groupId}`, `${tab}:${groupId}:${sideChatId}`, tab === "Chat" ? "contextual" : "toast");
   const [connected, setConnected] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -385,15 +395,11 @@ export default function App({
     routeContextRef.current = { tab, groupId, newAgentProject };
   }, [groupId, sideChatId, tab, newAgentProject]);
 
+  const genericFeedback = useActionFeedback("workspace-actions");
+  const notifyAction = genericFeedback.run;
   const perform = useCallback(
-    (work: () => Promise<void>, clearError = true) =>
-      work().then(
-        () => {
-          if (clearError) setError("");
-        },
-        (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
-      ),
-    [setError],
+    (work: () => Promise<void>) => work().catch((e: unknown) => notifyAction("action-error", async () => { throw e; })),
+    [notifyAction],
   );
   const refresh = useCallback(async () => {
     const response = await api<StateView>("/state");
@@ -416,6 +422,10 @@ export default function App({
       setMessagesScope(scope);
     }
   }, [setMessages, setMessagesScope]);
+  const sidebarPreferences = useGroupPreferences(
+    data?.group_preferences ?? { pinned: [], order: [], sort: "custom", sections: [], collapsed: [] },
+    async next => { await put("/preferences/groups", next); }, refresh,
+  );
   useEffect(() => {
     void perform(async () => {
       const fragment = new URLSearchParams(location.hash.slice(1)).get("key");
@@ -496,26 +506,29 @@ export default function App({
       void api<Message[]>(`${chatMessagesPath(groupId, sideChatId, messages[0].id)}&limit=200`).then(older => {
         if (cancelled) return;
         if (!older.length) {
-          setError("Original message is no longer available in this conversation.");
+          void notifyAction("quote-error", async () => { throw new Error("Original message is no longer available in this conversation."); });
           setReplyTarget(null);
         } else {
           setMessages(current => [...new Map([...older, ...current].map(message => [message.id, message])).values()]);
         }
       }, (reason: unknown) => {
         if (!cancelled) {
-          setError(reason instanceof Error ? reason.message : String(reason));
+          void notifyAction("quote-error", async () => { throw reason; });
           setReplyTarget(null);
         }
       });
     });
     return () => { cancelled = true; cancelAnimationFrame(frame); };
-  }, [replyTarget, groupId, sideChatId, messagesScope, messages]);
+  }, [replyTarget, groupId, sideChatId, messagesScope, messages, notifyAction]);
   useEffect(() => {
-    if (selectedRun)
-      void perform(async () =>
-        setRunEvents(await api<Event[]>(`/runs/${selectedRun.id}/events`)),
-      );
-  }, [selectedRun, data?.cursor, perform]);
+    if (!selectedRun) return;
+    const controller = new AbortController();
+    void api<Event[]>(`/runs/${selectedRun.id}/events`, { signal: controller.signal }).then(events => {
+      if (!controller.signal.aborted) { setRunEvents(events); setRunEventsFailure(null); }
+    }, () => { if (!controller.signal.aborted) setRunEventsFailure(selectedRun.id); });
+    return () => controller.abort();
+  }, [selectedRun, data?.cursor]);
+
 
   const group = data?.groups.find((g) => g.id === groupId);
   const groupClosed = !!(group?.archived_at || group?.deleted_at);
@@ -553,7 +566,16 @@ export default function App({
       const fingerprint = JSON.stringify(content);
       if (pendingMessage.current?.fingerprint !== fingerprint)
         pendingMessage.current = { fingerprint, id: requestId() };
-      const sent = await post<Message>("/messages", { id: pendingMessage.current.id, ...content });
+      if (content.body.trim() === "/usage") sendFeedback.watchRequest(pendingMessage.current.id);
+      let sent: Message;
+      try { sent = await post<Message>("/messages", { id: pendingMessage.current.id, ...content }); }
+      catch (error) {
+        if (error instanceof ApiFailure && error.status >= 400 && error.status < 500 && error.status !== 408) {
+          const detail = safeActionError(error, "The server rejected this request.").slice(0, 350);
+          throw new Error(`Message rejected: ${detail} Your draft is kept.`);
+        }
+        throw error;
+      }
       const sameChat = groupRef.current.groupId === groupId && groupRef.current.sideChatId === sideChatId;
       if (sent.command === "btw" && sent.side_chat_id && sameChat && groupRef.current.tab === "Chat") go({ sideChatId: sent.side_chat_id, view: "Chat" });
       pendingMessage.current = null;
@@ -647,11 +669,6 @@ export default function App({
                 org/.state/owner.key.
               </p>
             </form>
-          )}
-          {error && (
-            <div role="alert" className="error">
-              {error}
-            </div>
           )}
           <span className="local-label">
             <ShieldCheck size={14} /> Native on this machine
@@ -796,19 +813,11 @@ export default function App({
         <GroupList
           readOnly={role !== "owner"}
           groups={data.groups}
-          preferences={data.group_preferences}
-          acknowledged={acknowledgedPreferences}
-          needsRefresh={preferencesNeedsRefresh}
-          onAcknowledgedChange={setAcknowledgedPreferences}
-          onNeedsRefreshChange={setPreferencesNeedsRefresh}
+          persistence={sidebarPreferences}
           selected={["Organization", "Live Preview", "Action board", "User settings", "Profile", "Workspace settings"].includes(tab) ? null : groupId}
           running={data.runs.filter(active).map((r) => r.group_id)}
           onCreate={() => setGroupEditor({ id: "", name: "", description: "", member_ids: [], human_ids: [], project:null, scope_levels: null, chat_lead_id: null, archived_at: null, deleted_at: null })}
           onCreateProject={() => setGroupEditor({ id:"", name:"", description:"", project:{workdir:{path:"",canonical_path:"",git_root:null,ssh_host:null},members:[]},scope_levels:null,chat_lead_id:null,archived_at:null,deleted_at:null })}
-          onSave={async (preferences) => {
-            await put("/preferences/groups", preferences);
-          }}
-          onRefresh={refresh}
           onSelect={(id) => {
             go({ groupId: id, view: "Chat", agentId: null, runId: null });
             setReply(null);
@@ -947,17 +956,9 @@ export default function App({
           }
         }}
       >
-        {!mobile && <Panel
-          id="sidebar"
-          panelRef={onSidebarPanelRef}
-          collapsible
-          collapsedSize={56}
-          defaultSize={getSavedExpandedWidth()}
-          minSize={180}
-          maxSize={420}
-        >
+        {!mobile && <NavigationPanel panelRef={onSidebarPanelRef} defaultSize={getSavedExpandedWidth()}>
           {sidebarCollapsed ? railNavigation : navigation}
-        </Panel>}
+        </NavigationPanel>}
         {!mobile && <Separator
           elementRef={separatorRef}
           className="panel-separator navigation-separator"
@@ -1087,14 +1088,6 @@ export default function App({
                 {q.agent_name} needs your answer · {data?.groups.find(g => g.id === q.group_id)?.name}{q.side_chat_id ? " · Side chat" : ""}
               </button>)}
             </div>}
-            {error && (
-              <div className="banner error" role="alert">
-                {error}
-                <button aria-label="Dismiss error" onClick={() => setError("")}>
-                  <X size={16} />
-                </button>
-              </div>
-            )}
             {!connected && (
               <div className="banner notice" role="status">
                 Reconnecting to your workspace…
@@ -1715,6 +1708,7 @@ export default function App({
                     selectedRun
                   }
                   events={runEvents}
+                  activityUnavailable={runEventsFailure === selectedRun.id}
                   questions={(data?.questions ?? []).filter(q => q.run_id === selectedRun.id)}
                   onRefresh={refresh}
                   onCancel={() =>
@@ -1909,18 +1903,21 @@ function Empty({
 function RunInspector({
   run,
   events,
+  activityUnavailable,
   onCancel,
   questions,
   onRefresh,
 }: {
   run: Run;
   events: Event[];
+  activityUnavailable: boolean;
   onCancel: () => void;
   questions: QuestionRequest[];
   onRefresh: () => Promise<void>;
 }) {
   return (
     <div className="inspector-body">
+      {activityUnavailable && <p role="status">Run activity could not refresh. Previously loaded activity is retained.</p>}
       <Badge variant="outline">{run.status}</Badge>
       <h2>{run.profile.name}</h2>
       {run.profile.position && <p className="muted">{run.profile.position}</p>}

@@ -161,6 +161,25 @@ Verified archive cache is reused. No native process stopping is implied by UI Re
 ### Controller package inventory and release
 
 Package delivery is disabled until an operator configures one trusted inventory.
+Production Compose forwards `AE_WORKER_PACKAGE_DIR` to the platform container,
+defaulting to `/data/worker-packages/current` in the existing persistent data volume.
+For an immutable release set it to `/data/worker-packages/FULL_COMMIT`. An operator
+copies the complete four-file inventory there from the authenticated GitLab package
+registry, verifies its manifests and archive hashes, and keeps it readable by UID
+10001. No GitLab credential needs to be installed on the controller for this path.
+Back up configuration and state and use the production release procedure to apply
+configuration changes; preserve the previous inventory for rollback.
+
+A first release may use a native Windows build and the matching successful Linux
+ARM64 CI backend artifact, packaged with `infra/ci/worker_packages.py` and published
+as the same source commit. Verify both actual executables; do not label fixtures as
+release binaries. The optional Windows runner automates subsequent releases.
+
+Installers distinguish HTTP 401 (invalid/expired/consumed/revoked credential), 403
+(access denied), 404 (old/wrong controller route), 503 (package configuration or
+inventory unavailable), and transport failures. A 503 does not establish token
+rejection; correct the controller inventory before asking users for a new token.
+
 Set `AE_WORKER_PACKAGE_URL` to a pinned HTTPS GitLab Generic Package directory:
 `https://gitlab.example/api/v4/projects/PROJECT_ID/packages/generic/worker/FULL_COMMIT/`.
 Use optional `AE_WORKER_PACKAGE_TOKEN_FILE` for a server-side read-only package
@@ -452,3 +471,31 @@ npm run build
 Run `scripts/verify-decentralized.py --help` for the real HTTP/Matrix/worker smoke test.
 It requires a running controller, two real Matrix test identities and an enrolled runtime.
 No provider or Matrix mocks are used.
+
+## Runtime-aware `/usage`
+
+`/usage` inspects the effective execution environment of enabled agents in the
+current conversation. A project workdir overrides individual agent workdirs,
+just as it does for execution. Sources are deduplicated by runtime/SSH target and
+harness, not by a guessed shared account. Results retain runtime name, harness,
+inspection timestamp, scope and status. Different account quotas are never added.
+
+Codex uses its native read-only `account/rateLimits/read` RPC on that environment.
+It does not start an agent turn or load the project `.env`. A registered worker
+must advertise `read_operations.usage = 1`; older workers receive an explicit
+upgrade result and are never sent an unknown operation. Update the worker using
+the existing verified installer when this capability is needed. An offline worker
+does not cause inspection of the controller's account as a fallback.
+
+Antigravity account quota/reset metadata is unavailable in this integration.
+OpenCode rows describe saved conversation measurements, not remaining account
+quota. Missing token/cost fields remain unreported. Native Codex reads are bounded
+to 20 seconds; the existing worker metadata/SSH adapters retain their own deadlines.
+Inspection helpers own and terminate only their own process trees.
+
+Acceptance and collection are separate. The request ID is persisted before quota
+collection; retrying that ID returns its existing accepted message. Completed
+sources remain visible when another fails. A controller restart marks unfinished
+reports interrupted and requires a new `/usage`, without replaying uncertain reads.
+Legacy saved usage reports remain readable. This does not change login identities,
+Matrix membership or agent permissions.
