@@ -1,0 +1,12 @@
+# Optional controller-only overlay. Enable only after the operator configures local Synapse.
+services:
+  platform:
+    environment:
+      AE_MATRIX_ONBOARDING: "true"
+      AE_MATRIX_SERVER_NAME: "${AE_MATRIX_SERVER_NAME:?Set the exact local Matrix server name}"
+      AE_MATRIX_REGISTRATION_SECRET_FILE: /run/ae-matrix/registration.secret
+    volumes:
+      - type: bind
+        source: "${AE_MATRIX_REGISTRATION_SECRET_FILE:?Select a dedicated protected secret file}"
+        target: /run/ae-matrix/registration.secret
+        read_only: true

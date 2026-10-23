@@ -13,6 +13,7 @@ mod fleet;
 mod group_scope;
 mod knowledge;
 mod matrix;
+mod matrix_onboarding;
 mod model;
 mod opencode;
 mod platform;

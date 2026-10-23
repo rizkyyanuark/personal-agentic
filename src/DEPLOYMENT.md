@@ -499,3 +499,76 @@ sources remain visible when another fails. A controller restart marks unfinished
 reports interrupted and requires a new `/usage`, without replaying uncertain reads.
 Legacy saved usage reports remain readable. This does not change login identities,
 Matrix membership or agent permissions.
+
+## New-member Matrix invitation links
+
+Existing **Workspace settings → People → Invite Matrix user** grants workspace
+membership to an existing Matrix ID. It does not create an account or change its
+password. New-member links are a separate, opt-in path on that same screen.
+Matrix and owner-key login order, existing sessions and display names are unchanged.
+
+One-time operator setup (separate from inviting a teammate):
+
+1. Use a supported local Synapse with shared-secret registration, public signup
+   disabled, and MAS disabled. The adapter follows the official
+   [Synapse nonce/HMAC registration API](https://element-hq.github.io/synapse/latest/admin_api/register_api.html).
+2. Put the matching registration secret (at least 32 bytes) in a dedicated file
+   outside Git and the public frontend. On Linux, use an absolute regular file
+   owned by the service operator, mode 0600 or 0400; group/world access is rejected.
+   On Windows, restrict its ACL to the controller user and SYSTEM. Do not mount
+   Synapse's complete data/config directory or the Docker socket into the app.
+3. Set `AE_MATRIX_ONBOARDING=true`, `AE_MATRIX_SERVER_NAME` to the actual server
+   name in Matrix IDs (not necessarily its HTTP hostname), and
+   `AE_MATRIX_REGISTRATION_SECRET_FILE` to that protected absolute filename.
+   `AE_MATRIX_HOMESERVER` remains the existing fixed internal Synapse origin.
+   HTTPS is required for the browser-facing public URL outside localhost; trust
+   the operator-controlled internal connection. Redirects are not followed.
+   Native controllers read these environment variables. Docker controllers can
+   explicitly include `compose.onboarding.example.yaml`; its single-file mount
+   is read-only. Normal Compose and production configuration stay disabled.
+4. Restart the controller through the environment's reviewed deployment procedure.
+   People checks configuration and the supported nonce endpoint. A wrong shared
+   secret can only be discovered when Synapse authenticates a registration; a
+   readiness indicator is not a promise that every username/password is valid.
+   Do not enable sensitive Synapse registration debug logging or request-body logging.
+
+Per teammate:
+
+1. Owner selects the workspace, opens **People**, clicks **Create invitation**,
+   then copies the link and shares it privately. The raw link is shown only then;
+   the invitation list contains status/expiry, never the link or a password.
+2. The teammate opens the link in a browser; no Matrix app or personal-agentic
+   installation is required. They choose a local username and password and confirm
+   the password. Successful completion means both a regular Matrix account and a
+   Member membership have been confirmed. It does not confer Synapse admin or
+   workspace Owner privileges.
+3. They use **Go to sign in** and the normal Matrix login. If another user is
+   already signed in, use a separate browser profile; acceptance never signs them
+   out automatically. The owner separately grants private room/project access.
+   Existing Owner promotion remains a separate action in People.
+
+Links are bearer credentials, valid for 24 hours and one acceptance; forwarding a
+link permits someone else to choose the account. There is no email identity
+verification. Store/share it privately. `/join#invite=…` keeps it out of HTTP URLs;
+its fragment is removed into document memory, never browser storage. Keep the
+page open through completion. Reloading discards the private claim; reopen the
+original link for status, and ask the owner to inspect membership or invite the
+verified existing Matrix ID if acceptance was interrupted. No account is attached
+based only on username existence. Already-used links cannot create another user.
+
+An uncertain registration resumes by authenticating the exact claimed local
+account. A confirmed account with failed membership stays pending; retry the same
+claim and credentials without recreating/resetting the account. Unknown outcomes,
+expired/revoked links, authority loss and exhausted attempts never grant access.
+A Matrix account created before failure/revocation remains; the platform does not
+automatically delete it or claim a complete rollback. In-flight revocation returns
+an explicit conflict; wait for its outcome, then revoke or manage the membership.
+There is one exclusive claim, 10 attempts per invitation, 60 public checks/accepts
+per minute per controller, 5 creation attempts per owner/workspace per minute and
+50 pending invitations per workspace. On startup an abandoned claim becomes
+unresolved; a stale operation lease is recoverable after 90 seconds. Account
+secrets and raw invitation credentials are never written to platform audit events.
+
+Disabling onboarding preserves accounts, sessions, memberships and invitation
+records; normal login and inviting existing Matrix IDs remain available. Production
+secret provisioning and enabling this feature need a separately authorized release.
