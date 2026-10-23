@@ -130,3 +130,12 @@
 
 .runtime-edit { order: 1; flex-basis: 100%; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); }
 .new-agent-dialog { max-height: calc(100dvh - 40px); overflow-y: auto; }
+
+.matrix-invitations { display: flex; flex-direction: column; gap: 12px; padding-block: 20px; border-block: 1px solid var(--border); }
+.matrix-invitations p { margin: 0; }
+.matrix-invite-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.matrix-invite-link { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.matrix-invite-link input { width: 100%; min-width: 0; }
+.matrix-invite-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.matrix-invite-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.matrix-invite-list li > div { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }

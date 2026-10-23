@@ -91,6 +91,7 @@ impl Platform {
             CREATE TABLE IF NOT EXISTS account_profiles(user TEXT PRIMARY KEY, display_name TEXT NOT NULL, updated_at TEXT NOT NULL);
             INSERT OR IGNORE INTO tenants(id,name) VALUES('default','My workspace');
             INSERT OR IGNORE INTO members VALUES('default','owner','owner');")?;
+        crate::matrix_onboarding::migrate(&db)?;
         let tenants = {
             let mut q = db.prepare("SELECT id,name,deleted FROM tenants")?;
             q.query_map([], |r| {
@@ -220,6 +221,9 @@ impl Platform {
                     "Cross-origin request rejected".into(),
                 ));
             }
+        }
+        if path.starts_with("/api/invitations/") {
+            return crate::matrix_onboarding::recipient(self, req).await;
         }
         if path == "/api/auth" {
             return Ok(axum::Json(json!({"matrix":self.homeserver.is_some()})).into_response());
@@ -564,6 +568,9 @@ impl Platform {
                     "Workspace owner required".into(),
                 ));
             }
+            if sub == "invitations" || sub.starts_with("invitations/") {
+                return crate::matrix_onboarding::owner(self, id, &user, sub, req).await;
+            }
             if sub == "members" && method == Method::GET {
                 return Ok(axum::Json(self.members(id)?).into_response());
             }
@@ -874,6 +881,10 @@ pub fn router(platform: Arc<Platform>) -> Router {
                     Ok(r) => r,
                     Err(e) => e.into_response(),
                 };
+                response.headers_mut().insert(
+                    header::REFERRER_POLICY,
+                    "no-referrer".parse().expect("static"),
+                );
                 response
                     .headers_mut()
                     .insert(header::CACHE_CONTROL, "no-store".parse().expect("static"));

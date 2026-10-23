@@ -9,6 +9,7 @@ import { ValuePicker } from "./ValuePicker";
 import { ArrowRight, Eye, EyeOff, LoaderCircle, Settings2, Plus, Users, Building2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./components/ui/dialog";
 import "./platform-settings.css";
+import { MatrixInvitations } from "./MatrixInvitations";
 type Tenant = { id: string; name: string; deleted: boolean; role: string };
 type Person = { user: string; role: string };
 export function WorkspaceGate() {
@@ -363,6 +364,7 @@ function SelectedWorkspaceSettings({
             return { kind: "success", message: `Removed ${p.user} from ${workspace.name}.` };
           }, { errorMessage: `Removal of ${p.user} could not be confirmed.` });
         }}>{feedback.isPending(`remove:${p.user}`) ? "Removing…" : "Remove"}</Button>}</div>)}</div>
+        <MatrixInvitations key={selected} tenant={selected} />
         <form className="settings-inline-form" onSubmit={e => {
           e.preventDefault();
           const trimmed = invite.trim();

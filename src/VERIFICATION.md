@@ -701,3 +701,34 @@ an already configured local Synapse. Supply the password through a private test
 process environment, never in recorded commands. Configure the disposable
 controller's Matrix bot through its existing settings. This tests current login
 and membership enforcement; it does not implement invitation onboarding.
+
+## Matrix member invitation onboarding
+
+Build the native controller and web bundle locally. Set `AE_TEST_BINARY` to the
+built native executable and `AE_TEST_OUTPUT` to a new, ignored directory, then run
+`python -B src/backend/tests/matrix_member_onboarding.py` from the repository root.
+Docker Desktop must already be running and Chrome must be installed. The harness
+creates its own local Synapse v1.161.0 container (512 MiB, 0.5 CPU), new platform
+SQLite and two isolated Chrome contexts on loopback ports 18811–18813. It never
+uses the user's local application volumes, production, SSH or a provider.
+
+The fixture's forwarding proxy passes requests to real Synapse. For lost-response
+acceptance it discards one genuine registration response after the account is
+created. A temporary trigger in the disposable platform DB interrupts one real
+membership insert. Neither boundary creates fake accounts or bypasses product
+authentication. Browser clipboard denial is the only browser permission stub.
+Expiry, exhausted attempts, abandoned leases and issuer-role changes are controlled
+state fixtures in the same real database. Receipts include only labels, statuses
+and test IDs, never passwords, links, owner keys or registration secrets. Private
+fixture state remains ignored. The test stops its controller and removes only its
+own temporary Synapse container; it never deletes user data/volumes.
+
+Required checks include owner/member/anonymous authorization, tampered request
+fields, configured/unconfigured provisioning, real non-admin account creation,
+no retained temporary registration session, ordinary Matrix login, room/workspace
+isolation, single-use/replay/concurrency, expiry/revoke, username collision,
+restart, genuine partial failure and authenticated reconciliation. Run affected
+backend tests with `cargo test --workspace --locked matrix_invite` and web checks
+with `npm run lint --workspace frontend` and `npm run build --workspace frontend`.
+Actual commands/results and any limitations belong in the active OpenSpec change's
+verification report; this runbook is not a claim that an unrun test passed.
