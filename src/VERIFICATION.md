@@ -732,3 +732,21 @@ backend tests with `cargo test --workspace --locked matrix_invite` and web check
 with `npm run lint --workspace frontend` and `npm run build --workspace frontend`.
 Actual commands/results and any limitations belong in the active OpenSpec change's
 verification report; this runbook is not a claim that an unrun test passed.
+
+
+## CI pipeline admission
+
+Run `python -B infra/ci/tests/workflow_test.py` from the repository root. The
+standard-library contract test reads the actual workflow and release-job rules
+and evaluates their supported equality/conjunction syntax; it rejects unsupported
+syntax rather than pretending to implement the full GitLab evaluator. No GitLab
+API, runner, SSH, production service or provider is contacted.
+
+Only merge-request events and the default branch (main) may create pipelines.
+Feature-branch pushes are rejected even before an MR exists; opening/updating its
+MR runs verification. Default-branch push/manual/scheduled pipelines retain their
+existing release gates, including explicitly selected protected-main worker
+packages. Tag and non-default-branch manual/scheduled pipelines are rejected.
+The production_config job runs the same test. Actual GitLab scheduler behavior
+is established only after a later authorized push/MR; local contract tests do not
+claim a live pipeline was executed.
