@@ -1,9 +1,8 @@
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"'
-      when: never
-    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - when: never
 
 stages:
   - verify
@@ -122,6 +121,7 @@ production_config:
   script:
     - python -B infra/production/tests/release_test.py
     - python -B infra/ci/tests/deploy_test.py
+    - python -B infra/ci/tests/workflow_test.py
     - python -B infra/ci/tests/worker_packages_test.py
     - python -B infra/ops/tests/maintenance_test.py
     - python -B infra/ops/tests/measure_test.py
