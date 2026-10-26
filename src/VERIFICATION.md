@@ -750,3 +750,63 @@ packages. Tag and non-default-branch manual/scheduled pipelines are rejected.
 The production_config job runs the same test. Actual GitLab scheduler behavior
 is established only after a later authorized push/MR; local contract tests do not
 claim a live pipeline was executed.
+
+
+## Workspace invitation experience
+
+Workspace settings keeps People and Invitations distinct. **Invite teammate** opens
+one dialog: **Create invite link** is the default, while **Existing Matrix account**
+accepts a Matrix ID and the existing Member/Owner role choice. Opening the dialog
+or changing tabs never creates an invitation. New-account links always grant
+Member access; account creation does not sign the recipient in automatically.
+
+A newly displayed link remains in memory across dialog close/reopen and tab
+changes in the same selected workspace. Hide link, workspace changes, logout,
+and document exit discard it. Inventory has statuses and expiry, not recoverable
+raw links. Clipboard denial leaves selectable manual copying. No link/password
+is saved to browser storage or printed in notifications/evidence.
+
+The recipient form shows brief field help with full username/password/account
+rules under an accessible disclosure. Partial acceptance has its own same-account
+recovery instructions. A confirmed registration shows **Account created** and
+**Sign in**. Refreshing the token-free page or reopening an already-used link
+shows neutral sign-in/new-link guidance; it does not prove signup failed.
+Transport errors and retryable 429/5xx inspection responses have a read-only retry.
+
+Use a disposable loopback controller with the candidate frontend mounted read-only,
+a matching local backend, and separate real Synapse/data/secret from the user's
+normal localhost application. Set AE_TEST_URL, AE_TEST_ORG, AE_TEST_OUTPUT and
+AE_TEST_DISPOSABLE=true for the owned fixture. The partial-membership regression
+also requires AE_TEST_SQLITE_FAULTS=true: it temporarily rejects one insert into
+that fixture's actual SQLite members table and removes the trigger before retry.
+Use AE_TEST_SQLITE_VOLUME=personal-agentic-invitations-test-data and set
+AE_TEST_SQLITE_IMAGE to the already-installed Synapse image digest. The helper
+uses that owned Linux volume so Windows/Linux WAL caches cannot mask the fault.
+Set AE_TEST_MATRIX_CONTAINER=personal-agentic-invitations-test-matrix and
+AE_TEST_MATRIX_URL to its loopback endpoint for the real outage regression.
+Never enable this option against user, shared, or production data.
+
+From src, run:
+
+```powershell
+npm run lint --workspace frontend
+npm run build --workspace frontend -- --outDir '../../.state/refine-workspace-invitations/frontend-dist'
+node frontend/tests/matrix-member-onboarding.mjs
+```
+
+Verify candidate served assets against the built files first. Browser assertions
+retain real account creation, membership, normal login, Owner/Member permissions,
+reserved-name checks, token-free URLs/storage, and unchanged owner sessions.
+Additional coverage checks keyboard tabs/focus return, retained link/drafts,
+manual copying, accurate inventory/revoke behavior, refresh/reopened-link recovery,
+partial acceptance, 320/390 px layouts, actual 200 percent browser zoom, reduced
+motion, one notification per action, and zero agent runs.
+
+Fault injection is limited and explicit: denied clipboard permission, aborted or
+429/503 gateway responses for inspection, and an opt-in temporary SQLite membership
+insert trigger plus one unknown persisted status with fixture constraints
+explicitly bypassed to exercise forward-compatible rendering. A delayed response
+retains the actual completed server mutation. Successful API/provisioning/authentication paths use the real
+controller, SQLite and Synapse. Screenshots mask link/password controls. Keep
+receipts, logs, candidate state and fixture secrets under ignored protected .state;
+do not commit them. This section documents checks, not a claim they have run.
