@@ -364,8 +364,8 @@ function SelectedWorkspaceSettings({
             return { kind: "success", message: `Removed ${p.user} from ${workspace.name}.` };
           }, { errorMessage: `Removal of ${p.user} could not be confirmed.` });
         }}>{feedback.isPending(`remove:${p.user}`) ? "Removing…" : "Remove"}</Button>}</div>)}</div>
-        <MatrixInvitations key={selected} tenant={selected} />
-        <form className="settings-inline-form" onSubmit={e => {
+        <MatrixInvitations key={selected} tenant={selected} workspaceName={workspace.name} existingAccountForm={
+          <form className="settings-inline-form" onSubmit={e => {
           e.preventDefault();
           const trimmed = invite.trim();
           if (!trimmed || busy) return;
@@ -386,9 +386,10 @@ function SelectedWorkspaceSettings({
           }, { errorMessage: `Invitation for ${trimmed} could not be confirmed.` });
         }}>
           <label htmlFor="workspace-invite">Invite Matrix user<Input id="workspace-invite" value={invite} onChange={e => setInvite(e.target.value)} placeholder="@person:server" required disabled={busy} /></label>
-          <label htmlFor="invite-role">Role<ValuePicker id="invite-role" value={inviteRole} onValueChange={setInviteRole} options={[{ value: "member", label: "Member" }, { value: "owner", label: "Owner" }]} disabled={busy} /></label>
+          <label htmlFor="invite-role">Role<ValuePicker id="invite-role" aria-label="Role" value={inviteRole} onValueChange={setInviteRole} options={[{ value: "member", label: "Member" }, { value: "owner", label: "Owner" }]} disabled={busy} /></label>
           <Button type="submit" variant="outline" disabled={busy || !invite.trim()} aria-busy={feedback.isPending("invite")}><PendingIcon pending={feedback.isPending("invite")} size={16} />{feedback.isPending("invite") ? "Inviting…" : "Invite"}</Button>
         </form>
+        } />
         <details className="workspace-danger"><summary>Delete workspace</summary><p>History is retained. You can restore this workspace later.</p>
           {deletedId === workspace.id ? (
             <Button

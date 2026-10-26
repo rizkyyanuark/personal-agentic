@@ -534,15 +534,19 @@ One-time operator setup (separate from inviting a teammate):
 
 Per teammate:
 
-1. Owner selects the workspace, opens **People**, clicks **Create invitation**,
-   then copies the link and shares it privately. The raw link is shown only then;
-   the invitation list contains status/expiry, never the link or a password.
+1. Owner opens Workspace settings and **Invite teammate**, keeps the default
+   **Create invite link** tab, and clicks **Create invitation**. Copy the link and
+   share it privately. The same link remains available after closing/reopening
+   the dialog in this workspace/document; Hide link, workspace switch, logout,
+   or leaving the page discards it. The inventory contains status/expiry, never
+   retrievable raw links or passwords. For an existing account, use the other
+   **Existing Matrix account** tab and the current role selector.
 2. The teammate opens the link in a browser; no Matrix app or personal-agentic
    installation is required. They choose a local username and password and confirm
    the password. Successful completion means both a regular Matrix account and a
    Member membership have been confirmed. It does not confer Synapse admin or
    workspace Owner privileges.
-3. They use **Go to sign in** and the normal Matrix login. If another user is
+3. They use **Sign in** and the normal Matrix login. If another user is
    already signed in, use a separate browser profile; acceptance never signs them
    out automatically. The owner separately grants private room/project access.
    Existing Owner promotion remains a separate action in People.
