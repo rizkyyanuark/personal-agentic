@@ -116,6 +116,11 @@ export async function verifyWorkspaceNavigation({ page, request, call, state, un
   assert(railBox.width >= 50 && railBox.width <= 70, `Rail width (${railBox.width}px) is ~56px`);
   await expect(page.locator(".sidebar.rail").getByRole("button", { name: /Search/ })).toBeVisible();
   await expect(page.locator(".sidebar.rail").getByRole("button", { name: "Account menu", exact: true })).toBeVisible();
+  const railSearch = page.locator(".sidebar.rail").getByRole("button", { name: /^Search #/ });
+  await railSearch.click();
+  await expect(page.getByRole("textbox", { name: "Search query" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(railSearch).toBeFocused();
   // Test tooltip on rail buttons (hover and keyboard focus)
   const expandBtn = page.getByRole("button", { name: "Expand navigation", exact: true });
   await expandBtn.hover();
@@ -202,9 +207,6 @@ export async function verifyWorkspaceNavigation({ page, request, call, state, un
   await page.getByRole("button", { name: "Expand Product team", exact: true }).click();
   await page.screenshot({ path: path.join(directory, "desktop-sections.png") });
 
-  const workdir = path.join(org, "navigation-workdir"); await mkdir(workdir, { recursive: true });
-  await writeFile(path.join(workdir, "proof.txt"), "WORKSPACE_ACTIVITY_OK");
-  const workspace = (await call("/workspaces/probe", { path: workdir })).workspace;
   const original = (await state()).agents.find((a) => a.id === "ceo") ?? (await state()).agents[0];
   let runId = "no-provider";
   let recordedModel = "none";
@@ -213,6 +215,9 @@ export async function verifyWorkspaceNavigation({ page, request, call, state, un
   let failed = { id: "no-failed-run" };
 
   if (!noProvider) {
+  const workdir = path.join(org, "navigation-workdir"); await mkdir(workdir, { recursive: true });
+  await writeFile(path.join(workdir, "proof.txt"), "WORKSPACE_ACTIVITY_OK");
+  const workspace = (await call("/workspaces/probe", { path: workdir })).workspace;
     const catalog = await call("/codex/settings", undefined, "GET");
     const model = catalog.models.find((m) => m.slug === "gpt-5.6-luna") ?? catalog.models.find((m) => m.slug === catalog.model);
     effort = model.supported_reasoning_levels.find((r) => r.effort === "low")?.effort ?? model.default_reasoning_level;
@@ -480,6 +485,18 @@ async function verifySidebarZoom({ page, directory, base }) {
     const metrics = await candidate.evaluate(() => ({ innerWidth, innerHeight, outerWidth, devicePixelRatio, visualViewportScale: visualViewport?.scale ?? null, cssZoom: getComputedStyle(document.documentElement).zoom }));
     assert(metrics.devicePixelRatio >= 1.9 && metrics.devicePixelRatio <= 2.1 && metrics.innerWidth >= 930 && metrics.innerWidth <= 990, `Native 200% layout zoom required: ${JSON.stringify(metrics)}`);
     assert(metrics.visualViewportScale === 1 && ["1", "normal"].includes(metrics.cssZoom), "Sidebar zoom acceptance excludes CSS zoom and pinch scaling");
+    await candidate.goto("/settings/profile");
+    await expect(candidate.locator("#account-display-name")).toBeVisible();
+    assert(await candidate.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Profile fits actual browser 200 percent zoom");
+    await candidate.screenshot({ path: path.join(directory, "profile-browser-zoom-200.png") });
+    await candidate.getByRole("button", { name: "Search #General", exact: true }).click();
+    await expect(candidate.getByRole("textbox", { name: "Search query" })).toBeFocused();
+    const zoomDialog = candidate.getByRole("dialog", { name: "Search #General", exact: true });
+    assert(await zoomDialog.evaluate(element => { const rect = element.getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth + 1; }), "Search fits actual browser 200 percent zoom");
+    await zoomDialog.evaluate(async element => Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => null))));
+    await candidate.screenshot({ path: path.join(directory, "search-browser-zoom-200.png") });
+    await candidate.keyboard.press("Escape");
+    await candidate.goto("/groups/general/chat");
     const expanded = await verifySidebarLayout(candidate, "browser-zoom-200");
     await candidate.getByRole("button", { name: "Collapse navigation", exact: true }).click();
     await expect.poll(async () => Math.round((await candidate.locator("#sidebar").boundingBox()).width)).toBe(56);
