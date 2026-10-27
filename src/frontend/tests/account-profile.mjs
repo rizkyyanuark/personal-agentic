@@ -146,9 +146,12 @@ async function staleWorkspaceResponse(page, context, workspaces, savedName, suff
   const oldName = method === "PUT" ? `Old PUT ${suffix}` : savedName;
   const currentName = `Current ${method} ${suffix}`;
   if (method === "GET") {
-    await enterName(page, "🚀".repeat(65));
+    const reject = route => route.abort("failed");
+    await page.route("**/api/me/profile", reject);
+    await enterName(page, `Unconfirmed ${suffix}`);
     await page.getByRole("button", { name: "Save profile", exact: true }).click();
-    await oneOutcome(page, "Display name cannot exceed 64 characters.");
+    await oneOutcome(page, "Could not save profile. Your draft has been kept.");
+    await page.unroute("**/api/me/profile", reject);
     await dismissToasts(page);
   }
   let releaseResponse;
@@ -177,6 +180,9 @@ async function staleWorkspaceResponse(page, context, workspaces, savedName, suff
       await page.getByRole("button", { name: "Check saved profile", exact: true }).click();
     }
     await expect.poll(() => forwarded).toBe(true);
+    await expect(page.getByRole("button", { name: "Save profile", exact: true })).toBeDisabled();
+    await expect(page.locator("#account-display-name")).toBeDisabled();
+    if (method === "PUT") await expect(page.getByRole("button", { name: "Save profile", exact: true })).toHaveText("Saving…");
     assert.equal((await api(context, "/me")).display_name, oldName, "The held response must come from the real persisted profile");
     await switchWorkspace(page, workspaces[1].id);
     await saveName(page, currentName, currentName);
@@ -293,11 +299,25 @@ export async function verifyAccountProfile({ page, call, org, directory, base, o
       });
       assert.deepEqual(nameLayout, { contained: true, separated: true, documentFits: true }, "Long names must fit without overlapping the role");
       await ownerPage.screenshot({ path: path.join(proofDirectory, "owner-unicode-64.png"), fullPage: true });
+      for (const width of [390, 320]) {
+        await ownerPage.setViewportSize({ width, height: 844 });
+        await expect(ownerPage.locator("#account-display-name")).toBeVisible();
+        assert(await ownerPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Profile fits ${width}px with a long saved name`);
+        await ownerPage.screenshot({ path: path.join(proofDirectory, `profile-long-name-${width}.png`), fullPage: true });
+      }
+      await ownerPage.setViewportSize({ width: 1440, height: 980 });
+      await enterName(ownerPage, `  ${unicode64}  `);
+      await expect(ownerPage.getByRole("button", { name: "Save profile", exact: true })).toBeDisabled();
+      await ownerPage.locator("#account-display-name").fill("Bad" + String.fromCharCode(7));
+      await expect(ownerPage.locator("#profile-name-error")).toHaveText("Display name cannot contain control characters.");
+      await expect(ownerPage.getByRole("button", { name: "Save profile", exact: true })).toBeDisabled();
       await dismissToasts(ownerPage);
       const beforeInvalidPuts = ownerPuts;
       await enterName(ownerPage, "🚀".repeat(65));
-      await ownerPage.getByRole("button", { name: "Save profile", exact: true }).click();
-      await oneOutcome(ownerPage, "Display name cannot exceed 64 characters.");
+      await expect(ownerPage.locator("#profile-name-error")).toHaveText("Display name cannot exceed 64 characters.");
+      await expect(ownerPage.locator("#account-display-name")).toHaveAttribute("aria-invalid", "true");
+      await expect(ownerPage.getByRole("button", { name: "Save profile", exact: true })).toBeDisabled();
+      await expect(ownerPage.locator(".action-toast:not([data-ending-style])")).toHaveCount(0);
       assert.equal(ownerPuts, beforeInvalidPuts, "65 scalars must be rejected in the form before a PUT");
       assert.equal(Array.from(await ownerPage.locator("#account-display-name").inputValue()).length, 65);
       assert.equal((await api(ownerContext, "/me")).display_name, unicode64);
@@ -324,7 +344,7 @@ export async function verifyAccountProfile({ page, call, org, directory, base, o
       const literal = `<b data-profile-test="${suffix}">Plain text</b>`;
       await saveName(ownerPage, literal, literal);
       await expect(ownerPage.locator(`[data-profile-test="${suffix}"]`)).toHaveCount(0);
-      await expect(ownerPage.locator(".settings-section-title h2")).toHaveText(literal);
+      await expect(ownerPage.locator(".profile-identity h2")).toHaveText(literal);
       await saveName(ownerPage, "A🚀", "A🚀");
       await expect(ownerPage.locator(".account-menu-trigger .avatar-initials")).toHaveText("A🚀");
       await saveName(ownerPage, manifest.owner.name, manifest.owner.name);
@@ -369,7 +389,7 @@ export async function verifyAccountProfile({ page, call, org, directory, base, o
       for (const method of ["PUT", "GET"]) staleResponses.push(await staleWorkspaceResponse(ownerPage, ownerContext, workspaces, manifest.owner.name, suffix, method));
       await switchWorkspace(ownerPage, "default");
       proof.cases.push({ scenario: "late responses from abandoned profile workspace", responses: staleResponses });
-      proof.networkFaultInjection = "Real profile PUT/GET responses are delayed until a different workspace acknowledges a newer save; backend requests and persistence remain real.";
+      proof.networkFaultInjection = "Real profile PUT/GET responses are delayed until a different workspace acknowledges a newer save; backend requests and persistence remain real. One local PUT is aborted before delivery to expose the existing read-only recovery control; successful results are not mocked.";
 
       await switchWorkspace(memberPage, workspaceA.id);
       await memberPage.goto("/groups/general/chat");

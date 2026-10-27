@@ -76,6 +76,9 @@ import { NewAgentDialog } from "./NewAgentDialog";
 import { ValuePicker } from "./ValuePicker";
 import { WorkstationSelect } from "./WorkstationSelect";
 import { applicationEnvironmentLabel, sshWorkstationLabel } from "./workstationLabels";
+import { AccountProfile } from "./AccountProfile";
+import { useAccountProfile } from "./useAccountProfile";
+import { GroupSearch } from "./GroupSearch";
 import { UserSettings } from "./UserSettings";
 import type { Workstation } from "./bindings/Workstation";
 import { GroupDialog } from "./GroupDialog";
@@ -136,10 +139,6 @@ type FileView = {
   entries?: { name: string; directory: boolean }[];
   text?: string;
   base: string;
-};
-type SearchResult = {
-  messages?: Message[];
-  artifacts?: { id: string; name: string; snippet: string; distance: number }[];
 };
 const active = isActiveRun;
 const time = (value: string) =>
@@ -207,16 +206,6 @@ export default function App({
   const [archiveOpen, setArchiveOpen] = useState(false);
   const navigationPanel = useRef<PanelImperativeHandle | null>(null);
   const edgePointer = useRef<number | null>(null);
-  const [displayNameDraft, setDisplayNameDraft] = useState(() => displayName ?? "");
-  const prevUser = useRef(user);
-  useEffect(() => {
-    if (prevUser.current !== user) {
-      prevUser.current = user;
-      setDisplayNameDraft(displayName ?? "");
-    }
-  }, [user, displayName]);
-  const accountProfileFeedback = useActionFeedback(`account-profile:${user}`, workspaceId);
-
   const getSavedExpandedWidth = useCallback(() => {
     const fromData = data?.panel_sizes.sidebar;
     if (typeof fromData === "number" && fromData >= 180 && fromData <= 420) {
@@ -309,6 +298,7 @@ export default function App({
   const setSelectedAgent = (id: string | null) =>
     go({ view: "Organization", agentId: id, section: "Profile", runId: null });
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const accountProfile = useAccountProfile({ user, workspaceId, displayName, onDisplayNameChange });
   useLayoutEffect(() => {
     if (authenticated && !mobile && navigationPanel.current) {
       if (sidebarCollapsed) {
@@ -361,11 +351,24 @@ export default function App({
   const [newAgentProject, setNewAgentProject] = useState("");
   const [projectTeamOpen, setProjectTeamOpen] = useState(true);
   const [groupEditor, setGroupEditor] = useState<Group | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [semantic, setSemantic] = useState(false);
-  const [searchMedia, setSearchMedia] = useState("documents");
-  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
+  const searchContext = JSON.stringify([user, workspaceId, data?.groups.some(item => item.id === groupId) ? groupId : null, role, authenticated]);
+  const [searchState, setSearchState] = useState({ scope: searchContext, open: false });
+  if (searchState.scope !== searchContext) setSearchState({ scope: searchContext, open: false });
+  const searchOpen = searchState.scope === searchContext && searchState.open;
+  const setSearchOpen = useCallback((open: boolean) => setSearchState({ scope: searchContext, open }), [searchContext]);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const searchTrigger = useRef<HTMLElement | null>(null);
+  const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K";
+  const openSearch = useCallback(() => {
+    searchTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setMobileNavigationOpen(false);
+    setSearchOpen(true);
+  }, [setSearchOpen]);
+  const returnSearchFocus = useCallback(() => {
+    const trigger = searchTrigger.current;
+    if (trigger?.isConnected && trigger.getClientRects().length) return trigger;
+    return Array.from(document.querySelectorAll<HTMLElement>('button[aria-label="Show navigation"], .search-button:not(:disabled), .rail-action-button:not(:disabled)')).find(element => element.getClientRects().length > 0) ?? null;
+  }, []);
   const [busy, setBusy] = useState(false);
   const sendFeedback = useActionFeedback(`chat-send:${groupId}:${sideChatId ?? "main"}`, `${tab}:${groupId}:${sideChatId}`);
   const uploadFeedback = useActionFeedback(`upload:${groupId}`, `${tab}:${groupId}:${sideChatId}`, tab === "Chat" ? "contextual" : "toast");
@@ -531,6 +534,21 @@ export default function App({
 
 
   const group = data?.groups.find((g) => g.id === groupId);
+  const searchScope = searchContext;
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+      if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k" || !(mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) return;
+      if (role !== "owner" || !group || !authenticated) return;
+      if (searchOpen) { event.preventDefault(); searchInput.current?.focus(); return; }
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]') || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      event.preventDefault(); openSearch();
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, [role, group, authenticated, searchOpen, openSearch]);
+
   const groupClosed = !!(group?.archived_at || group?.deleted_at);
   const organizationAgents = data?.agents ?? [];
   const allAgents = [...organizationAgents, ...(data?.deleted_agents ?? [])];
@@ -804,9 +822,9 @@ export default function App({
           aria-label={group ? `Search #${group.name}` : "Search unavailable: select a group to search"}
           title={group ? `Search #${group.name}` : "Select a group to search messages and documents"}
           disabled={!group}
-          onClick={() => setSearchOpen(true)}
+          onClick={openSearch}
         >
-          <Search size={16} /> <span>{group ? `Search #${group.name}` : "Select a group to search"}</span> {group && <kbd>⌕</kbd>}
+          <Search size={16} /> <span>{group ? `Search #${group.name}` : "Select a group to search"}</span> {group && <kbd aria-hidden="true">{searchShortcut}</kbd>}
         </button>
       )}
       {data && (
@@ -878,7 +896,7 @@ export default function App({
               aria-label={group ? `Search #${group.name}` : "Search unavailable: select a group to search"}
               title={group ? `Search #${group.name}` : "Select a group to search messages and documents"}
               disabled={!group}
-              onClick={() => setSearchOpen(true)}
+              onClick={openSearch}
             >
               <Search size={18} />
             </button>
@@ -1510,114 +1528,7 @@ export default function App({
                 <Button variant={tab === "User settings" ? "secondary" : "ghost"} aria-current={tab === "User settings" ? "page" : undefined} onClick={()=>go({view:"User settings",agentId:null,runId:null})}><Server size={16}/>Runtime</Button>
                 <Button variant={tab === "Workspace settings" ? "secondary" : "ghost"} aria-current={tab === "Workspace settings" ? "page" : undefined} onClick={()=>go({view:"Workspace settings",agentId:null,runId:null})}><Building2 size={16}/>Workspace</Button>
               </nav></header>
-            {tab === "Profile" && (
-              <section className="user-settings">
-                <div className="settings-page">
-                  <header className="settings-page-heading">
-                    <p className="settings-kicker">ACCOUNT</p>
-                    <h1>Profile</h1>
-                    <p>Your signed-in account and workspace access.</p>
-                  </header>
-                  <section className="settings-card">
-                    <div className="settings-section-title">
-                      <UserRound size={20} />
-                      <h2>{displayName || user}</h2>
-                    </div>
-                    <form
-                      className="form-stack profile-form"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void accountProfileFeedback.run(
-                          "save-profile",
-                          async () => {
-                            const hasControl = Array.from(displayNameDraft).some(c => {
-                              const code = c.charCodeAt(0);
-                              return code < 32 || (code >= 127 && code <= 159);
-                            });
-                            if (hasControl) {
-                              return { kind: "error", message: "Display name cannot contain control characters." };
-                            }
-                            const trimmed = displayNameDraft.trim();
-                            if (Array.from(trimmed).length > 64) {
-                              return { kind: "error", message: "Display name cannot exceed 64 characters." };
-                            }
-                            const payload = { display_name: trimmed === "" ? null : trimmed };
-                            const res = await put<{ user: string; display_name: string | null }>("/me/profile", payload);
-                            if (!activeApp.current) return;
-                            onDisplayNameChange?.(res.display_name);
-                            setDisplayNameDraft(res.display_name ?? "");
-                            return { kind: "success", message: "Profile saved." };
-                          },
-                          { errorMessage: "Could not save profile. Your draft has been kept." }
-                        );
-                      }}
-                    >
-                      <div className="form-field">
-                        <Label htmlFor="account-display-name">Display name</Label>
-                        <Input
-                          id="account-display-name"
-                          name="display_name"
-                          placeholder={user}
-                          value={displayNameDraft}
-                          onChange={(e) => setDisplayNameDraft(e.target.value)}
-                          disabled={accountProfileFeedback.pending !== null}
-                        />
-                        <p className="hint">Plain text up to 64 characters. Leave blank to use your account username.</p>
-                      </div>
-                      <div className="form-actions">
-                        <Button
-                          type="submit"
-                          disabled={accountProfileFeedback.pending !== null || displayNameDraft === (displayName ?? "")}
-                        >
-                          <PendingIcon pending={accountProfileFeedback.pending !== null} />
-                          Save profile
-                        </Button>
-                      </div>
-                      <ActionStatus feedback={accountProfileFeedback}>
-                        {accountProfileFeedback.result?.kind === "error" && (
-                          <Button
-                            variant="outline"
-                            type="button"
-                            disabled={accountProfileFeedback.pending !== null}
-                            onClick={() =>
-                              void accountProfileFeedback.run(
-                                "check-profile",
-                                async () => {
-                                  const me = await api<{ user: string; display_name?: string | null }>("/me");
-                                  if (!activeApp.current) return;
-                                  onDisplayNameChange?.(me.display_name ?? null);
-                                  const savedName = me.display_name ?? "";
-                                  const isMatching = savedName === displayNameDraft.trim();
-                                  return {
-                                    kind: "success",
-                                    message: isMatching
-                                      ? `Saved display name matches your draft (${savedName || "account default"}).`
-                                      : `Saved display name is: "${savedName || "account default"}". Your unsaved draft "${displayNameDraft}" is retained.`,
-                                  };
-                                },
-                                { errorMessage: "Could not check saved profile." }
-                              )
-                            }
-                          >
-                            Check saved profile
-                          </Button>
-                        )}
-                      </ActionStatus>
-                    </form>
-                    <dl className="profile-details">
-                      <dt>Account</dt>
-                      <dd>{user === "owner" ? "Platform administrator" : "Matrix account"}</dd>
-                      <dt>Username</dt>
-                      <dd>{user}</dd>
-                      <dt>Workspace</dt>
-                      <dd>{workspaceName}</dd>
-                      <dt>Role</dt>
-                      <dd>{role === "owner" ? "Owner" : "Member"}</dd>
-                    </dl>
-                  </section>
-                </div>
-              </section>
-            )}
+            {tab === "Profile" && <AccountProfile key={`${user}:${workspaceId}`} user={user} displayName={displayName} role={role} workspaceName={workspaceName} profile={accountProfile} />}
             {tab === "Workspace settings" && <section className="user-settings"><div className="settings-page"><header className="settings-page-heading"><p className="settings-kicker">SETTINGS</p><h1>Workspace</h1><p>Manage your workspace, people, and their access.</p></header>{workspaceSettings}</div></section>}
             {tab === "User settings" && <UserSettings role={role} user={user} controllerAccess={controllerAccess} workstations={data?.workstations ?? []} onRefresh={refresh} enrollmentToken={enrollmentToken} onEnrollmentTokenChange={setEnrollmentToken}/>}
             </section>}
@@ -1804,80 +1715,8 @@ export default function App({
           if (saved.project && !groupEditor.id) setProjectTeamOpen(true);
           setReply(null); setAttachments([]);
         }} />}
-      <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
-        <DialogContent className="search-dialog">
-          <DialogHeader>
-            <DialogTitle>Search #{group?.name}</DialogTitle>
-            <DialogDescription>
-              Find earlier messages or indexed documents and images.
-            </DialogDescription>
-          </DialogHeader>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void perform(async () =>
-                setSearchResult(
-                  await api<SearchResult>(
-                    `/search?group_id=${encodeURIComponent(groupId)}&q=${encodeURIComponent(searchQuery)}&semantic=${semantic}&media=${searchMedia}`,
-                  ),
-                ),
-              );
-            }}
-            className="form-stack"
-          >
-            <Input
-              aria-label="Search query"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="What are you looking for?"
-              required
-            />
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={semantic}
-                onChange={(e) => setSemantic(e.target.checked)}
-              />{" "}
-              Semantic document & image search
-            </label>
-            {semantic && (
-              <ValuePicker
-                aria-label="Search file type"
-                value={searchMedia}
-                onValueChange={setSearchMedia}
-                options={[{ value: "documents", label: "Documents" }, { value: "images", label: "Images" }]}
-              />
-            )}
-            <Button type="submit">
-              <Search size={15} /> Search
-            </Button>
-          </form>
-          <div className="search-results">
-            {searchResult?.messages?.map((m) => (
-              <article key={m.id}>
-                <small>{time(m.created_at)}</small>
-                <p>{m.body}</p>
-              </article>
-            ))}
-            {searchResult?.artifacts?.map((a) => (
-              <a
-                key={a.id}
-                href={`/api/artifacts/${a.id}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <strong>{a.name}</strong>
-                <p>{a.snippet}</p>
-                <small>CLIP similarity · source file</small>
-              </a>
-            ))}
-            {searchResult &&
-              !(
-                searchResult.messages?.length || searchResult.artifacts?.length
-              ) && <p>No results in this group.</p>}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {role === "owner" && group && authenticated && <GroupSearch key={searchScope} open={searchOpen} onOpenChange={setSearchOpen} groupId={group.id} groupName={group.name} inputRef={searchInput} returnFocus={returnSearchFocus} />}
+
     </div>
   );
 }

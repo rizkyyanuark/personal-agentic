@@ -116,6 +116,14 @@ try {
     const { verifyWorkspaceNavigation } = await import("./workspace-navigation.mjs");
     proof.workspaceNavigation = await verifyWorkspaceNavigation({ page, request, call, state, until, finished, org, directory, base, noProvider: true });
     console.log("PASS persisted sections, sort menu, archived restore, hidden deleted groups, sidebar resize/rail and responsive navigation; no provider execution");
+  } else if (phase === "group-search") {
+    const { verifyGroupSearch } = await import("./group-search.mjs");
+    proof.groupSearch = await verifyGroupSearch({ page, request, call, state, until, directory, base, ownerKey });
+    console.log("PASS explicit local group search, real indexed files, request ownership and accessible navigation");
+  } else if (phase === "account-profile-navigation") {
+    const { verifyAccountProfileNavigation } = await import("./account-profile-navigation.mjs");
+    proof.accountProfileNavigation = await verifyAccountProfileNavigation({ page, call, state, directory, base });
+    console.log("PASS real profile save/read-only recovery across same-workspace SPA navigation; Owner and Matrix Member; zero agent runs");
   } else if (phase === "account-profile") {
     const { verifyAccountProfile } = await import("./account-profile.mjs");
     const profilePhase = process.env.AE_TEST_PROFILE_PHASE || "prepare";
@@ -1532,9 +1540,8 @@ try {
       .getByRole("button", { name: "Platform verification" })
       .last()
       .click();
-    await page.getByRole("button", { name: /Search your workspace/ }).click();
-    await page.getByLabel("Semantic document & image search").check();
-    await selectValue(page.getByLabel("Search file type"), "images");
+    await page.getByRole("button", { name: /Search #Platform verification/ }).click();
+    await page.getByRole("tab", { name: "Images", exact: true }).click();
     await page
       .getByLabel("Search query")
       .fill("a red circle on a white background");
