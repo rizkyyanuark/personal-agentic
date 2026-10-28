@@ -790,26 +790,7 @@ pub fn worker(
             return Ok(());
         }
         if refreshed.elapsed() > Duration::from_secs(60) {
-            capabilities =
-                json!({"codex":crate::codex_settings::read().ok(),"read_operations":{"usage":1}});
-            // OpenCode's native catalog can be exported by its CLI without a controller.
-            if let Ok(output) = Command::new(
-                crate::opencode::executable().unwrap_or_else(|_| PathBuf::from("opencode")),
-            )
-            .args(["models", "--format", "json"])
-            .output()
-            {
-                if output.status.success() {
-                    if let Ok(value) = serde_json::from_slice::<Value>(&output.stdout) {
-                        if let Ok(settings) = crate::opencode::parse_models(&value) {
-                            capabilities["opencode"] = serde_json::to_value(settings)?;
-                        }
-                    }
-                }
-            }
-            if let Ok(settings) = crate::antigravity::settings_local() {
-                capabilities["antigravity"] = serde_json::to_value(settings)?;
-            }
+            capabilities = crate::worker_catalog::read();
             refreshed = Instant::now();
         }
         let iteration = (|| -> Result<()> {

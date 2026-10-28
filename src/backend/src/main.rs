@@ -31,6 +31,7 @@ mod security;
 mod skills;
 mod store;
 mod terminal;
+mod worker_catalog;
 #[cfg(test)]
 mod worker_onboarding_tests;
 mod worker_packages;

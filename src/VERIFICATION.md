@@ -20,6 +20,8 @@ compiler on the target. Configure a complete two-platform local package director
 with `AE_WORKER_PACKAGE_DIR`. A package generated from a header fixture is only a
 contract test, never native executable or Online proof.
 
+Worker catalog discovery uses owned subprocesses with a five-second deadline per optional CLI and a 1 MiB output limit. A stalled or oversized catalog is reported unavailable without claiming authentication or delaying worker polling indefinitely. Run `cargo test --workspace --locked worker_catalog -- --test-threads=1` alongside the onboarding tests. For real worker acceptance, sample fresh heartbeat and directory responses across at least one 60-second catalog refresh; preserve any startup timeout separately from later recovery. These probes query model metadata only and must never submit an agent task.
+
 Run package contract tests with `python -B infra/ci/tests/worker_packages_test.py`
 from the repository root and backend checks with
 `cargo test --workspace --locked worker_onboarding` from `src`. Use real native
