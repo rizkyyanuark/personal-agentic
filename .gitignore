@@ -36,3 +36,5 @@ scratch/
 # AI Agent instructions and local OpenSpec workspace
 .agents/
 openspec/
+.ae-worker/
+

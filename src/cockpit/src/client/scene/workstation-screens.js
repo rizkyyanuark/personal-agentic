@@ -283,15 +283,26 @@ export function createWorkstationScreens(role, anisotropy = 1) {
 
       // Large centered clock and concise subtitle matching kantor-agent layout
       ctx.fillStyle = '#ffffff';
-      ctx.font = '600 120px system-ui, sans-serif';
-      ctx.fillText(time?.timeText || '--:--', 384, 235);
+      ctx.font = '600 110px system-ui, sans-serif';
+      ctx.fillText(time?.timeText || '--:--', 384, 230);
 
-      ctx.font = '500 34px system-ui, sans-serif';
-      ctx.fillText(`${role.name} · ${projection.stateLabel}`, 384, 295);
+      const isIdle = projection.fresh && projection.state === 'siaga';
+      ctx.font = '500 32px system-ui, sans-serif';
+      ctx.fillText(
+        isIdle ? `${role.name} · Santai` : `${role.name} · ${projection.stateLabel}`,
+        384,
+        285
+      );
+
+      if (isIdle) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.font = '500 20px system-ui, sans-serif';
+        ctx.fillText('menunggu tugas', 384, 325);
+      }
 
       ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
       ctx.font = '600 18px system-ui, sans-serif';
-      ctx.fillText('WIB', 384, 340);
+      ctx.fillText('WIB', 384, isIdle ? 365 : 335);
     }
 
     texture.userData = {
@@ -320,6 +331,35 @@ export function createWorkstationScreens(role, anisotropy = 1) {
         standby: true,
         stateLabel: 'Standby',
         connection: projection.connection
+      };
+      texture.needsUpdate = true;
+      return true;
+    }
+    if (!active && projection.fresh && projection.state === 'siaga') {
+      ctx.fillStyle = '#0d131a';
+      ctx.fillRect(0, 0, 768, 480);
+      ctx.fillStyle = '#141d27';
+      ctx.fillRect(0, 0, 768, 64);
+      ctx.fillStyle = '#65778a';
+      ctx.font = '600 20px system-ui, sans-serif';
+      ctx.fillText(role.name, 38, 40);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#8e9eaf';
+      ctx.font = '600 36px system-ui, sans-serif';
+      ctx.fillText('Layar terkunci', 384, 220);
+      ctx.fillStyle = '#5c6f82';
+      ctx.font = '500 22px system-ui, sans-serif';
+      ctx.fillText('Agent sedang berada di area santai', 384, 270);
+      ctx.textAlign = 'left';
+      texture.userData = {
+        roleKey: role.key,
+        kind: 'work',
+        concept: concept.title,
+        illustrative: true,
+        stateLabel: projection.stateLabel,
+        connection: projection.connection,
+        summary: projection.task,
+        animated: false
       };
       texture.needsUpdate = true;
       return true;

@@ -191,6 +191,7 @@ export const OFFICE_ACTIVITY_DESTINATIONS = Object.freeze([
   ),
   destination('coffee:left', 'coffee', 'pantry', [6.7, ROOM_LAYOUT.floorY, -5.65], Math.PI),
   destination('coffee:right', 'coffee', 'pantry', [7.55, ROOM_LAYOUT.floorY, -5.65], Math.PI),
+  destination('pantry:water', 'water', 'pantry', [8.65, ROOM_LAYOUT.floorY, -5.65], Math.PI),
   destination(
     'reading:left',
     'reading',
@@ -204,7 +205,9 @@ export const OFFICE_ACTIVITY_DESTINATIONS = Object.freeze([
     'bookshelf',
     [-7.85, ROOM_LAYOUT.floorY, 4.1],
     -Math.PI / 2
-  )
+  ),
+  destination('guitar', 'guitar', 'lounge', [-1.4, ROOM_LAYOUT.floorY, 2.6], 0.35),
+  destination('window', 'window', 'window', [3.5, ROOM_LAYOUT.floorY, -6.15], Math.PI)
 ]);
 
 export function createOfficeNavigation() {

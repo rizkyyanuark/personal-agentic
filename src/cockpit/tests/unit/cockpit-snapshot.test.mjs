@@ -157,6 +157,39 @@ test('five visual slots retain real identity with a whitelist projection and no 
   assert.deepEqual(input, before);
 });
 
+test('feed items project tool badge from activity metadata or direct tool property', () => {
+  const input = fixture();
+  input.events = [
+    {
+      id: 101,
+      office_role: 'data_engineer',
+      kind: 'step',
+      status: 'active',
+      created_at: input.generated_at,
+      summary: 'Membaca file · src/App.tsx',
+      activity: {
+        run_id: 'run-1',
+        category: 'reading',
+        state: 'active',
+        step_index: 2,
+        relative_file: 'src/App.tsx'
+      }
+    },
+    {
+      id: 102,
+      office_role: 'ml_engineer',
+      kind: 'step',
+      status: 'active',
+      created_at: input.generated_at,
+      summary: 'Menjalankan perintah · cargo test',
+      tool: 'Terminal'
+    }
+  ];
+  const state = projectCockpitSnapshot(input);
+  assert.equal(state.feed[0].tool, 'Membaca');
+  assert.equal(state.feed[1].tool, 'Terminal');
+});
+
 test('fresh active runs remain working independently of cached local readiness', () => {
   for (const availability of ['ready', 'unknown', 'paused', 'unattached']) {
     const input = fixture();

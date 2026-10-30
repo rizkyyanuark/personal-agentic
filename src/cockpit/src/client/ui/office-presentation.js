@@ -66,9 +66,10 @@ export function createOfficePresentation(roles, { visible = true, reducedMotion 
               workingBubble:
                 dataFresh && isVisible && facts.state === 'bekerja'
                   ? {
-                      kind: 'role-description',
-                      text: ROLE_DESCRIPTIONS[key],
-                      label: 'Deskripsi peran'
+                      kind: 'work',
+                      cls: 'hi',
+                      text: facts.task || ROLE_DESCRIPTIONS[key],
+                      label: 'Tugas publik'
                     }
                   : null
             }

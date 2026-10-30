@@ -1796,14 +1796,17 @@
 }
 .cockpit-root .bubble.hi,
 .cockpit-root .speech-bubble.hi {
-  background: #e9f8ef;
-  border-color: #b6e3c6;
+  background: #d4f5d4;
+  border-color: #78c288;
+  color: #14462a;
   font-weight: 600;
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.22);
 }
 .cockpit-root .bubble.hi::after,
 .cockpit-root .speech-bubble.hi::after {
-  background: #e9f8ef;
-  border-color: #b6e3c6;
+  background: #d4f5d4;
+  border-right-color: #78c288;
+  border-bottom-color: #78c288;
 }
 .cockpit-root .character-bubble-layer {
   display: none;

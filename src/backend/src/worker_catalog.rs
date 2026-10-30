@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const TIMEOUT: Duration = Duration::from_secs(5);
+const TIMEOUT: Duration = Duration::from_secs(45);
 const MAX_OUTPUT: u64 = 1024 * 1024;
 
 fn capture(command: &mut Command, timeout: Duration, limit: u64) -> Result<String> {

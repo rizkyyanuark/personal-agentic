@@ -130,13 +130,13 @@ export function createRoomScene(options = {}) {
   const skyline = new THREE.MeshBasicMaterial({ color: 0xd5e4eb, toneMapped: false });
   const cityLightPositions = [];
   ROOM_LAYOUT.windows.forEach((center, paneIndex) => {
-    addBox(room, [2.55, 2.2, 0.025], [center, 3.53, -7.37], sky);
+    addBox(room, [2.55, 2.2, 0.025], [center, 2.58, -7.37], sky);
     for (let block = 0; block < 5; block++) {
       const height = 0.4 + ((block * 3 + paneIndex) % 4) * 0.18;
       addBox(
         room,
         [0.32, height, 0.012],
-        [center - 0.92 + block * 0.46, 2.43 + height / 2, -7.34],
+        [center - 0.92 + block * 0.46, 1.48 + height / 2, -7.34],
         skyline
       );
       for (let row = 0; row < Math.floor(height / 0.18); row++) {
@@ -144,19 +144,19 @@ export function createRoomScene(options = {}) {
           if ((block + row + paneIndex) % 3 === 0) continue;
           cityLightPositions.push([
             center - 0.92 + block * 0.46 + offset,
-            2.51 + row * 0.18,
+            1.56 + row * 0.18,
             -7.33
           ]);
         }
       }
     }
-    addBox(room, [2.7, 0.09, 0.09], [center, 4.68, -7.3], white);
-    addBox(room, [2.7, 0.09, 0.09], [center, 2.38, -7.3], white);
-    addBox(room, [0.09, 2.3, 0.09], [center - 1.3, 3.53, -7.3], white);
-    addBox(room, [0.09, 2.3, 0.09], [center + 1.3, 3.53, -7.3], white);
-    addBox(room, [0.06, 2.2, 0.09], [center, 3.53, -7.29], white);
-    addBox(room, [2.56, 0.06, 0.09], [center, 3.53, -7.29], white);
-    addBox(room, [2.8, 0.09, 0.3], [center, 2.35, -7.2], white);
+    addBox(room, [2.7, 0.09, 0.09], [center, 3.73, -7.3], white);
+    addBox(room, [2.7, 0.09, 0.09], [center, 1.43, -7.3], white);
+    addBox(room, [0.09, 2.3, 0.09], [center - 1.3, 2.58, -7.3], white);
+    addBox(room, [0.09, 2.3, 0.09], [center + 1.3, 2.58, -7.3], white);
+    addBox(room, [0.06, 2.2, 0.09], [center, 2.58, -7.29], white);
+    addBox(room, [2.56, 0.06, 0.09], [center, 2.58, -7.29], white);
+    addBox(room, [2.8, 0.09, 0.3], [center, 1.4, -7.2], white);
   });
 
   const cityLightMaterial = new THREE.MeshBasicMaterial({

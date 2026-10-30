@@ -8,7 +8,6 @@ const SETTLE_TURN_RATE = 4;
 const WALK_PHASE_RATE = 8;
 const SEAT_TRANSITION_SECONDS = 0.85;
 const PERSONAL_SPACE = 0.62;
-const MIN_ARRIVAL_DWELL_SECONDS = 8;
 const REPLAN_SECONDS = 2.2;
 const BLOCKED_SECONDS = 5;
 const MOVING_PHASES = new Set([
@@ -190,8 +189,7 @@ export function createCharacterActivityController(
     record.arrivalPending = false;
     record.arrivalId += 1;
     record.arrivedAt = clock;
-    // A delayed route must still leave time for reaching the mug and the first sip.
-    record.deadline = Math.max(record.deadline, clock + MIN_ARRIVAL_DWELL_SECONDS);
+    record.deadline = clock + 38 + record.random() * 34;
     dirty = true;
   }
 

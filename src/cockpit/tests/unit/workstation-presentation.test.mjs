@@ -513,3 +513,19 @@ test('HQ cannot create a workstation even when dummy shared assets are supplied'
     /No workstation for hq_lab_director/
   );
 });
+
+test('idle workstation screens show Santai clock with waiting subtitle and locked work monitor', (t) => {
+  const records = installCanvasStub(t);
+  const screens = screensForAllRoles(t);
+  for (const screen of screens) {
+    screen.setState({ state: 'siaga', task: 'Siaga.' }, LIVE);
+    screen.update(0, false, BASE_TIME);
+    const clockLabels = drawnLabels(recordFor(records, screen.clock).frames.at(-1));
+    assert(clockLabels.includes('menunggu tugas'));
+    assert(clockLabels.some((l) => l.includes('Santai')));
+
+    const workLabels = drawnLabels(recordFor(records, screen.work).frames.at(-1));
+    assert(workLabels.includes('Layar terkunci'));
+    assert(workLabels.includes('Agent sedang berada di area santai'));
+  }
+});

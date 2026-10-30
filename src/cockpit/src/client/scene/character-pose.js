@@ -151,7 +151,7 @@ function placeWalkingFoot(leg, calf, shoe, hipHeight, phase, cycleDistance) {
 }
 
 function activityPose(activity, elapsedTime, arrivalTime, seed) {
-  if (activity === 'coffee') {
+  if (activity === 'coffee' || activity === 'water') {
     const reaching = arrivalTime < 2.5;
     const sipTime = arrivalTime % 6;
     const sip =
@@ -171,6 +171,32 @@ function activityPose(activity, elapsedTime, arrivalTime, seed) {
     const laugh = Math.sin(elapsedTime * 0.7 + seed) > 0.93;
     return { lean: laugh ? -0.25 : -0.12, headX: laugh ? -0.25 : -0.02, headY: 0 };
   }
+  if (activity === 'ps') {
+    return {
+      lean: 0.14,
+      headX: -0.04,
+      headY: 0,
+      padTap: Math.sin(elapsedTime * 9) * 0.015
+    };
+  }
+  if (activity === 'guitar') {
+    return {
+      lean: 0.05,
+      headX: Math.sin(elapsedTime * 4 + seed) * 0.08,
+      headY: 0.05,
+      strum: Math.sin(elapsedTime * 12) * 0.03
+    };
+  }
+  if (activity === 'window') {
+    const stretchTime = arrivalTime % 9;
+    const stretch = stretchTime < 2.5 ? Math.sin((stretchTime / 2.5) * Math.PI) : 0;
+    return {
+      lean: 0,
+      headX: -0.05,
+      headY: 0,
+      stretch
+    };
+  }
   if (activity === 'meeting')
     return {
       lean: 0.1,
@@ -184,7 +210,7 @@ function activityPose(activity, elapsedTime, arrivalTime, seed) {
 }
 
 function localActivityHands(entity, activity, pose) {
-  if (activity === 'coffee') {
+  if (activity === 'coffee' || activity === 'water') {
     return [
       relativeHandTarget(entity, -0.27, -0.06, 0.05),
       pose.reaching
@@ -192,11 +218,38 @@ function localActivityHands(entity, activity, pose) {
         : relativeHandTarget(entity, 0.17, 0.46 + pose.sip * 0.32, 0.29)
     ];
   }
-  if (activity === 'reading')
+  if (activity === 'reading') {
     return [
       relativeHandTarget(entity, -0.13, 0.31, 0.26),
       relativeHandTarget(entity, 0.13, 0.31, 0.26)
     ];
+  }
+  if (activity === 'ps') {
+    const tap = pose.padTap ?? 0;
+    return [
+      relativeHandTarget(entity, -0.1, 0.27 + tap, 0.27),
+      relativeHandTarget(entity, 0.1, 0.27 - tap, 0.27)
+    ];
+  }
+  if (activity === 'guitar') {
+    const strum = pose.strum ?? 0;
+    return [
+      relativeHandTarget(entity, -0.26, 0.41, 0.28),
+      relativeHandTarget(entity, 0.035, 0.24 + strum, 0.285)
+    ];
+  }
+  if (activity === 'window') {
+    if (pose.stretch && pose.stretch > 0.01) {
+      return [
+        relativeHandTarget(entity, -0.2, 0.55 + pose.stretch * 0.2, 0.15),
+        relativeHandTarget(entity, 0.2, 0.55 + pose.stretch * 0.2, 0.15)
+      ];
+    }
+    return [
+      relativeHandTarget(entity, -0.25, 0.1, 0.15),
+      relativeHandTarget(entity, 0.25, 0.1, 0.15)
+    ];
+  }
   return null;
 }
 
@@ -324,15 +377,18 @@ export function applyCharacterPose(
   entity.handMug.visible = false;
   entity.handPad.visible = false;
   entity.handBook.visible = false;
+  if (entity.handGuitar) entity.handGuitar.visible = false;
   entity.handTablet.visible =
     standing &&
     entity.cfg.key === 'hq_lab_director' &&
     motion.neutral !== true &&
     !walking &&
-    !['coffee', 'reading'].includes(activity);
+    !['coffee', 'water', 'reading', 'guitar', 'ps'].includes(activity);
   if (!walking && motion.neutral !== true) {
-    entity.handMug.visible = activity === 'coffee' && !pose.reaching;
+    entity.handMug.visible = (activity === 'coffee' || activity === 'water') && !pose.reaching;
     entity.handBook.visible = activity === 'reading';
+    entity.handPad.visible = activity === 'ps' || (activity === 'sofa' && seat.id === 'sofa:right');
+    if (entity.handGuitar) entity.handGuitar.visible = activity === 'guitar';
     if (entity.handMug.visible) {
       const scratch = poseScratch(entity);
       entity.rightForearm.getWorldQuaternion(scratch.propRotation);
