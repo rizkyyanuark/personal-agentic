@@ -402,9 +402,60 @@ impl Platform {
                 .await
                 .expect("infallible router"));
         }
-        let user = self
-            .user(&req)?
-            .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "Sign-in required".into()))?;
+        let user = match self.user(&req)? {
+            Some(user) => user,
+            None if path == "/api/cockpit/state" && method == Method::GET => {
+                let tenant = req
+                    .headers()
+                    .get("x-ae-workspace")
+                    .and_then(|v| v.to_str().ok())
+                    .or_else(|| cookie(&req, "ae_workspace"))
+                    .unwrap_or("default");
+                let app = self
+                    .apps
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("Workspace registry unavailable"))?
+                    .get(tenant)
+                    .cloned();
+                let app = match app {
+                    Some(a) => a,
+                    None => {
+                        let row: Option<(String, bool)> = self.db(|db| {
+                            Ok(db
+                                .query_row(
+                                    "SELECT name, deleted FROM tenants WHERE id=?",
+                                    [tenant],
+                                    |r| Ok((r.get(0)?, r.get(1)?)),
+                                )
+                                .optional()?)
+                        })?;
+                        match row {
+                            Some((name, false)) => self.load(&Tenant {
+                                id: tenant.into(),
+                                name,
+                                deleted: false,
+                            })?,
+                            _ => {
+                                return Err(ApiError(
+                                    StatusCode::NOT_FOUND,
+                                    "Workspace unavailable".into(),
+                                ));
+                            }
+                        }
+                    }
+                };
+                return Ok(crate::api::router(app, self.frontend.clone())
+                    .oneshot(req)
+                    .await
+                    .expect("infallible router"));
+            }
+            None => {
+                return Err(ApiError(
+                    StatusCode::UNAUTHORIZED,
+                    "Sign-in required".into(),
+                ));
+            }
+        };
         if path == "/api/logout" {
             if let Some(token) = credential(&req) {
                 self.db(|db| {
@@ -821,7 +872,7 @@ async fn authorize_member(
             "Room membership or workspace owner permission required".into(),
         )
     };
-    if path == "/api/state" && method == Method::GET {
+    if (path == "/api/state" || path == "/api/cockpit/state") && method == Method::GET {
         return Ok(());
     }
     // Members receive a filtered snapshot; global event payloads and administrative APIs are owner-only.

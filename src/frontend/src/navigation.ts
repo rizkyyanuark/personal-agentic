@@ -67,6 +67,11 @@ export function parseRoute(url: string): Route {
   if (parts.join("/") === "settings/workspace") return { ...route, view: "Workspace settings" };
   if (["settings/runtime", "settings/workstations"].includes(parts.join("/"))) return { ...route, view: "User settings" };
   if (parts[0] === "actions" && parts.length === 1) return { ...route, view: "Action board" };
+  if (parts[0] === "office" && parts.length === 1) {
+    const filter = location.searchParams.get("group");
+    if (filter && !/^[a-zA-Z0-9-]{1,64}$/.test(filter)) return { ...route, valid: false };
+    return { ...route, view: "Live Preview", agentId: null, runId: null, sideChatId: null, cockpitGroupId: filter || null };
+  }
   if (parts[0] === "organization") {
     route.view = "Organization";
     if (parts.length === 1) return route;
@@ -95,7 +100,7 @@ export function parseRoute(url: string): Route {
 }
 export function routePath(route: Route, group?: Named, agent?: Named): string {
   let path =
-    route.view === "Profile" ? "/settings/profile" : route.view === "Workspace settings" ? "/settings/workspace" : route.view === "User settings" ? "/settings/runtime" : route.view === "Action board" ? "/actions" : route.view === "Live Preview" ? "/organization/live-preview" : route.view === "Organization"
+    route.view === "Profile" ? "/settings/profile" : route.view === "Workspace settings" ? "/settings/workspace" : route.view === "User settings" ? "/settings/runtime" : route.view === "Action board" ? "/actions" : route.view === "Live Preview" ? "/office" : route.view === "Organization"
       ? "/organization"
       : `/${group?.project ? "projects" : "groups"}/${encodeURIComponent(group ? slug(group) : route.groupId)}/${route.view.toLowerCase().replaceAll(" ", "-")}`;
   if (route.view === "Organization" && route.agentId)

@@ -112,7 +112,8 @@ export function setupCharacterLabels(characterEntities, onAgentClick, roles = OF
 export function updateCharacterLabelView(labelMap, { focusedRole = null, width = 0 } = {}) {
   Object.entries(labelMap).forEach(([key, label]) => {
     const role = label.role || OFFICE_ROLES.find((item) => item.key === key);
-    label.requestedVisible = focusedRole ? focusedRole === key : width >= 600;
+    const isUnmapped = role?.agentId === null;
+    label.requestedVisible = !isUnmapped && (focusedRole ? focusedRole === key : width >= 600);
     label.labelObject.visible = label.requestedVisible;
     label.tag.title = roleIdentity(role);
     label.tag.textContent = focusedRole ? roleIdentity(role) : role?.name || key.replace(/_/g, ' ');
@@ -122,13 +123,16 @@ export function updateCharacterLabelView(labelMap, { focusedRole = null, width =
 export function updateCharacterLabelPositions(labelMap, entities, camera) {
   camera.updateMatrixWorld(true);
   for (const [key, label] of Object.entries(labelMap)) {
+    const parentVisible = entities[key]?.root?.visible !== false;
     label.labelObject.position.y = entities[key].hips.position.y + 1.32;
     label.labelObject.getWorldPosition(label.projected).project(camera);
     label.labelObject.visible =
+      parentVisible &&
       label.requestedVisible &&
       Math.abs(label.projected.x) <= 1 &&
       Math.abs(label.projected.y) <= 1 &&
       Math.abs(label.projected.z) <= 1;
+    label.container.style.display = label.labelObject.visible ? 'flex' : 'none';
   }
 }
 

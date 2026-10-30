@@ -31,7 +31,9 @@ async function call(route, method = "GET", body, workspace = tenant?.id) {
 
 try {
   const anonymous = await browser.newContext({ baseURL: base });
-  assert.equal((await anonymous.request.get("/api/cockpit/state")).status(), 401);
+  assert.equal((await anonymous.request.get("/api/cockpit/state")).status(), 200);
+  assert.equal((await anonymous.request.post("/api/cockpit/setup")).status(), 401);
+  assert.equal((await anonymous.request.put("/api/cockpit/mapping")).status(), 401);
   await anonymous.close();
   await call("/login", "POST", { token });
   tenant = await call("/tenants", "POST", { name: `Cockpit verification ${crypto.randomUUID().slice(0, 8)}` });
