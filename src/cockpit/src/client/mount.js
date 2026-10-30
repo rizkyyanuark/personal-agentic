@@ -426,6 +426,14 @@ export function mountCockpit(container, options = {}) {
       }
       entity.operational = operational;
       entity.state = operational?.state || 'offline';
+      const isUnmapped =
+        operational?.state === 'unmapped' ||
+        config.roles.find((role) => role.key === key)?.agentId === null;
+      entity.root.visible = !isUnmapped;
+      if (labels[key]) {
+        labels[key].requestedVisible = !isUnmapped;
+        labels[key].labelObject.visible = !isUnmapped;
+      }
     }
     presentationSnapshot = next;
     activityController.receive(next);

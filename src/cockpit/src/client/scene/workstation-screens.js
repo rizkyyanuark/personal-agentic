@@ -170,6 +170,12 @@ function schematic(ctx, kind, color, phase, active) {
 
 export function createNameplateTexture(role, anisotropy = 1) {
   const { ctx, texture } = canvasTexture(512, 128, anisotropy, `nameplate_${role.key}`);
+  if (role.agentId === null || role.agentId === '') {
+    ctx.fillStyle = '#1e242b';
+    ctx.fillRect(0, 0, 512, 128);
+    texture.userData = { roleKey: role.key, name: '', job: '' };
+    return texture;
+  }
   ctx.fillStyle = '#fbfaf7';
   ctx.fillRect(0, 0, 512, 128);
   ctx.fillStyle = role.color;
@@ -193,12 +199,27 @@ export function createWorkstationScreens(role, anisotropy = 1) {
   let lastWorkKey = null;
   let clockTime = null;
   let elapsed = 0;
+  let unmapped = false;
 
   function drawClock(time) {
-    const key = `${time?.minuteKey || 'loading'}|${projection.connection}|${projection.stateLabel}|${projection.state === 'bekerja' ? 'app' : 'wall'}`;
+    const key = `${time?.minuteKey || 'loading'}|${projection.connection}|${projection.stateLabel}|${unmapped ? 'standby' : projection.state === 'bekerja' ? 'app' : 'wall'}`;
     if (key === lastClockKey) return false;
     lastClockKey = key;
     const { ctx, texture } = clock;
+
+    if (unmapped) {
+      ctx.fillStyle = '#0a0c10';
+      ctx.fillRect(0, 0, 768, 480);
+      texture.userData = {
+        roleKey: role.key,
+        kind: 'clock',
+        standby: true,
+        stateLabel: 'Standby',
+        connection: projection.connection
+      };
+      texture.needsUpdate = true;
+      return true;
+    }
 
     if (projection.fresh && projection.state === 'bekerja') {
       // Dark application window with role-specific illustration, not a process log.
@@ -286,10 +307,23 @@ export function createWorkstationScreens(role, anisotropy = 1) {
   }
 
   function drawWork(phase, active) {
-    const key = `${statusKey}|${active ? phase : 'static'}`;
+    const key = `${statusKey}|${unmapped ? 'standby' : active ? phase : 'static'}`;
     if (key === lastWorkKey) return false;
     lastWorkKey = key;
     const { ctx, texture } = work;
+    if (unmapped) {
+      ctx.fillStyle = '#0a0c10';
+      ctx.fillRect(0, 0, 768, 480);
+      texture.userData = {
+        roleKey: role.key,
+        kind: 'work',
+        standby: true,
+        stateLabel: 'Standby',
+        connection: projection.connection
+      };
+      texture.needsUpdate = true;
+      return true;
+    }
     ctx.fillStyle = '#18212c';
     ctx.fillRect(0, 0, 768, 480);
     ctx.fillStyle = '#23303e';
@@ -338,8 +372,9 @@ export function createWorkstationScreens(role, anisotropy = 1) {
       drawWork(0, false);
     },
     setState(agent, snapshot) {
+      unmapped = agent?.state === 'unmapped';
       const nextProjection = projectWorkstationState(agent, snapshot);
-      const nextStatusKey = JSON.stringify(nextProjection);
+      const nextStatusKey = `${JSON.stringify(nextProjection)}|${unmapped}`;
       if (statusKey === nextStatusKey) return false;
       projection = nextProjection;
       statusKey = nextStatusKey;

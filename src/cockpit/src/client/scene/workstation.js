@@ -591,15 +591,21 @@ export function createAgentWorkstation({ config, assets, detailed = false, aniso
     screens,
     schematic: screens.concept,
     setIdentity(identity) {
-      if (group.userData.agentName === identity.name && group.userData.job === identity.role)
+      if (
+        group.userData.agentName === identity.name &&
+        group.userData.job === identity.role &&
+        group.userData.agentId === identity.agentId
+      )
         return;
       group.userData.agentName = identity.name;
       group.userData.job = identity.role;
+      group.userData.agentId = identity.agentId;
       role.name = identity.name;
       role.role = identity.role;
+      role.agentId = identity.agentId;
       screens.invalidateIdentity();
       const next = createNameplateTexture(
-        { ...role, name: identity.name, role: identity.role },
+        { ...role, agentId: identity.agentId, name: identity.name, role: identity.role },
         anisotropy
       );
       const plate = group.getObjectByName(`nameplate_${config.key}`);

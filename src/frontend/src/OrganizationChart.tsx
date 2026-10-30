@@ -28,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar } from "./Avatar";
 import { WorkstationStatus } from "./WorkstationStatus";
+import { DeskAssignmentDialog } from "./DeskAssignmentDialog";
 import { applicationEnvironmentLabel, sshWorkstationLabel } from "./workstationLabels";
 import type { Workstation } from "./bindings/Workstation";
 import type { Connection } from "./bindings/Connection";
@@ -275,6 +276,9 @@ export function OrganizationChart({
   projectName,
   workstations,
   layoutPath = "/organization/layout",
+  role = "owner",
+  workspaceId = "default",
+  onRefresh,
 }: {
   projectName?: string;
   workstations: Workstation[];
@@ -287,7 +291,11 @@ export function OrganizationChart({
   onSelect: (id: string) => void;
   onAdd: () => void;
   onLivePreview?: () => void;
+  role?: string;
+  workspaceId?: string;
+  onRefresh?: () => Promise<void>;
 }) {
+  const [deskAssignmentOpen, setDeskAssignmentOpen] = useState(false);
   const layout = useMemo(() => chartLayout(agents), [agents]);
   const [nodes, setNodes] = useState<PersonNode[]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -373,7 +381,18 @@ export function OrganizationChart({
           <p>Your agents, roles, and reporting lines.</p>
         </div>
         <div className="organization-actions">
-          {onLivePreview && <Button variant="outline" data-testid="open-live-preview" onClick={onLivePreview}>Live Preview</Button>}
+          <Button
+            variant="outline"
+            data-testid="open-live-preview"
+            onClick={onLivePreview || (() => window.open("/office", "_blank", "noreferrer"))}
+          >
+            Live Office
+          </Button>
+          {role === "owner" && !projectName && (
+            <Button variant="outline" onClick={() => setDeskAssignmentOpen(true)}>
+              <Settings2 size={16} /> Assign desks
+            </Button>
+          )}
           <Button variant="outline" onClick={onDeletedAgents}>
             {projectName ? "Manage team" : "Deleted agents"}
           </Button>
@@ -465,6 +484,16 @@ export function OrganizationChart({
           </div>
         )}
       </div>
+      {role === "owner" && (
+        <DeskAssignmentDialog
+          open={deskAssignmentOpen}
+          onOpenChange={setDeskAssignmentOpen}
+          agents={agents}
+          workspaceId={workspaceId}
+          role={role}
+          onSaved={onRefresh ?? (async () => {})}
+        />
+      )}
     </section>
   );
 }

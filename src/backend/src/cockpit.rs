@@ -250,7 +250,6 @@ pub async fn state(
     State(app): State<App>,
     Query(query): Query<StateQuery>,
 ) -> ApiResult<CockpitState> {
-    require_owner(&app)?;
     Ok(Json(snapshot(&app, query.group_id.as_deref())?))
 }
 
@@ -1183,7 +1182,18 @@ mod tests {
             json!({}),
         )
         .await?;
-        assert_eq!(anonymous.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(anonymous.0, StatusCode::OK);
+        for (method, path) in [
+            (Method::POST, "/api/cockpit/setup"),
+            (Method::PUT, "/api/cockpit/mapping"),
+        ] {
+            assert_eq!(
+                request(&router, method, path, None, None, json!({"mapping":{}}))
+                    .await?
+                    .0,
+                StatusCode::UNAUTHORIZED
+            );
+        }
         let member_token = "test-member-session";
         platform.db(|conn| {
             conn.execute(
@@ -1196,8 +1206,20 @@ mod tests {
             )?;
             Ok(())
         })?;
+        assert_eq!(
+            request(
+                &router,
+                Method::GET,
+                "/api/cockpit/state",
+                Some(member_token),
+                None,
+                json!({})
+            )
+            .await?
+            .0,
+            StatusCode::OK
+        );
         for (method, path) in [
-            (Method::GET, "/api/cockpit/state"),
             (Method::POST, "/api/cockpit/setup"),
             (Method::PUT, "/api/cockpit/mapping"),
         ] {

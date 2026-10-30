@@ -53,8 +53,11 @@ pub async fn guard(State(app): State<App>, req: Request, next: Next) -> Response
         }
     }
     let path = req.uri().path();
+    let is_public_cockpit_state =
+        path == "/api/cockpit/state" && req.method() == axum::http::Method::GET;
     if path.starts_with("/api/")
         && !["/api/login", "/api/health"].contains(&path)
+        && !is_public_cockpit_state
         && req
             .extensions()
             .get::<crate::platform::Identity>()
