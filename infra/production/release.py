@@ -348,7 +348,11 @@ def smoke(svg_sha256: str | None) -> dict[str, object]:
     token = compose("exec", "-T", "platform", "cat", "/data/org/.state/owner.key").decode().strip()
     require(bool(token) and len(token) < 1024, "Production owner credential is unavailable")
     request("/api/state", expected=401)
-    request("/api/cockpit/state", expected=401)
+    unauthenticated_cockpit = json.loads(request("/api/cockpit/state", expected=200)[0])
+    require(unauthenticated_cockpit.get("schema_version") == 1 and unauthenticated_cockpit.get("workspace_id") == "default"
+            and isinstance(unauthenticated_cockpit.get("agents"), list) and isinstance(unauthenticated_cockpit.get("totals"), dict),
+            "Unauthenticated cockpit state is invalid")
+    request("/api/cockpit/setup", body={}, expected=401)
     request("/api/login", body={"token": "invalid-production-smoke-key"}, expected=401)
     login, headers = request("/api/login", body={"token": token})
     identity = json.loads(login)

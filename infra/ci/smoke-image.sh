@@ -92,7 +92,16 @@ request() {
 }
 
 request 401 /api/state
-request 401 /api/cockpit/state
+request 200 /api/cockpit/state
+perl -MJSON::PP -0777 -e '
+  my $v = decode_json(<>);
+  die "Invalid unauthenticated cockpit projection\n"
+    unless $v->{schema_version} == 1 && $v->{workspace_id} eq "default"
+      && ref($v->{agents}) eq "ARRAY" && ref($v->{totals}) eq "HASH";
+' "$body"
+request 401 /api/cockpit/setup --request POST
+request 401 /api/cockpit/mapping --request PUT --header 'Content-Type: application/json' \
+  --data '{"mapping":{}}'
 request 401 /api/login --header 'Content-Type: application/json' \
   --data '{"token":"invalid-image-smoke-key"}'
 perl -MJSON::PP -0777 -e '
