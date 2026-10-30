@@ -129,7 +129,7 @@ function drawCar(ctx, x, y, scale, color) {
   ctx.restore();
 }
 
-function drawRace(ctx, sky, raceTime) {
+function drawRace(ctx, sky, raceTime, playerName = '') {
   const curve = Math.sin(raceTime * 0.45) * 65;
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -203,7 +203,7 @@ function drawRace(ctx, sky, raceTime) {
   ctx.fillRect(0, 407, WIDTH, 25);
   ctx.fillStyle = '#eeeae1';
   ctx.font = '700 26px Arial, sans-serif';
-  ctx.fillText('Sirkuit Senja', 25, 37);
+  ctx.fillText(playerName ? `P1 · ${playerName}` : 'Sirkuit Senja', 25, 37);
   ctx.font = '18px Arial, sans-serif';
   ctx.fillText('Animasi dekoratif', 568, 35);
   ctx.font = '15px Arial, sans-serif';
@@ -238,7 +238,12 @@ export function createTVScreen({ anisotropy = 1 } = {}) {
   let lastTimeSeconds = null;
   let lastPaintSeconds = null;
 
-  function update({ occupied = false, reducedMotion = false, timeSeconds = 0 } = {}) {
+  function update({
+    occupied = false,
+    playerName = '',
+    reducedMotion = false,
+    timeSeconds = 0
+  } = {}) {
     const now = Number.isFinite(timeSeconds) ? Math.max(0, timeSeconds) : 0;
     const nextMode = occupied ? 'racing' : 'catalog';
     if (nextMode !== mode) {
@@ -246,7 +251,7 @@ export function createTVScreen({ anisotropy = 1 } = {}) {
       raceTime = 0;
       lastTimeSeconds = now;
       lastPaintSeconds = now;
-      if (mode === 'racing') drawRace(ctx, sky, raceTime);
+      if (mode === 'racing') drawRace(ctx, sky, raceTime, playerName);
       else drawCatalog(ctx);
       texture.needsUpdate = true;
       return true;
@@ -267,7 +272,7 @@ export function createTVScreen({ anisotropy = 1 } = {}) {
     )
       return false;
 
-    drawRace(ctx, sky, raceTime);
+    drawRace(ctx, sky, raceTime, playerName);
     lastPaintSeconds = now;
     texture.needsUpdate = true;
     return true;

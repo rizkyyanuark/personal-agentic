@@ -811,7 +811,7 @@ async function assertPanels(page, hidden, description) {
   assert.equal(actual.expanded, String(!hidden), `${description}: panel toggle aria-expanded`);
   assert.equal(
     actual.text,
-    hidden ? 'Tampilkan panel' : 'Sembunyikan panel',
+    hidden ? 'Tampilkan panel' : 'Lihat kantor penuh',
     `${description}: panel toggle action text`
   );
   await assertDpr(page, 1, `${description}: aspect and DPR preserved`);

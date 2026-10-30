@@ -68,6 +68,24 @@ test('event bubbles stay explicitly historical and render payload as text', () =
   });
 });
 
+test('work speech bubbles render with green highlight class', () => {
+  withTimers(() => {
+    const labels = labelsFixture();
+    assert.equal(
+      updateSpeechBubble(labels, 'nova', {
+        kind: 'work',
+        cls: 'hi',
+        text: 'Membaca file · src/App.tsx'
+      }),
+      true
+    );
+    assert.equal(labels.nova.bubble.dataset.kind, 'work');
+    assert.equal(labels.nova.bubble.className, 'speech-bubble bubble hi');
+    assert.equal(labels.nova.bubble.textContent, 'Tugas publik: Membaca file · src/App.tsx');
+    assert.equal(labels.nova.bubble.hidden, false);
+  });
+});
+
 test('bubble kinds use fixed provenance labels, never a caller-supplied label', () => {
   withTimers(() => {
     const labels = labelsFixture();

@@ -314,7 +314,9 @@ test('persists desktop preference to localStorage when available', () => {
     setItem: (key, val) => map.set(key, String(val))
   };
   const f = fixture(1440, { storage });
+  assert.equal(f.toggle.textContent, 'Lihat kantor penuh');
   f.toggle.click();
+  assert.equal(f.toggle.textContent, 'Tampilkan panel');
   assert.equal(storage.getItem('cockpit.lapang'), '1');
   f.minLeft.click();
   assert.equal(storage.getItem('cockpit.min.left'), '1');

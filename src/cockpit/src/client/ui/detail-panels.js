@@ -100,7 +100,7 @@ export function setupDetailPanels({ documentRef = document, windowRef = window }
     if (content) content.hidden = false;
     if (toggle) {
       toggle.hidden = mobile;
-      toggle.textContent = hidden ? 'Tampilkan panel' : 'Sembunyikan panel';
+      toggle.textContent = hidden ? 'Tampilkan panel' : 'Lihat kantor penuh';
       toggle.setAttribute('aria-expanded', String(!hidden));
     }
     if (leftPanel) {

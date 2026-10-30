@@ -84,6 +84,7 @@ export function createBubbleCoordinator({ labelMap }) {
     const ranked = [...details].sort(
       (a, b) =>
         priority(b, selectedRole) - priority(a, selectedRole) ||
+        Number(b.turn === 'comment') - Number(a.turn === 'comment') ||
         Number(b.turn === 'reply') - Number(a.turn === 'reply')
     );
     const chosen = new Map();

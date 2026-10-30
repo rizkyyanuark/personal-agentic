@@ -418,11 +418,53 @@ export function mountCockpit(container, options = {}) {
     }
     for (const [key, entity] of Object.entries(entities)) {
       const operational = next.agents[key]?.operational;
+      const prevOperational = previous.agents[key]?.operational;
       if (
-        previous.agents[key]?.operational.state !== operational?.state ||
-        previous.agents[key]?.operational.task !== operational?.task
+        prevOperational?.state !== operational?.state ||
+        prevOperational?.task !== operational?.task
       ) {
         eventBubbles.delete(key);
+        if (
+          prevOperational?.state &&
+          operational?.state &&
+          next.gates?.dataFresh &&
+          next.gates?.visible
+        ) {
+          if (prevOperational.state !== 'bekerja' && operational.state === 'bekerja') {
+            eventBubbles.set(key, {
+              id: `lifecycle:${key}:start:${performance.now()}`,
+              roleKey: key,
+              kind: 'work',
+              cls: 'hi',
+              text: 'Siap, saya kerjakan!',
+              expiresAt: performance.now() + 3600
+            });
+            if (key !== 'hq_lab_director' && entities.hq_lab_director) {
+              const assigneeName = entities[key]?.cfg?.name || 'Tim';
+              const taskText = (operational.task || 'tugas baru').slice(0, 40);
+              eventBubbles.set('hq_lab_director', {
+                id: `lifecycle:hq:delegate:${performance.now()}`,
+                roleKey: 'hq_lab_director',
+                kind: 'work',
+                text: `${assigneeName}, tolong: ${taskText}`,
+                expiresAt: performance.now() + 4000
+              });
+            }
+          } else if (
+            prevOperational.state === 'bekerja' &&
+            ['siaga', 'selesai'].includes(operational.state)
+          ) {
+            const isDirector = key === 'hq_lab_director';
+            eventBubbles.set(key, {
+              id: `lifecycle:${key}:done:${performance.now()}`,
+              roleKey: key,
+              kind: 'work',
+              cls: 'hi',
+              text: isDirector ? 'Beres, menunggu instruksi berikutnya' : 'Beres!',
+              expiresAt: performance.now() + (isDirector ? 3800 : 3600)
+            });
+          }
+        }
       }
       entity.operational = operational;
       entity.state = operational?.state || 'offline';
@@ -448,11 +490,19 @@ export function mountCockpit(container, options = {}) {
   function updateTVPresentation(now) {
     if (!tvScreen) return;
     const { gates } = presentationSnapshot;
-    const occupied =
-      gates.dataFresh &&
-      gates.visible &&
-      Object.values(entities).some((entity) => entity.seat?.kind === 'sofa');
-    tvScreen.update({ occupied, reducedMotion: !gates.allowAmbient, timeSeconds: now / 1000 });
+    const player = Object.values(entities).find(
+      (entity) => entity.seat?.id === 'sofa:right' || entity.seat?.kind === 'sofa'
+    );
+    const occupied = gates.dataFresh && gates.visible && Boolean(player);
+    const playerName = player
+      ? presentationSnapshot?.agents?.[player.cfg.key]?.role?.name || player.cfg.name || ''
+      : '';
+    tvScreen.update({
+      occupied,
+      playerName,
+      reducedMotion: !gates.allowAmbient,
+      timeSeconds: now / 1000
+    });
     if (renderer) renderer.domElement.dataset.tvMode = tvScreen.mode;
     hud.updateTVMode(tvScreen.mode);
   }
@@ -495,6 +545,7 @@ export function mountCockpit(container, options = {}) {
         id: `event:${signature}`,
         roleKey: latest.role,
         kind: 'event',
+        cls: latest.tool ? 'hi' : '',
         text: latest.text,
         expiresAt: performance.now() + 4800
       });

@@ -108,8 +108,9 @@ test('empty sofa catalog switches to racing and returns to a labeled catalog', (
   assert(labels(frames.at(-1)).includes('Katalog dekoratif'));
   assert(labels(frames.at(-1)).includes('Judul dan artwork fiksi. TV hanya dekorasi.'));
 
-  assert.equal(screen.update({ occupied: true, timeSeconds: 5 }), true);
+  assert.equal(screen.update({ occupied: true, playerName: 'Nova', timeSeconds: 5 }), true);
   assert.equal(screen.mode, 'racing');
+  assert(labels(frames.at(-1)).includes('P1 · Nova'));
   assert(labels(frames.at(-1)).includes('Animasi dekoratif'));
   assert(labels(frames.at(-1)).includes('Layar lounge, tanpa kontrol permainan.'));
 

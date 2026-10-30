@@ -511,3 +511,30 @@ test('only working desk hands type subtly, while feet, head, HQ, and reduced-mot
     }
   }
 });
+
+test('idle activities toggle corresponding 3D dynamic props (guitar, gamepad, mug, book)', (context) => {
+  const entities = createFixture(context);
+  const nova = entities.data_engineer;
+  const seat = SOFA_SEATS[1];
+
+  applyCharacterPose(nova, seat, 1.0, false, { activity: 'ps' });
+  assert.equal(nova.handPad.visible, true);
+  assert.equal(nova.handMug.visible, false);
+  assert.equal(nova.handGuitar.visible, false);
+
+  applyCharacterPose(nova, seat, 1.0, false, { activity: 'guitar' });
+  assert.equal(nova.handGuitar.visible, true);
+  assert.equal(nova.handPad.visible, false);
+
+  applyCharacterPose(nova, seat, 3.0, false, { activity: 'coffee', elapsedSinceArrival: 3.0 });
+  assert.equal(nova.handMug.visible, true);
+  assert.equal(nova.handGuitar.visible, false);
+
+  applyCharacterPose(nova, seat, 3.0, false, { activity: 'water', elapsedSinceArrival: 3.0 });
+  assert.equal(nova.handMug.visible, true);
+  assert.equal(nova.handGuitar.visible, false);
+
+  applyCharacterPose(nova, seat, 1.0, false, { activity: 'reading' });
+  assert.equal(nova.handBook.visible, true);
+  assert.equal(nova.handMug.visible, false);
+});

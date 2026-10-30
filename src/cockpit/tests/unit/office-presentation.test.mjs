@@ -70,7 +70,7 @@ test('live and empty public snapshots permit only labeled, local idle activity',
   }
 });
 
-test('all valid operational states remain public facts, but only working gets a static bubble', () => {
+test('all valid operational states remain public facts, but only working gets a dynamic work bubble', () => {
   const presentation = createOfficePresentation(OFFICE_ROLES);
   for (const state of AGENT_STATES) {
     const snapshot = publicState();
@@ -87,20 +87,21 @@ test('all valid operational states remain public facts, but only working gets a 
     assert.equal(agent.workingBubble !== null, state === 'bekerja');
     if (agent.workingBubble) {
       assert.deepEqual(agent.workingBubble, {
-        kind: 'role-description',
-        text: 'Penyiapan dan validasi data.',
-        label: 'Deskripsi peran'
+        kind: 'work',
+        cls: 'hi',
+        text: 'Kalimat status publik',
+        label: 'Tugas publik'
       });
-      assert.ok(!agent.workingBubble.text.includes(agent.operational.task));
+      assert.equal(agent.workingBubble.text, agent.operational.task);
     }
   }
 });
 
-test('each canonical working role has a static description independent of generic task text', () => {
+test('each canonical working role surfaces its real task text with kind work and cls hi', () => {
   const presentation = createOfficePresentation(OFFICE_ROLES);
   const state = publicState();
   for (const { key } of OFFICE_ROLES) {
-    state.agents[key] = { state: 'bekerja', task: 'Sedang menjalankan tugas' };
+    state.agents[key] = { state: 'bekerja', task: `Tugas ${key}` };
   }
   presentation.receive(state);
   const descriptions = Object.values(presentation.getSnapshot().agents).map(
@@ -109,7 +110,7 @@ test('each canonical working role has a static description independent of generi
   assert.equal(new Set(descriptions.map(({ text }) => text)).size, OFFICE_ROLES.length);
   assert.ok(
     descriptions.every(
-      ({ kind, label }) => kind === 'role-description' && label === 'Deskripsi peran'
+      ({ kind, label, cls }) => kind === 'work' && label === 'Tugas publik' && cls === 'hi'
     )
   );
 });
@@ -225,7 +226,7 @@ test('reduced motion suppresses atmosphere and work motion while retaining stati
   assert.equal(snapshot.gates.allowAmbient, false);
   assert.equal(snapshot.gates.allowWorkMotion, false);
   assert.equal(snapshot.agents[IDLE].visual, null);
-  assert.equal(snapshot.agents[WORKER].workingBubble.label, 'Deskripsi peran');
+  assert.equal(snapshot.agents[WORKER].workingBubble.label, 'Tugas publik');
   presentation.setEnvironment({ reducedMotion: false });
   assert.equal(presentation.getSnapshot().gates.allowAmbient, true);
   assert.equal(presentation.getSnapshot().agents[IDLE].visual, null);
@@ -388,7 +389,7 @@ test('activity, private properties, and feed entries are never read as current w
   presentation.receive(state);
   const snapshot = presentation.getSnapshot();
   assert.equal(snapshot.gates.dataFresh, true);
-  assert.equal(snapshot.agents[WORKER].workingBubble.text, 'Penyiapan dan validasi data.');
+  assert.equal(snapshot.agents[WORKER].workingBubble.text, 'Belum ada tugas tercatat');
   assert.equal(snapshot.agents[IDLE].visual, null);
 });
 
@@ -414,7 +415,7 @@ test('input snapshots and returned snapshots cannot mutate retained presentation
   assert.equal(retained.agents[IDLE].operational.state, 'siaga');
   assert.equal(retained.agents[IDLE].operational.task, 'Belum ada tugas tercatat');
   assert.equal(retained.agents[IDLE].visual.text, 'Duduk di sofa');
-  assert.equal(retained.agents[WORKER].workingBubble.text, 'Penyiapan dan validasi data.');
+  assert.equal(retained.agents[WORKER].workingBubble.text, 'Belum ada tugas tercatat');
   assert.equal(Object.hasOwn(retained.agents, 'different'), false);
 });
 

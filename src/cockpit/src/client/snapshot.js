@@ -55,6 +55,26 @@ const ACTIVITY = {
   delegating: ['Menjalankan subagent', 'Langkah subagent selesai'],
   other: ['Menjalankan langkah pekerjaan', 'Langkah pekerjaan selesai']
 };
+const TOOL_LABELS = {
+  reading: 'Membaca',
+  searching: 'Pencarian',
+  writing: 'Menulis',
+  command: 'Terminal',
+  responding: 'Jawaban',
+  delegating: 'Delegasi',
+  other: 'Aktivitas'
+};
+
+function eventToolLabel(event) {
+  if (typeof event?.tool === 'string' && event.tool.trim()) {
+    return text(event.tool, 60);
+  }
+  const category = event?.activity?.category;
+  if (typeof category === 'string' && category) {
+    return TOOL_LABELS[category] || text(category, 60);
+  }
+  return null;
+}
 
 function activityText(activity) {
   if (!activity) return '';
@@ -215,7 +235,7 @@ export function projectCockpitSnapshot(snapshot) {
       status: text(event.status, 32),
       text: text(event.summary),
       time: event.created_at,
-      tool: null
+      tool: eventToolLabel(event)
     };
   });
   return {

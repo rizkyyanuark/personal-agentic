@@ -420,7 +420,8 @@ export function setupHUD(
     } else if (queue.waiting_approval > 0) {
       systemPhase.textContent = `${metric(queue.waiting_approval)} tugas menunggu keputusan pemilik`;
     } else {
-      systemPhase.textContent = 'Tidak ada agent dengan tugas aktif pada snapshot ini.';
+      systemPhase.textContent =
+        'Semua santai ☕ - nonton, ngopi & ngobrol. Otomatis kembali kerja saat ada tugas.';
     }
     return connection;
   }
@@ -846,7 +847,11 @@ export function setupHUD(
         element('div', 'feed-text', boundedText(item?.text, 600) || 'Aktivitas tanpa rincian.')
       );
       if (boundedText(item?.tool, 60)) {
-        content.append(element('span', 'feed-tool', boundedText(item.tool, 60)));
+        const toolBadge = element('span', 'feed-tool', boundedText(item.tool, 60));
+        if (role) {
+          toolBadge.style.borderColor = roleColor(role);
+        }
+        content.append(toolBadge);
       }
       row.append(avatar, content);
       feedList.append(row);

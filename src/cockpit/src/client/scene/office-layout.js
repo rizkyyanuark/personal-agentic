@@ -6,7 +6,7 @@ export const ROOM_LAYOUT = Object.freeze({
   min: Object.freeze([-9.5, 0, -7.5]),
   max: Object.freeze([9.5, 5.5, 6.5]),
   board: Object.freeze({ x: -2.4, y: 3.25, z: -7.34 }),
-  windows: Object.freeze([2.3, 5.5])
+  windows: Object.freeze([-7.0, 3.5])
 });
 
 const placements = [

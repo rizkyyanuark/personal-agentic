@@ -81,70 +81,95 @@ export const DIALOGUE_BY_ZONE = Object.freeze({
   ]
 });
 
-export const QUIPS_BY_KIND = Object.freeze({
-  sofa: [
+export const SPOT_BY_DESTINATION = Object.freeze({
+  'sofa:left': 'tv',
+  'sofa:right': 'ps',
+  'coffee:left': 'coffee',
+  'coffee:right': 'coffee',
+  'pantry:water': 'water',
+  'reading:left': 'bookshelf',
+  'reading:right': 'bookshelf',
+  'meeting:0': 'meet1',
+  'meeting:1': 'meet2',
+  'meeting:2': 'meet3',
+  'standing:hq': 'board',
+  guitar: 'guitar',
+  window: 'window'
+});
+
+export const QUIPS_BY_SPOT = Object.freeze({
+  tv: Object.freeze([
     'Filmnya lagi seru nih 🍿',
     'Eh, aktornya siapa ya?',
     'Jangan di-skip dulu!',
-    'Episode ini bagus banget',
+    'Episode ini bagus banget'
+  ]),
+  ps: Object.freeze([
     'Gooool! ⚽',
     'Satu match lagi ah 🎮',
     'Stiknya agak nge-drift nih',
     'Tunggu, aku belum siap!'
-  ],
-  coffee: [
+  ]),
+  coffee: Object.freeze([
     'Ngopi dulu biar melek ☕',
     'Espresso double, please',
     'Wangi banget kopinya',
-    'Gulanya di mana ya?',
+    'Gulanya di mana ya?'
+  ]),
+  water: Object.freeze([
     'Minum air putih dulu 💧',
     'Galonnya tinggal dikit',
     'Seger!',
     'Airnya dingin, mantap'
-  ],
-  reading: [
-    'Buku ini seru juga 📚',
-    'Wah, ada komik!',
-    'Bukunya belum dikembalikan nih',
-    'Sampul buku ini menarik.',
-    'Baca sebentar di dekat rak.'
-  ],
-  meeting: [
-    'Rapat lima menit, janji!',
-    'Siapa yang pesan kopi?',
-    'Kursinya empuk juga',
-    'Diskusi ringan dulu ☕',
-    'Laptopnya siapa ini?',
-    'Duduk dulu ah',
-    'Meja ini paling adem',
-    'Ngobrol santai dulu'
-  ],
-  desk: [
-    'Duduk dulu ah',
-    'Ngopi dulu biar melek ☕',
-    'Beres, siap lanjut',
-    'Langitnya cerah ya ☀️',
-    'Peregangan dulu, pegal 🙆'
-  ],
-  board: [
+  ]),
+  guitar: Object.freeze([
     '🎸 jreng… jreng…',
     'Request lagu dong',
     'Kuncinya G atau C ya?',
-    'Senarnya perlu diganti',
-    'Siapa yang pinjam spidol biru?',
-    'Ada di papan, tuh',
-    'Macet banget di bawah'
-  ]
+    'Senarnya perlu diganti'
+  ]),
+  window: Object.freeze([
+    'Langitnya cerah ya ☀️',
+    'Peregangan dulu, pegal 🙆',
+    'Macet banget di bawah',
+    'Ada layangan tuh!'
+  ]),
+  meet1: Object.freeze([
+    'Rapat lima menit, janji!',
+    'Siapa yang pesan kopi?',
+    'Kursinya empuk juga'
+  ]),
+  meet2: Object.freeze(['Diskusi ringan dulu ☕', 'Laptopnya siapa ini?', 'Duduk dulu ah']),
+  meet3: Object.freeze(['Meja ini paling adem', 'Ngobrol santai dulu', 'Kita bahas nanti aja']),
+  bookshelf: Object.freeze([
+    'Buku ini seru juga 📚',
+    'Wah, ada komik!',
+    'Bukunya belum dikembalikan nih'
+  ])
+});
+
+export const QUIP_FALLBACK = Object.freeze(['Santai dulu']);
+
+export const QUIPS_BY_KIND = Object.freeze({
+  sofa: [...QUIPS_BY_SPOT.tv, ...QUIPS_BY_SPOT.ps],
+  coffee: [...QUIPS_BY_SPOT.coffee],
+  water: [...QUIPS_BY_SPOT.water],
+  reading: [...QUIPS_BY_SPOT.bookshelf],
+  meeting: [...QUIPS_BY_SPOT.meet1, ...QUIPS_BY_SPOT.meet2, ...QUIPS_BY_SPOT.meet3],
+  guitar: [...QUIPS_BY_SPOT.guitar],
+  window: [...QUIPS_BY_SPOT.window],
+  desk: QUIP_FALLBACK,
+  board: ['Siapa yang pinjam spidol biru?', 'Ada di papan, tuh']
 });
 
 const STATIONARY_PHASES = new Set(['standing', 'seated']);
-const STATIONARY_KINDS = new Set(Object.keys(QUIPS_BY_KIND));
-const FIRST_WAIT_SECONDS = 4;
+const SOLO_DESTINATIONS = new Set(['guitar', 'window']);
+const FIRST_WAIT_SECONDS = 1.5;
 const OPENER_SECONDS = 4.8;
 const REPLY_DELAY_SECONDS = 2.3;
 const REPLY_SECONDS = 4.2;
 const COMMENT_SECONDS = 4.2;
-const PAIR_DISTANCE = 5.0;
+const SPOT_REPEAT_INTERVAL = 14;
 
 function seededRandom(value) {
   let seed = 2166136261;
@@ -177,8 +202,6 @@ function eligibleAgent(snapshot, activities, roleKey) {
     !facts?.available ||
     facts.state !== 'siaga' ||
     !STATIONARY_PHASES.has(activity?.phase) ||
-    !STATIONARY_KINDS.has(activity?.kind) ||
-    !Object.hasOwn(DIALOGUE_BY_ZONE, activity?.zone || '') ||
     !positionOf(activity)
   ) {
     return null;
@@ -186,15 +209,15 @@ function eligibleAgent(snapshot, activities, roleKey) {
   return {
     roleKey,
     kind: activity.kind,
-    zone: activity.zone,
+    zone: activity.zone || 'lounge',
+    destinationId: activity.destinationId,
     position: activity.position,
     signature: JSON.stringify([
       facts.state,
       facts.task,
       activity.kind,
-      activity.zone,
-      activity.phase,
       activity.destinationId,
+      activity.phase,
       arrivalIdOf(activity)
     ])
   };
@@ -205,10 +228,10 @@ function distance(first, second) {
 }
 
 function compatiblePair(first, second) {
-  return Boolean(first && second && distance(first, second) <= PAIR_DISTANCE);
+  return Boolean(first && second && first.roleKey !== second.roleKey);
 }
 
-export function createAmbientDialogue(roles) {
+export function createAmbientDialogue(roles, { random: customRandom = null } = {}) {
   const suppliedRoles = Array.isArray(roles) ? roles : [];
   const roleKeys = [
     ...new Set(
@@ -228,9 +251,13 @@ export function createAmbientDialogue(roles) {
         : ''
     ])
   );
-  const random = seededRandom(`cockpit-dialogue:${roleKeys.join(':')}`);
+  const random =
+    typeof customRandom === 'function'
+      ? customRandom
+      : seededRandom(`cockpit-dialogue:${roleKeys.join(':')}`);
   const previousScript = new Map();
   const seenArrivals = new Map();
+  const lastSpotQuipAt = new Map();
   const comments = new Map();
   let clock = 0;
   let nextAt = FIRST_WAIT_SECONDS;
@@ -243,6 +270,7 @@ export function createAmbientDialogue(roles) {
     conversation = null;
     comments.clear();
     seenArrivals.clear();
+    lastSpotQuipAt.clear();
     nextAt = clock + FIRST_WAIT_SECONDS;
     enabled = false;
   }
@@ -254,24 +282,21 @@ export function createAmbientDialogue(roles) {
     }
   }
 
-  function pickScript(zone) {
-    let scriptPool = CHAT;
-    if (zone && DIALOGUE_BY_ZONE[zone] && random() < 0.25) {
-      scriptPool = DIALOGUE_BY_ZONE[zone];
-    }
-    const poolKey = scriptPool === CHAT ? 'chat' : zone;
+  function pickScript() {
+    const poolKey = 'chat';
     const previous = previousScript.get(poolKey);
-    let index = Math.floor(random() * scriptPool.length);
-    if (index === previous) index = (index + 1) % scriptPool.length;
+    let index = Math.floor(random() * CHAT.length);
+    if (index === previous) index = (index + 1) % CHAT.length;
     previousScript.set(poolKey, index);
-    return scriptPool[index];
+    return CHAT[index];
   }
 
   function begin(snapshot, activities) {
     const available = roleKeys
       .filter((roleKey) => !comments.has(roleKey))
       .map((roleKey) => eligibleAgent(snapshot, activities, roleKey))
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter((agent) => !SOLO_DESTINATIONS.has(agent.destinationId));
     const speakers = available.filter((speaker) =>
       available.some((peer) => peer !== speaker && compatiblePair(speaker, peer))
     );
@@ -286,7 +311,7 @@ export function createAmbientDialogue(roles) {
       random() < 0.7 || !alternatives.length
         ? nearby[0]
         : alternatives[Math.floor(random() * alternatives.length)];
-    const script = pickScript(speaker.zone);
+    const script = pickScript();
     conversation = {
       id: `ambient-${++sequence}`,
       zone: speaker.zone,
@@ -317,17 +342,34 @@ export function createAmbientDialogue(roles) {
       if (arrivalId === null) continue;
       const previous = seenArrivals.get(roleKey);
       seenArrivals.set(roleKey, arrivalId);
-      if (
-        previous === undefined ||
-        arrivalId <= previous ||
-        comments.has(roleKey) ||
-        conversation?.participants.some((participant) => participant.roleKey === roleKey)
+      const isNewArrival = previous !== undefined && arrivalId > previous;
+      const destinationId = activities?.[roleKey]?.destinationId;
+      const spot = SPOT_BY_DESTINATION[destinationId] || activities?.[roleKey]?.kind;
+      const hasSpotQuips = Boolean(QUIPS_BY_SPOT[spot]);
+
+      if (comments.has(roleKey)) continue;
+
+      let shouldQuip = false;
+      if (isNewArrival) {
+        if (random() < 0.55) {
+          shouldQuip = true;
+        }
+      } else if (
+        hasSpotQuips &&
+        clock - (lastSpotQuipAt.get(roleKey) ?? 0) >= SPOT_REPEAT_INTERVAL &&
+        !conversation?.participants.some((p) => p.roleKey === roleKey)
       ) {
-        continue;
+        shouldQuip = true;
       }
+
+      if (!shouldQuip) continue;
       const participant = eligibleAgent(snapshot, activities, roleKey);
-      if (!participant || random() >= 0.55) continue;
-      const lines = QUIPS_BY_KIND[participant.kind];
+      if (!participant) continue;
+      if (conversation?.participants.some((p) => p.roleKey === roleKey)) {
+        conversation = null;
+      }
+      const lines = QUIPS_BY_SPOT[spot] || QUIPS_BY_KIND[participant.kind] || QUIP_FALLBACK;
+      lastSpotQuipAt.set(roleKey, clock);
       comments.set(roleKey, {
         id: `ambient-comment-${++sequence}`,
         participant,
