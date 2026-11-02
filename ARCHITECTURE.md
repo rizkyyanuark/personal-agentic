@@ -26,7 +26,7 @@ flowchart LR
 | Harness dan SSH | [antigravity.rs](src/backend/src/antigravity.rs), [opencode.rs](src/backend/src/opencode.rs), [remote.rs](src/backend/src/remote.rs), [remote bridge](src/backend/src/remote_bridge.py), [workstations.rs](src/backend/src/workstations.rs): native CLI, workstation, transport dan stop/heartbeat |
 | Registered runtime | [fleet.rs](src/backend/src/fleet.rs): worker terdaftar, koneksi outbound, enrollment dan execution; kemampuan transport tidak selalu sama dengan SSH |
 | File dan knowledge | [run_files.rs](src/backend/src/run_files.rs), API artifact, [knowledge.rs](src/backend/src/knowledge.rs): containment preview, artifact bytes/metadata, indexing dan retrieval LanceDB/FastEmbed |
-| UI dan visualisasi | [frontend](src/frontend/src), [cockpit adapter](src/frontend/src/LivePreview.tsx), [scene lifecycle](src/cockpit/src/client/lifecycle.js): state aplikasi dan scene read-only pada origin yang sama |
+| UI dan visualisasi | [frontend](src/frontend/src), [standalone office adapter](src/frontend/src/StandaloneOffice.tsx), [scene lifecycle](src/cockpit/src/client/mount.js): state aplikasi dan scene read-only pada origin yang sama |
 | Matrix | [matrix.rs](src/backend/src/matrix.rs), [deployment contract](src/DEPLOYMENT.md): identitas/room bridge dengan state workspace yang terpisah |
 | Release | [GitLab CI](.gitlab-ci.yml), [production Compose](infra/production/compose.yaml), [release helper](infra/production/release.py): verifikasi, image ARM64, digest smoke, backup dan promotion |
 
@@ -53,6 +53,6 @@ GitLab self-hosted menjadi canonical; GitHub adalah downstream mirror. Dev dan p
 
 ## Perubahan arsitektur
 
-Perubahan API, auth, session, schema, artifact/path, runtime atau release memerlukan kontrak eksplisit sesuai [template](openspec/templates/change.md). Tambahkan ADR ketika keputusan memengaruhi beberapa capability. Pertahankan boundary yang ada sebelum membuat modul/persistence paralel.
+Perubahan API, auth, session, schema, artifact/path, runtime atau release memerlukan kontrak eksplisit. [Indeks kontrak Live Office](openspec/README.md) mencatat scope dan precedence perubahan kantor yang sedang ditinjau. Tambahkan ADR ketika keputusan memengaruhi beberapa capability. Pertahankan boundary yang ada sebelum membuat modul/persistence paralel.
 
 [UPSTREAM](src/UPSTREAM.md) mencatat CCCC/Paperclip dan provenance komponen. Gunakan source reference untuk keputusan teknis; jangan menganggap kedua proyek mempunyai environment, adapter atau kebijakan development yang sama dengan personal-agentic.

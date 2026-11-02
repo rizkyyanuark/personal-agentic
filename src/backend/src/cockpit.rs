@@ -10,7 +10,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
 };
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -179,6 +179,7 @@ pub struct CockpitEvent {
     pub office_role: OfficeRole,
     pub agent_id: String,
     pub run_id: String,
+    pub group_id: String,
     pub status: String,
     pub created_at: String,
     pub summary: String,
@@ -741,6 +742,80 @@ mod tests {
     }
 
     #[test]
+    fn legacy_command_metadata_enrichment_is_read_only_and_never_skips_an_unrelated_event()
+    -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let app = application(directory.path())?;
+        initialize(&app)?;
+        let agent: Agent = app.store.get(
+            "agents",
+            &snapshot(&app, None)?.mapping[&OfficeRole::DataEngineer],
+        )?;
+        app.store.put(
+            "runs",
+            "legacy",
+            &run(&agent, "legacy", "running", RunKind::Direct, None),
+        )?;
+        let frames: Vec<Value> = serde_json::from_str(include_str!(
+            "../tests/fixtures/live-office-native-commands.json"
+        ))?;
+        for (index, category, operation) in [
+            (1, "reading", json!("read_file")),
+            (2, "command", Value::Null),
+        ] {
+            app.store.event("run.activity", json!({"run_id":"legacy","category":category,"state":"completed","step_index":index,"relative_file":null,"operation":operation}))?;
+            let mut frame = frames[index - 1].clone();
+            frame["item"]["aggregated_output"] = "PRIVATE_OUTPUT".into();
+            app.store.event(
+                "run.output",
+                json!({"run_id":"legacy","stderr":false,"line":serde_json::to_string(&frame)?}),
+            )?;
+        }
+        let before = app.store.read(|conn| {
+            Ok(conn.query_row("SELECT COUNT(*) FROM events", [], |row| {
+                row.get::<_, i64>(0)
+            })?)
+        })?;
+        let state = snapshot(&app, None)?;
+        assert_eq!(state.events.len(), 2);
+        assert_eq!(
+            state.events[0].summary,
+            "Menjalankan: Evaluasi JavaScript dengan Node.js"
+        );
+        assert_eq!(state.events[1].summary, "Membaca src/cart.js, package.json");
+        assert_eq!(
+            state
+                .agents
+                .iter()
+                .find(|slot| slot.office_role == OfficeRole::DataEngineer)
+                .unwrap()
+                .current_activity
+                .as_ref()
+                .unwrap()
+                .operation,
+            Some(crate::activity::ActivityOperation::NodeEval)
+        );
+        assert!(!serde_json::to_string(&state)?.contains("PRIVATE_OUTPUT"));
+        assert!(!serde_json::to_string(&state)?.contains("console.log"));
+        assert_eq!(
+            before,
+            app.store.read(|conn| Ok(conn.query_row(
+                "SELECT COUNT(*) FROM events",
+                [],
+                |row| row.get::<_, i64>(0)
+            )?))?
+        );
+        app.store.event("run.activity", json!({"run_id":"legacy","category":"command","state":"completed","step_index":3,"relative_file":null}))?;
+        app.store.event("run.changed", json!({"run_id":"legacy"}))?;
+        app.store.event(
+            "run.output",
+            json!({"run_id":"legacy","stderr":false,"line":serde_json::to_string(&frames[1])?}),
+        )?;
+        assert_eq!(snapshot(&app, None)?.events[0].summary, "Perintah selesai");
+        Ok(())
+    }
+
+    #[test]
     fn projection_keeps_parallel_old_active_work_and_hides_private_data() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let app = application(directory.path())?;
@@ -804,7 +879,7 @@ mod tests {
         assert_eq!(state.totals.awaiting_delegates, 1);
         assert_eq!(state.totals.queued, 1);
         assert_eq!(state.totals.completed, 120);
-        assert_eq!(state.events.len(), 1);
+        assert_eq!(state.events.len(), 0);
         app.store.event("run.activity", json!({"run_id":"active-main","category":"reading","state":"active","step_index":1,"relative_file":"PROJECT_BRIEF.md"}))?;
         let with_activity = snapshot(&app, None)?;
         let activity_slot = with_activity
@@ -821,10 +896,40 @@ mod tests {
                 .as_deref(),
             Some("PROJECT_BRIEF.md")
         );
-        assert_eq!(with_activity.events.len(), 2);
+        assert_eq!(with_activity.events.len(), 1);
         assert!(with_activity.events[0].summary.contains("Membaca file"));
         assert!(with_activity.events[0].activity.is_some());
         assert!(!serde_json::to_string(&with_activity)?.contains("private-output"));
+        app.store.event("run.activity", json!({"run_id":"active-main","category":"reading","state":"completed","step_index":1,"relative_file":"src/cart.js","operation":"read_file"}))?;
+        app.store.event("run.activity", json!({"run_id":"active-main","category":"responding","state":"completed","step_index":2,"relative_file":null}))?;
+        let compact = snapshot(&app, None)?;
+        assert_eq!(compact.events.len(), 1);
+        assert_eq!(compact.events[0].summary, "Membaca src/cart.js");
+        assert_eq!(compact.events[0].group_id, "general");
+        assert_eq!(
+            compact.events[0].activity.as_ref().unwrap().state,
+            crate::activity::ActivityState::Completed
+        );
+        for index in 0..105 {
+            app.store.event("run.activity", json!({"run_id":"finished-0","category":"command","state":"completed","step_index":index,"relative_file":null,"operation":"test"}))?;
+        }
+        let bounded = snapshot(&app, None)?;
+        assert_eq!(bounded.events.len(), 100);
+        assert!(
+            bounded
+                .events
+                .iter()
+                .all(|event| event.run_id == "finished-0")
+        );
+        assert!(
+            bounded
+                .agents
+                .iter()
+                .find(|agent| agent.office_role == OfficeRole::DataEngineer)
+                .unwrap()
+                .current_activity
+                .is_some()
+        );
         let serialized = serde_json::to_string(&state)?;
         for secret in [
             "private-session",
@@ -1362,6 +1467,33 @@ mod tests {
     }
 }
 
+fn enrich_stored_activity(
+    conn: &Connection,
+    seq: i64,
+    activity: &mut crate::activity::RunActivity,
+    workdir: &str,
+) -> Result<()> {
+    activity.sanitize(workdir);
+    if !activity.needs_native_details() {
+        return Ok(());
+    }
+    // Capture writes activity immediately before its same-run output; never skip to a later command.
+    let source: Option<(String, Option<String>)> = conn.query_row(
+        "SELECT kind, CASE WHEN kind='run.output' AND json_extract(payload,'$.stderr')=0 AND json_valid(json_extract(payload,'$.line')) THEN json_object('type',json_extract(json_extract(payload,'$.line'),'$.type'),'item',json_object('id',json_extract(json_extract(payload,'$.line'),'$.item.id'),'type',json_extract(json_extract(payload,'$.line'),'$.item.type'),'command',json_extract(json_extract(payload,'$.line'),'$.item.command'),'status',json_extract(json_extract(payload,'$.line'),'$.item.status'),'exit_code',json_extract(json_extract(payload,'$.line'),'$.item.exit_code'))) END FROM events WHERE seq>?1 AND json_extract(payload,'$.run_id')=?2 ORDER BY seq LIMIT 1",
+        params![seq, activity.run_id], |row| Ok((row.get(0)?, row.get(1)?))
+    ).optional()?;
+    if let Some((kind, Some(source))) = source {
+        if kind == "run.output" {
+            let frame: Value =
+                serde_json::from_str(&source).context("Invalid stored native metadata")?;
+            if frame["item"]["type"] == "command_execution" {
+                activity.enrich_from_native(&frame, workdir);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn aggregate(runs: &[CockpitRun]) -> CockpitPhase {
     [
         CockpitPhase::Working,
@@ -1452,11 +1584,21 @@ fn snapshot(app: &App, filter: Option<&str>) -> Result<CockpitState> {
             let agent_phase = if active_runs.is_empty() && latest_result.as_ref().is_some_and(|run| run.phase == CockpitPhase::Unknown) {
                 CockpitPhase::Unknown
             } else { aggregate(&active_runs) };
+            let current_activity = if agent_phase == CockpitPhase::Working {
+                let working_ids: Vec<_> = active_runs.iter().filter(|run| run.phase == CockpitPhase::Working).map(|run| &run.id).collect();
+                let payload: Option<(i64, String)> = conn.query_row("SELECT seq,payload FROM events WHERE kind='run.activity' AND json_extract(payload,'$.run_id') IN (SELECT value FROM json_each(?1)) ORDER BY seq DESC LIMIT 1", [serde_json::to_string(&working_ids)?], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+                payload.map(|(seq, payload)| -> Result<crate::activity::RunActivity> {
+                    let mut activity: crate::activity::RunActivity = serde_json::from_str(&payload).context("Invalid stored run activity")?;
+                    let workdir = agent_runs.iter().find(|run| run.id == activity.run_id).and_then(|run| run.profile.workdir.as_ref()).map(|workdir| workdir.canonical_path.as_str()).unwrap_or_default();
+                    enrich_stored_activity(conn, seq, &mut activity, workdir)?;
+                    Ok(activity)
+                }).transpose()?
+            } else { None };
             agents.push(CockpitAgent {
                 office_role: profile.key, agent_id: agent_id.cloned(), name: agent.map(|agent| agent.name.clone()).unwrap_or_else(|| profile.name.into()),
                 position: agent.map(|agent| agent.position.clone()).unwrap_or_else(|| profile.position.into()), role: agent.map(|agent| agent.role.clone()).unwrap_or_else(|| profile.description.into()),
                 color: agent.map(|agent| agent.color.clone()).unwrap_or_else(|| profile.color.into()), reports_to: agent.and_then(|agent| agent.reports_to.clone()), enabled: agent.is_some_and(|agent| agent.enabled),
-                availability, connection_checked_at, in_scope, phase: agent_phase, active_runs, latest_result, current_activity: None,
+                availability, connection_checked_at, in_scope, phase: agent_phase, active_runs, latest_result, current_activity,
             });
         }
         totals.tokens_processed = (totals.tokens_reported_runs > 0 && !token_overflow).then_some(token_sum);
@@ -1469,10 +1611,16 @@ fn snapshot(app: &App, filter: Option<&str>) -> Result<CockpitState> {
         let mut events_query = conn.prepare("SELECT seq,kind,json_extract(payload,'$.run_id'),created_at, CASE WHEN kind='run.activity' THEN payload ELSE NULL END FROM events WHERE kind IN ('run.activity','run.changed','run.delegated','run.awaiting_answer','question.created','question.answered') AND json_extract(payload,'$.run_id') IS NOT NULL ORDER BY seq DESC")?;
         let records = events_query.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, Option<String>>(4)?)))?;
         let mut events = vec![];
+        let mut seen_steps = HashSet::new();
         for record in records {
             let (id, kind, run_id, created_at, payload) = record?;
             let Some(run) = runs_by_id.get(run_id.as_str()) else { continue; };
-            let activity = payload.map(|payload| serde_json::from_str::<crate::activity::RunActivity>(&payload)).transpose().context("Invalid stored run activity")?;
+            if kind == "run.changed" { continue; }
+            let mut activity = payload.map(|payload| serde_json::from_str::<crate::activity::RunActivity>(&payload)).transpose().context("Invalid stored run activity")?;
+            if let Some(activity) = &mut activity {
+                enrich_stored_activity(conn, id, activity, run.profile.workdir.as_ref().map(|workdir| workdir.canonical_path.as_str()).unwrap_or_default())?;
+                if activity.category == crate::activity::ActivityCategory::Responding || !seen_steps.insert((run_id.clone(), activity.step_index)) { continue; }
+            }
             let (kind, status, label) = match kind.as_str() {
                 "run.delegated" => (CockpitEventKind::Delegated, "delegated", "Work delegated"),
                 "run.awaiting_answer" | "question.created" => (CockpitEventKind::AwaitingAnswer, "awaiting_answer", "Owner question requested"),
@@ -1481,13 +1629,10 @@ fn snapshot(app: &App, filter: Option<&str>) -> Result<CockpitState> {
                 _ => (CockpitEventKind::ActivityUpdated, "updated", "Activity updated"),
             };
             let summary = if let Some(activity) = &activity {
-                if let Some(agent) = agents.iter_mut().find(|agent| agent.agent_id.as_ref() == Some(&run.agent_id) && agent.phase == CockpitPhase::Working && agent.current_activity.is_none() && agent.active_runs.iter().any(|active| active.id == run_id)) {
-                    agent.current_activity = Some(activity.clone());
-                }
-                format!("{}{} · {}", activity.summary(), activity.relative_file.as_ref().map(|file| format!(" · {file}")).unwrap_or_default(), groups[&run.group_id].name)
+                activity.description()
             } else { format!("{label} in {}", groups[&run.group_id].name) };
-            events.push(CockpitEvent { id, kind, office_role: scoped_ids[&run.agent_id], agent_id: run.agent_id.clone(), run_id, status: status.into(), created_at, summary, activity });
-            if events.len() == 40 { break; }
+            events.push(CockpitEvent { id, kind, office_role: scoped_ids[&run.agent_id], agent_id: run.agent_id.clone(), group_id: run.group_id.clone(), run_id, status: status.into(), created_at, summary, activity });
+            if events.len() == 100 { break; }
         }
         let mut group_choices: Vec<_> = groups.values().map(|group| CockpitGroup { id: group.id.clone(), name: group.name.clone(), is_project: group.project.is_some() }).collect();
         group_choices.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));

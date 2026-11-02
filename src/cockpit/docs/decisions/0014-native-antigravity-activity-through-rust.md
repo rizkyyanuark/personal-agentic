@@ -16,7 +16,10 @@ back to chat. Native subagents remain details of the parent platform run.
 
 Rust normalizes native step transitions into `run.activity`. The public cockpit
 projection exposes only run identity, category, state, step index and a sanitized
-relative filename. It does not expose native arguments, outputs, private absolute
+relative filename. The Live Office work-activity follow-up adds a closed operation
+enum and group identity for run navigation, supports Codex/OpenCode tool events,
+and coalesces history per step. Unknown commands retain generic labels rather than
+guessed intent. Legacy rows without an operation remain readable. It does not expose native arguments, outputs, private absolute
 paths, prompts or credentials. Lifecycle success requires a native completion
 receipt and process exit; a completed file read is not task completion.
 

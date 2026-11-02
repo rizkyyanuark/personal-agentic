@@ -1063,7 +1063,7 @@ pub(crate) fn read_pipe(
 struct Protocol {
     workdir: String,
     summary_response: bool,
-    activities: BTreeMap<u32, crate::activity::RunActivity>,
+    activities: crate::activity::ActivityTracker,
     remote_started: Option<Value>,
     remote_finished: Option<Value>,
     bytes: usize,
@@ -1101,14 +1101,9 @@ impl Protocol {
             match serde_json::from_str::<Value>(line) {
                 Ok(value) => {
                     self.observe(&value);
-                    if let Some(activity) =
-                        crate::activity::antigravity_step(run_id, &value, &self.workdir)
-                    {
-                        if self.activities.get(&activity.step_index) != Some(&activity) {
-                            app.store
-                                .event("run.activity", serde_json::to_value(&activity)?)?;
-                            self.activities.insert(activity.step_index, activity);
-                        }
+                    for activity in self.activities.observe(run_id, &value, &self.workdir) {
+                        app.store
+                            .event("run.activity", serde_json::to_value(&activity)?)?;
                     }
                     if value["type"] == "item.completed"
                         && value["item"]["type"] == "mcp_tool_call"

@@ -19,7 +19,8 @@
     "format:check": "prettier --check .",
     "test": "node --test tests/unit/*.test.mjs",
     "check": "npm run lint && npm run format:check && npm test && npm run build",
-    "test:e2e": "node ../frontend/tests/cockpit-live.mjs"
+    "test:e2e": "node ../frontend/tests/live-office-context.mjs",
+    "test:e2e:legacy": "node ../frontend/tests/cockpit-live.mjs"
   },
   "engines": {
     "node": ">=22.12"

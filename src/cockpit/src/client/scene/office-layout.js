@@ -48,14 +48,15 @@ export const CHARACTER_CONFIGS = Object.freeze(
 );
 
 export const FURNITURE_LAYOUT = Object.freeze({
-  pantry: Object.freeze({ x: 7.2, z: -6.76, heading: 0 }),
+  pantry: Object.freeze({ x: 8.2, z: -6.45, heading: 0 }),
+  dispenser: Object.freeze({ x: 9.05, z: -5.45, heading: -Math.PI / 2 }),
   lounge: Object.freeze({ x: 3.3, z: 4.3, heading: Math.PI }),
   tv: Object.freeze({ x: 3.3, z: 1.95, heading: 0 }),
   meeting: Object.freeze({ x: -6.8, z: 0.3, heading: 0 }),
   bookshelf: Object.freeze({ x: -9.08, z: 3.5, heading: Math.PI / 2 }),
   plants: Object.freeze([
     Object.freeze({ x: -8.75, z: -6.25, scale: 1.15, zone: 'back-left' }),
-    Object.freeze({ x: 8.85, z: -5.0, scale: 1.0, zone: 'pantry-side' }),
+    Object.freeze({ x: 6.6, z: -6.4, scale: 0.8, zone: 'pantry-side' }),
     Object.freeze({ x: -8.5, z: 1.8, scale: 1.0, zone: 'bookshelf' }),
     Object.freeze({ x: 1.5, z: 4.35, scale: 1.0, zone: 'sofa-left' }),
     Object.freeze({ x: 8.6, z: 5.1, scale: 1.15, zone: 'front-right' })

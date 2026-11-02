@@ -72,6 +72,7 @@ function leanUpperBody(entity, lean, blend) {
   const scratch = poseScratch(entity);
   scratch.bodyLean = THREE.MathUtils.lerp(scratch.bodyLean, lean, blend);
   scratch.bodyRotation.setFromAxisAngle(across, scratch.bodyLean);
+  if (entity.guitarMount) entity.guitarMount.quaternion.copy(scratch.bodyRotation);
   entity.head.position.copy(scratch.headPosition).applyQuaternion(scratch.bodyRotation);
   entity.leftArm.position.copy(scratch.leftShoulder).applyQuaternion(scratch.bodyRotation);
   entity.rightArm.position.copy(scratch.rightShoulder).applyQuaternion(scratch.bodyRotation);
@@ -93,8 +94,8 @@ function handTargets(entity, seat, elapsedTime, reducedMotion) {
     const typing = active ? Math.sin(elapsedTime * 7) * 0.002 : 0;
     const deskZ = seat.fixture.z - DESK_CHAIR_OFFSET;
     return [
-      [seat.fixture.x - 0.032, ROOM_LAYOUT.floorY + 0.9 + typing, deskZ + 0.212],
-      [seat.fixture.x - 0.218, ROOM_LAYOUT.floorY + 0.9 - typing, deskZ + 0.212]
+      [seat.fixture.x - 0.032, ROOM_LAYOUT.floorY + 0.896 + typing, deskZ + 0.232],
+      [seat.fixture.x - 0.218, ROOM_LAYOUT.floorY + 0.896 - typing, deskZ + 0.232]
     ];
   }
   if (seat.kind === 'meeting') {
@@ -233,6 +234,14 @@ function localActivityHands(entity, activity, pose) {
   }
   if (activity === 'guitar') {
     const strum = pose.strum ?? 0;
+    if (entity.handGuitar?.userData.contacts) {
+      const { neck, strum: picking } = entity.handGuitar.userData.contacts;
+      return [picking, neck].map((contact, index) => {
+        const target = new THREE.Vector3().fromArray(contact);
+        if (index === 0) target.y += strum;
+        return entity.handGuitar.localToWorld(target).toArray();
+      });
+    }
     return [
       relativeHandTarget(entity, -0.26, 0.41, 0.28),
       relativeHandTarget(entity, 0.035, 0.24 + strum, 0.285)
@@ -261,10 +270,13 @@ export function applyCharacterPose(
   motion = {}
 ) {
   const walking = motion.walking === true && !reducedMotion;
-  const activity = !walking && !reducedMotion && motion.neutral !== true ? motion.activity : null;
+  const activity =
+    !walking && motion.neutral !== true && (!reducedMotion || motion.activity === 'guitar')
+      ? motion.activity
+      : null;
   const pose = activityPose(
     activity,
-    elapsedTime,
+    reducedMotion ? 0 : elapsedTime,
     Math.max(0, motion.elapsedSinceArrival ?? elapsedTime),
     motion.seed ?? 0
   );
@@ -362,8 +374,10 @@ export function applyCharacterPose(
     }
   }
   const [leftTarget, rightTarget] = targets;
-  placeHand(entity, entity.leftArm, entity.leftForearm, leftTarget, poseBlend);
-  placeHand(entity, entity.rightArm, entity.rightForearm, rightTarget, poseBlend);
+  // A rigid instrument needs exact grip contacts even while the torso blends into its pose.
+  const handBlend = activity === 'guitar' ? 1 : poseBlend;
+  placeHand(entity, entity.leftArm, entity.leftForearm, leftTarget, handBlend);
+  placeHand(entity, entity.rightArm, entity.rightForearm, rightTarget, handBlend);
   entity.head.updateWorldMatrix(true, false);
   const gaze = activity === 'reading' ? relativeHandTarget(entity, 0, 0.32, 0.28) : seat.lookTarget;
   const scratch = poseScratch(entity);

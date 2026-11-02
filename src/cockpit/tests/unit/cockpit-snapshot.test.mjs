@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OFFICE_ROLES, isPublicLabState } from '../../src/shared/office-contract.js';
 import { createDisconnectedState, projectCockpitSnapshot } from '../../src/client/snapshot.js';
-import { createOfficePresentation } from '../../src/client/ui/office-presentation.js';
+import {
+  createOfficePresentation,
+  didObservedRunSucceed
+} from '../../src/client/ui/office-presentation.js';
 import { projectTaskBoard } from '../../src/shared/task-board-contract.js';
 import { projectAgentCardPresentation, projectTokenMetric } from '../../src/client/ui/hud.js';
 
@@ -62,7 +65,7 @@ function card(input) {
   return projectAgentCardPresentation(view.agents.data_engineer, view);
 }
 
-test('real completed runs show Selesai for 60 seconds then Santai, retaining the outcome', () => {
+test('finished runs return directly to Santai while retaining the real outcome in history', () => {
   const input = fixture();
   for (const [status, result] of [
     ['succeeded', 'Selesai'],
@@ -73,13 +76,23 @@ test('real completed runs show Selesai for 60 seconds then Santai, retaining the
   ]) {
     input.agents[1].latest_result = run(status);
     input.generated_at = '2026-10-06T01:00:59.999Z';
-    assert.equal(card(input).status.label, 'Selesai');
-    assert.equal(card(input).subtext, `Tugas terakhir: ${result}`);
+    assert.equal(card(input).status.label, 'Santai');
+    assert.equal(
+      card(input).subtext,
+      ['failed', 'timed_out', 'interrupted'].includes(status)
+        ? `Tugas terakhir: ${result}`
+        : 'Menunggu tugas baru.'
+    );
     assert.equal(card(input).task, 'Run selesai');
     assert.equal(projectCockpitSnapshot(input).agents.data_engineer.state, 'siaga');
     input.generated_at = '2026-10-06T01:01:00Z';
     assert.equal(card(input).status.label, 'Santai');
-    assert.equal(card(input).subtext, `Tugas terakhir: ${result}`);
+    assert.equal(
+      card(input).subtext,
+      ['failed', 'timed_out', 'interrupted'].includes(status)
+        ? `Tugas terakhir: ${result}`
+        : 'Menunggu tugas baru.'
+    );
     assert.equal(projectCockpitSnapshot(input).office.history[0].status, status);
   }
 });
@@ -139,7 +152,7 @@ test('five visual slots retain real identity with a whitelist projection and no 
     {
       id: 42,
       office_role: 'data_engineer',
-      kind: 'activity_updated',
+      kind: 'step_activity',
       status: 'updated',
       created_at: input.generated_at,
       summary: 'Status run diperbarui',
@@ -358,4 +371,117 @@ test('offline and authorization errors remove facts and operational motion throu
     assert.equal(state.gates.allowWorkMotion, false);
     assert.equal(state.agents.data_engineer.operational.state, null);
   }
+});
+
+test('work history ignores generic lifecycle and responses, preserves run trace and 100 meaningful steps', () => {
+  const input = fixture();
+  const step = {
+    office_role: 'data_engineer',
+    kind: 'step_activity',
+    run_id: 'run-1',
+    group_id: 'general',
+    status: 'completed',
+    created_at: input.generated_at,
+    summary: 'Membaca src/cart.js',
+    activity: { category: 'reading', state: 'completed', step_index: 4 }
+  };
+  input.events = [
+    { ...step, kind: 'activity_updated' },
+    { ...step, activity: { category: 'responding' } },
+    ...Array.from({ length: 105 }, (_, id) => ({ ...step, id }))
+  ];
+  const feed = projectCockpitSnapshot(input).feed;
+  assert.equal(feed.length, 100);
+  assert.equal(feed[0].text, 'Membaca src/cart.js');
+  assert.equal(feed[0].runId, 'run-1');
+  assert.equal(feed[0].groupId, 'general');
+  assert.equal(feed[0].stepIndex, 4);
+  assert.equal(feed[0].stepState, 'completed');
+});
+
+test('active cards name every safe read target and distinguish inline Node.js evaluation', () => {
+  const input = fixture();
+  Object.assign(input.agents[1], {
+    phase: 'working',
+    active_runs: [run('running')],
+    current_activity: {
+      run_id: 'run-1',
+      category: 'reading',
+      state: 'active',
+      operation: 'read_file',
+      relative_file: 'src/cart.js',
+      relative_files: ['src/cart.js', 'package.json'],
+      command: 'PRIVATE_COMMAND',
+      output: 'PRIVATE_OUTPUT'
+    }
+  });
+  let state = projectCockpitSnapshot(input);
+  assert.equal(state.agents.data_engineer.task, 'Membaca src/cart.js, package.json');
+  assert.doesNotMatch(JSON.stringify(state), /PRIVATE_/);
+  Object.assign(input.agents[1].current_activity, {
+    category: 'command',
+    operation: 'node_eval',
+    relative_file: null,
+    relative_files: null
+  });
+  state = projectCockpitSnapshot(input);
+  assert.equal(state.agents.data_engineer.task, 'Menjalankan: Evaluasi JavaScript dengan Node.js');
+});
+
+test('completion speech uses the same observed native run through snapshot and presentation', () => {
+  const input = fixture();
+  const slot = input.agents[1];
+  slot.phase = 'working';
+  slot.active_runs = [run('running')];
+  const presentation = createOfficePresentation(OFFICE_ROLES);
+  presentation.receive(projectCockpitSnapshot(input));
+  const previous = presentation.getSnapshot().agents.data_engineer.operational;
+  assert.deepEqual(previous.activeRunIds, ['run-1']);
+  slot.phase = 'idle';
+  slot.active_runs = [];
+  for (const status of ['succeeded', 'failed', 'cancelled', 'timed_out', 'interrupted']) {
+    slot.latest_result = run(status);
+    presentation.receive(projectCockpitSnapshot(input));
+    const next = presentation.getSnapshot().agents.data_engineer.operational;
+    assert.deepEqual(next.latestResult, { runId: 'run-1', status });
+    assert.equal(didObservedRunSucceed(previous, next), status === 'succeeded');
+    assert.equal(didObservedRunSucceed(next, next), false, 'Polling cannot repeat completion.');
+  }
+  slot.latest_result = { ...run('succeeded'), id: 'old-success' };
+  presentation.receive(projectCockpitSnapshot(input));
+  const next = presentation.getSnapshot().agents.data_engineer.operational;
+  assert.equal(didObservedRunSucceed(previous, next), false, 'Old success is unrelated.');
+  assert.equal(
+    didObservedRunSucceed(
+      { ...previous, activeRunIds: ['run-1', 'other'] },
+      { ...next, latestResult: { runId: 'run-1', status: 'succeeded' } }
+    ),
+    false
+  );
+  assert.equal(didObservedRunSucceed({ ...previous, activeRunIds: undefined }, next), false);
+  assert.equal(didObservedRunSucceed(previous, { ...next, latestResult: null }), false);
+  assert.equal(didObservedRunSucceed(previous, { ...next, activeRunIds: ['still-active'] }), false);
+});
+
+test('completion provenance is optional, bounded and does not forward private result fields', () => {
+  const input = fixture();
+  input.agents[1].latest_result = {
+    ...run('succeeded'),
+    native_session_id: 'PRIVATE_SESSION',
+    output: 'PRIVATE_OUTPUT'
+  };
+  const projected = projectCockpitSnapshot(input);
+  const presentation = createOfficePresentation(OFFICE_ROLES);
+  const worker = projected.agents.data_engineer;
+  worker.activeRunIds = ['run-1', null];
+  worker.latestResult.extra = 'PRIVATE_EXTRA';
+  presentation.receive(projected);
+  const facts = presentation.getSnapshot().agents.data_engineer.operational;
+  assert.equal(facts.activeRunIds, undefined);
+  assert.deepEqual(facts.latestResult, { runId: 'run-1', status: 'succeeded' });
+  assert.doesNotMatch(JSON.stringify(facts), /PRIVATE_/);
+  worker.activeRunIds = [];
+  worker.latestResult = { runId: 'x'.repeat(129), status: 'succeeded' };
+  presentation.receive(projected);
+  assert.equal(presentation.getSnapshot().agents.data_engineer.operational.latestResult, undefined);
 });

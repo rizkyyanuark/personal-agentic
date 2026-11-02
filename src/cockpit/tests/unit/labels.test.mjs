@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BUBBLE_LABELS,
   clearSpeechBubble,
   clearSpeechBubbles,
   disposeCharacterLabels,
+  normalizeSpeechBubble,
   roleIdentity,
+  speechBubblePreview,
   updateSpeechBubble
 } from '../../src/client/ui/labels.js';
 
@@ -19,7 +22,8 @@ function labelsFixture() {
     ['nova', 'atlas'].map((key) => [
       key,
       {
-        bubble: { textContent: '', dataset: {}, hidden: true, style: { display: 'none' } },
+        bubble: { dataset: {}, hidden: true, style: { display: 'none' } },
+        bubbleText: { textContent: '' },
         bubbleTimer: null,
         bubbleRecord: null,
         disposed: false,
@@ -58,7 +62,7 @@ test('event bubbles stay explicitly historical and render payload as text', () =
       true
     );
     assert.equal(labels.nova.bubble.dataset.kind, 'event');
-    assert.equal(labels.nova.bubble.textContent, 'Riwayat publik: <b>Agent mulai bekerja</b>');
+    assert.equal(labels.nova.bubbleText.textContent, '<b>Agent mulai bekerja</b>');
     assert.equal(labels.nova.bubble.hidden, false);
     assert.equal(timers.get(0).delay, 6000);
     timers.get(0).handler();
@@ -68,7 +72,7 @@ test('event bubbles stay explicitly historical and render payload as text', () =
   });
 });
 
-test('work speech bubbles render with green highlight class', () => {
+test('work speech bubbles share the same plain class as dialogue', () => {
   withTimers(() => {
     const labels = labelsFixture();
     assert.equal(
@@ -80,8 +84,8 @@ test('work speech bubbles render with green highlight class', () => {
       true
     );
     assert.equal(labels.nova.bubble.dataset.kind, 'work');
-    assert.equal(labels.nova.bubble.className, 'speech-bubble bubble hi');
-    assert.equal(labels.nova.bubble.textContent, 'Tugas publik: Membaca file · src/App.tsx');
+    assert.equal(labels.nova.bubble.className, 'speech-bubble bubble');
+    assert.equal(labels.nova.bubbleText.textContent, 'Membaca file · src/App.tsx');
     assert.equal(labels.nova.bubble.hidden, false);
   });
 });
@@ -95,7 +99,9 @@ test('bubble kinds use fixed provenance labels, never a caller-supplied label', 
       ['work', 'Tugas publik']
     ]) {
       updateSpeechBubble(labels, 'nova', { kind, text: 'Teks', label: 'Aktivitas nyata' });
-      assert.equal(labels.nova.bubble.textContent, `${prefix}: Teks`);
+      assert.equal(labels.nova.bubbleText.textContent, 'Teks');
+      assert.equal(BUBBLE_LABELS[kind], prefix);
+      assert.equal(labels.nova.bubbleRecord.label, undefined);
       assert(Object.isFrozen(labels.nova.bubbleRecord));
     }
   });
@@ -113,7 +119,7 @@ test('untyped, invalid, empty or unknown bubbles clear instead of masquerading a
       updateSpeechBubble(labels, 'nova', { kind: 'event', text: 'Prior event' });
       assert.equal(updateSpeechBubble(labels, 'nova', input), false);
       assert.equal(labels.nova.bubble.hidden, true);
-      assert.equal(labels.nova.bubble.textContent, '');
+      assert.equal(labels.nova.bubbleText.textContent, '');
       assert.equal(labels.nova.bubble.dataset.kind, undefined);
       assert.equal(timers.size, 0);
     }
@@ -129,7 +135,7 @@ test('replacement cancels the old timer and its queued callback cannot erase a n
     updateSpeechBubble(labels, 'nova', { kind: 'role-description', text: 'New' });
     assert.equal(timers.has(0), false);
     oldCallback();
-    assert.equal(labels.nova.bubble.textContent, 'Deskripsi peran: New');
+    assert.equal(labels.nova.bubbleText.textContent, 'New');
     assert.equal(labels.nova.bubble.hidden, false);
     clearSpeechBubble(labels, 'nova');
     assert.equal(timers.size, 0);
@@ -168,4 +174,21 @@ test('bubble text and lifetime are bounded without retaining payload objects', (
     updateSpeechBubble(labels, 'atlas', { kind: 'event', text: 'bounded' }, 0);
     assert.equal(timers.get(1).delay, 100);
   });
+});
+
+test('bubble previews are short without splitting joined emoji and full detail remains intact', () => {
+  const emoji = '\u{1f469}\u{1f3fd}\u200d\u{1f4bb}';
+  const text = emoji.repeat(70);
+  const record = normalizeSpeechBubble({ kind: 'work', text });
+  const preview = speechBubblePreview(record);
+  assert.equal(
+    [...new Intl.Segmenter('id', { granularity: 'grapheme' }).segment(preview)].length,
+    48
+  );
+  assert.equal(preview, emoji.repeat(47) + '\u2026');
+  assert.equal(record.text, text);
+  assert.equal(
+    speechBubblePreview({ kind: 'dialogue', text: 'a'.repeat(110) }),
+    'a'.repeat(95) + '\u2026'
+  );
 });

@@ -39,7 +39,7 @@ test('loading and unavailable tasks do not invent an idle activity', () => {
   assert.equal(card.subtext, 'Memuat status agent.');
 });
 
-test('idle card ignores decorative activity and shows real task availability', () => {
+test('idle card describes the scene without changing operational facts', () => {
   const { agent, presentation } = fixture();
   Object.defineProperty(agent, 'activity', {
     get() {
@@ -49,7 +49,7 @@ test('idle card ignores decorative activity and shows real task availability', (
   const before = JSON.stringify({ agent, presentation });
   const card = projectAgentCardPresentation(agent, presentation);
   assert.equal(card.status.label, 'Santai');
-  assert.equal(card.task, 'Status tugas publik.');
+  assert.equal(card.task, 'Menikmati kopi');
   assert.equal(card.subtext, 'Menunggu tugas baru.');
   assert.equal(JSON.stringify({ agent, presentation }), before);
 
@@ -57,7 +57,7 @@ test('idle card ignores decorative activity and shows real task availability', (
   const next = projectAgentCardPresentation(agent, presentation);
   assert.equal(next.subtext, 'Menunggu tugas baru.');
   assert.deepEqual(next.status, card.status);
-  assert.equal(next.task, card.task);
+  assert.equal(next.task, 'Membaca');
 });
 
 test('work retains public task and runtime facts in reduced motion', () => {
@@ -73,6 +73,15 @@ test('work retains public task and runtime facts in reduced motion', () => {
   assert.equal(projectAgentCardPresentation(agent, presentation).subtext, 'Run sedang berjalan.');
   agent.operational.runtimeHint = 'Runtime terhubung';
   assert.equal(projectAgentCardPresentation(agent, presentation).subtext, 'Runtime terhubung');
+});
+
+test('a failed latest run keeps its result visible while the character is idle', () => {
+  const { agent, presentation } = fixture();
+  agent.operational.latestFailure = true;
+  agent.operational.resultHint = 'Percobaan terakhir gagal';
+  const card = projectAgentCardPresentation(agent, presentation);
+  assert.equal(card.task, agent.operational.task);
+  assert.equal(card.subtext, agent.operational.resultHint);
 });
 
 test('waiting and failed use operational hints without ambience or work description', () => {

@@ -17,14 +17,22 @@ export const BUBBLE_LABELS = Object.freeze({
 
 export function normalizeSpeechBubble(bubble) {
   const text =
-    typeof bubble?.text === 'string'
-      ? bubble.text
-          .replace(/[\p{Cc}\s]+/gu, ' ')
-          .trim()
-          .slice(0, 160)
-      : '';
+    typeof bubble?.text === 'string' ? bubble.text.replace(/[\p{Cc}\s]+/gu, ' ').trim() : '';
   if (!text || !Object.hasOwn(BUBBLE_LABELS, bubble?.kind)) return null;
-  return Object.freeze({ kind: bubble.kind, text });
+  const bounded = [...graphemes.segment(text)]
+    .slice(0, 160)
+    .map(({ segment }) => segment)
+    .join('');
+  return Object.freeze({ kind: bubble.kind, text: bounded });
+}
+
+const graphemes = new Intl.Segmenter('id', { granularity: 'grapheme' });
+export function speechBubblePreview(record) {
+  const limit = record.kind === 'dialogue' ? 96 : 48;
+  const characters = [...graphemes.segment(record.text)].map(({ segment }) => segment);
+  return characters.length > limit
+    ? `${characters.slice(0, limit - 1).join('')}\u2026`
+    : record.text;
 }
 
 export function setupCharacterLabels(characterEntities, onAgentClick, roles = OFFICE_ROLES) {
@@ -46,7 +54,9 @@ export function setupCharacterLabels(characterEntities, onAgentClick, roles = OF
     const bubble = document.createElement('div');
     bubble.className = 'speech-bubble bubble hide';
     bubble.id = `bubble-${key}`;
-    bubble.textContent = '';
+    const bubbleText = document.createElement('span');
+    bubbleText.className = 'bubble-text';
+    bubble.appendChild(bubbleText);
     bubble.setAttribute('aria-hidden', 'true');
     bubble.hidden = true;
     bubble.style.display = 'none';
@@ -91,6 +101,7 @@ export function setupCharacterLabels(characterEntities, onAgentClick, roles = OF
       container,
       role,
       bubble,
+      bubbleText,
       tag,
       labelObject,
       requestedVisible: true,
@@ -144,7 +155,7 @@ export function clearSpeechBubble(labelMap, roleKey) {
   }
   label.bubbleTimer = null;
   label.bubbleRecord = null;
-  label.bubble.textContent = '';
+  label.bubbleText.textContent = '';
   label.bubble.className = 'speech-bubble bubble hide';
   delete label.bubble.dataset.kind;
   label.bubble.hidden = true;
@@ -155,7 +166,7 @@ export function clearSpeechBubbles(labelMap) {
   for (const roleKey of Object.keys(labelMap)) clearSpeechBubble(labelMap, roleKey);
 }
 
-export function renderSpeechBubble(labelMap, roleKey, bubble, { coordinated = false } = {}) {
+export function renderSpeechBubble(labelMap, roleKey, bubble) {
   const label = labelMap[roleKey];
   if (!label) return false;
   clearSpeechBubble(labelMap, roleKey);
@@ -163,13 +174,8 @@ export function renderSpeechBubble(labelMap, roleKey, bubble, { coordinated = fa
   if (!record) return false;
   label.bubbleRecord = record;
   label.bubble.dataset.kind = record.kind;
-  const cls = bubble.cls ? `speech-bubble bubble ${bubble.cls}` : 'speech-bubble bubble';
-  label.bubble.className = cls;
-  if (coordinated) {
-    label.bubble.textContent = record.text;
-  } else {
-    label.bubble.textContent = `${BUBBLE_LABELS[record.kind]}: ${record.text}`;
-  }
+  label.bubble.className = 'speech-bubble bubble';
+  label.bubbleText.textContent = speechBubblePreview(record);
   label.bubble.hidden = false;
   label.bubble.style.display = 'block';
   return true;

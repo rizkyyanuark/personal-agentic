@@ -65,7 +65,6 @@ export function createBubbleCoordinator({ labelMap }) {
         {
           id: candidate.id,
           roleKey: candidate.roleKey,
-          cls: candidate.cls || '',
           ...bubble,
           turn:
             bubble.kind === 'dialogue' && DIALOGUE_TURNS.has(candidate.turn)
@@ -81,12 +80,14 @@ export function createBubbleCoordinator({ labelMap }) {
       return;
     }
 
-    const ranked = [...details].sort(
-      (a, b) =>
-        priority(b, selectedRole) - priority(a, selectedRole) ||
-        Number(b.turn === 'comment') - Number(a.turn === 'comment') ||
-        Number(b.turn === 'reply') - Number(a.turn === 'reply')
-    );
+    const ranked = details
+      .filter((candidate) => width > 820 || candidate.kind === 'dialogue')
+      .sort(
+        (a, b) =>
+          priority(b, selectedRole) - priority(a, selectedRole) ||
+          Number(a.turn === 'comment') - Number(b.turn === 'comment') ||
+          Number(b.turn === 'reply') - Number(a.turn === 'reply')
+      );
     const chosen = new Map();
     for (const candidate of ranked) {
       if (!chosen.has(candidate.roleKey)) chosen.set(candidate.roleKey, candidate);
@@ -102,13 +103,9 @@ export function createBubbleCoordinator({ labelMap }) {
 
       const current = record.label.bubbleRecord;
       if (current?.kind !== candidate.kind || current?.text !== candidate.text) {
-        renderSpeechBubble(labelMap, record.roleKey, candidate, { coordinated: true });
+        renderSpeechBubble(labelMap, record.roleKey, candidate);
       }
-      if (candidate.cls) {
-        record.label.bubble.className = `speech-bubble bubble ${candidate.cls}`;
-      } else {
-        record.label.bubble.className = 'speech-bubble bubble';
-      }
+      record.label.bubble.className = 'speech-bubble bubble';
       record.label.bubble.hidden = false;
       record.label.bubble.style.display = 'block';
       record.candidateId = candidate.id;

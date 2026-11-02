@@ -462,7 +462,115 @@ exact revision, proof and pending dependencies in [CI-003](../openspec/changes/a
 
 ## Organization Live Preview
 
-Build the real service, then run `node frontend/tests/cockpit-live.mjs` from `src`
+### Live Office work activity
+
+Use the isolated candidate at `http://127.0.0.1:18795`. Set `AE_TEST_URL`,
+`AE_TEST_OWNER_KEY` privately, `AE_TEST_WORKDIR` to a disposable child folder
+inside the registered runtime root, and `AE_TEST_PROOF_DIR`. Run from `src`:
+
+```powershell
+node frontend/tests/live-office-work-activity.mjs
+```
+
+This explicitly starts one real Codex task that repairs a disposable cart project.
+It temporarily attaches the mapped data engineer to that folder with workspace-write
+permission, then restores its profile after the run ends. It checks actual read,
+search, edit, build and test events, deduplication, reload/history, timestamps,
+passive feed behavior and 320/390/768/1024/1440 px layouts. No API interception
+or native provider replacement is used. Inspect `work-activity-proof.json`, screenshots
+and actual fixture build/test output. A failed or unavailable provider is a failed
+acceptance, not a presentation-only success. Keep the candidate idle while running.
+
+### Specific native command descriptions
+
+After a source build, run `node frontend/tests/live-office-command-details.mjs`
+from `src` with the same local candidate URL/owner/proof environment. The mapped
+data engineer must be read-only and attached to the verification workdir containing
+the existing disposable `cart-activity` fixture from the work-activity suite.
+This starts exactly one real read-only Codex task: a multi-file Get-Content call
+and a Node.js inline JavaScript evaluation. It verifies actual output 36, metadata,
+no profile changes, reload, passive feed and five widths.
+Set `AE_TEST_HISTORY_RECEIPT` to the previous work-activity-proof.json to additionally
+verify enriched history retains the original event IDs/timestamps/statuses.
+
+### Passive presentation, bubbles and guitar
+
+Run `node frontend/tests/live-office-presentation.mjs` from `src` using the same
+isolated candidate URL/owner/proof variables. It uses actual API data and one real
+read-only agent task to verify a long multi-file work preview, uniform white surface
+and tail, mobile suppression, completed-card semantics, passive feed and reload.
+It observes a naturally playing guitar actor through Three.js's existing devtools
+observer, without changing scene objects or intercepting responses. Captures show
+focused/orbited guitar views and all five viewport widths. Normal/reduced-motion
+geometry tests independently cover all five rigs and actual surface clearances.
+
+### Completion outcome regression
+
+Run `node frontend/tests/live-office-completion.mjs` from `src` against the same
+isolated loopback candidate. Set `AE_TEST_URL`, `AE_TEST_OWNER_KEY` privately,
+`AE_TEST_WORKDIR`, `AE_TEST_PROOF_DIR`, and `AE_TEST_WORKER_PID` to the owned fixture
+worker PID. The script rejects another port and verifies that PID belongs to the
+fixture worker before fault injection.
+
+It creates three direct native tasks: success reads/tests the existing cart fixture;
+failure terminates only the unique Codex descendant of the owned worker after the
+UI observes working; cancellation uses the authenticated `/runs/{id}/cancel` API.
+Neither controller nor worker is terminated. No provider/API response or DB row is
+faked. The maintained script does not alter agent profiles. The application's
+normal automatic failure-review run may also execute; it is recorded separately
+by parent run identity. The failed direct run must not be confused with that review.
+
+Inspect completion-proof.json: succeeded has one observed Beres, failed/cancelled
+have none, actual latest-result IDs/statuses agree, no page errors, profiles and
+fixture hashes are unchanged. Keep all task state, logs and screenshots ignored.
+This fault-injection suite is restricted to the owned disposable local fixture.
+
+### Live Office idle behavior
+
+Use an isolated local candidate at `http://127.0.0.1:18795` with its own organization
+and a real registered runtime rooted in a disposable workdir. Set `AE_TEST_URL`,
+`AE_TEST_OWNER_KEY` privately, `AE_TEST_RUNTIME_ID`, `AE_TEST_WORKDIR` and
+`AE_TEST_PROOF_DIR`. From `src`, run:
+
+```powershell
+node frontend/tests/live-office-idle.mjs
+```
+
+This configures only the candidate's cockpit profiles and observes `/office` for
+five minutes (`AE_TEST_OBSERVE_MS` can change the observation window). It does not
+intercept API responses. By default it does not invoke provider work. Three.js's existing devtools
+observer reads the actual rendered scene for world anchors and guitar contacts.
+Receipts include activity text, bubble transition timestamps, guitar views, a mobile
+screenshot, unchanged run/profile checks, and the absence of idle feed entries.
+Real work history survives reload; it is independent of scene roaming. A failure
+still saves `idle-proof.json`; inspect its errors before claiming acceptance.
+Random roaming may require a longer observation for every character/spot. This
+smoke alone does not prove interruption by a model task. With explicit authorization,
+set `AE_TEST_RUN_INTERRUPTION=true` to submit a read-only fixture task through the
+candidate's authenticated message API and registered runtime. A provider failure is
+recorded as a real limitation, never replaced with a mock success.
+
+Pair the receipt with cockpit unit/check output and the tested frontend build hash.
+Clock/random control in unit tests verifies deadline boundaries and eligibility;
+it is not a substitute for actual rendered timestamps or real provider evidence.
+
+Build the real service and frontend, configure the isolated candidate with the idle
+smoke above, then run `npm run test:e2e --workspace cockpit` from `src` with the same
+private owner key and a separate `AE_TEST_PROOF_DIR`. The standalone suite checks
+the Organization button opening `/office`, the `/organization/live-preview` alias,
+four desk camera views and actual mesh bounds, desktop/mobile, reduced motion,
+offline/recovery, public-read/authenticated-write boundaries, remount, workspace
+isolation, and unchanged profiles/runs. It uses real HTTP, SQLite, assets and WebGL.
+It records two minutes of production bubble timestamps with no API interception.
+
+The older overlay suite is retained as `npm run test:e2e:legacy --workspace cockpit`.
+It currently fails because this checkout routes both office URLs to StandaloneOffice,
+while the suite expects an overlay and a button named Live Preview. Do not claim
+its overlay/focus-trap coverage passes for the standalone page. The owner approved
+the standalone acceptance contract on 2026-11-02; the historical coverage below
+describes the retained legacy scripts.
+
+Legacy invocation: run `node frontend/tests/cockpit-live.mjs` from `src`
 with `AE_TEST_URL`, `AE_TEST_OWNER_KEY` and optionally `AE_TEST_PROOF_DIR` set.
 The owner key stays in the environment; do not put it in URLs or evidence files.
 This uses the actual HTTP service, identity/organization databases, and browser.
@@ -526,8 +634,9 @@ Previously on 6 October 2026, the compact build passed the main service smoke at
 9 viewport sizes, touch portrait/landscape, unchanged 7 profiles/2 runs, and no
 new runs. Candidate, persisted native-token receipt, 87 Rust tests, and 199 cockpit
 tests also passed. This correction reused the existing provider receipt and made
-no new provider invocation. Exact measurements, screenshot paths, and logs are
-recorded in [the integration result](../docs/cockpit-integration-result.md).
+no new provider invocation. The baseline referenced `docs/cockpit-integration-result.md`, which is absent
+from this checkout. Treat that paragraph as a historical record, not current proof.
+Current Live Office evidence is indexed in [the review](cockpit/docs/live-office-review.md).
 
 `docker build --target verification -f Dockerfile .` from `src` runs Rust format
 and the complete Rust workspace tests with the actual ONNX Runtime library.

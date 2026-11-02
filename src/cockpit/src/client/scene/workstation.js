@@ -242,11 +242,9 @@ function addDeskStickyNotes(group, roleKey) {
 }
 
 function addDeskSurface(group, config, role, assets, accentMaterial, nameplate, detailed) {
-  addBox(group, [1.05, 0.014, 0.4], [-0.12, 0.782, 0.2], assets.deskMat);
-
   const keyboardContainer = new THREE.Group();
   keyboardContainer.name = `keyboard_${config.key}`;
-  keyboardContainer.position.set(...(detailed ? [-0.15, 0.815, 0.14] : [-0.12, 0.806, 0.15]));
+  keyboardContainer.position.set(...(detailed ? [-0.15, 0.80435, 0.16] : [-0.12, 0.8032, 0.17]));
   keyboardContainer.rotation.y = 0;
   keyboardContainer.scale.setScalar(detailed ? 0.95 : 0.9);
   assets.attachKeyboard(keyboardContainer);
@@ -254,7 +252,7 @@ function addDeskSurface(group, config, role, assets, accentMaterial, nameplate, 
 
   const mouseContainer = new THREE.Group();
   mouseContainer.name = `mouse_${config.key}`;
-  mouseContainer.position.set(detailed ? 0.36 : 0.34, 0.789, 0.18);
+  mouseContainer.position.set(detailed ? 0.36 : 0.34, 0.7825, 0.18);
   mouseContainer.rotation.y = Math.PI;
   mouseContainer.scale.setScalar(detailed ? 1.0 : 0.9);
   assets.attachMouse(mouseContainer);
@@ -435,7 +433,6 @@ export function createWorkstationAssets({ anisotropy = 1, assetBase = '/cockpit-
       roughness: 0.3,
       metalness: 0.15
     }),
-    deskMat: new THREE.MeshStandardMaterial({ color: 0x28483f, roughness: 0.86 }),
     keyMaterial: new THREE.MeshStandardMaterial({ color: 0xe8e6e1, roughness: 0.58 }),
     cableMaterial: new THREE.MeshStandardMaterial({
       color: 0x22262c,

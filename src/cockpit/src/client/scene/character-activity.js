@@ -761,6 +761,7 @@ export function createCharacterActivityController(
             zone: kind === 'walking' || returning ? 'walkway' : (record.current?.zone ?? 'walkway'),
             phase: returning ? 'returning' : record.phase,
             destinationId: record.current?.id ?? null,
+            targetDestinationId: record.target?.id ?? null,
             arrivalId: record.arrivalId,
             position: record.entity.root.position.toArray()
           };
