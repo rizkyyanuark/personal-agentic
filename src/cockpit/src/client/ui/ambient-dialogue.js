@@ -163,13 +163,11 @@ export const QUIPS_BY_KIND = Object.freeze({
 });
 
 const STATIONARY_PHASES = new Set(['standing', 'seated']);
-const SOLO_DESTINATIONS = new Set(['guitar', 'window']);
-const FIRST_WAIT_SECONDS = 1.5;
+const FIRST_WAIT_SECONDS = 4;
 const OPENER_SECONDS = 4.8;
 const REPLY_DELAY_SECONDS = 2.3;
 const REPLY_SECONDS = 4.2;
 const COMMENT_SECONDS = 4.2;
-const SPOT_REPEAT_INTERVAL = 14;
 
 function seededRandom(value) {
   let seed = 2166136261;
@@ -240,24 +238,20 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
         .filter((key) => typeof key === 'string' && key.length > 0)
     )
   ];
-  const names = new Map(
-    suppliedRoles.map((role) => [
-      role?.key,
-      typeof role?.name === 'string'
-        ? role.name
-            .replace(/[\p{Cc}\s]+/gu, ' ')
-            .trim()
-            .slice(0, 32)
-        : ''
-    ])
-  );
+  const nameOf = (key) => {
+    const role = suppliedRoles.find((entry) => entry?.key === key);
+    return typeof role?.name === 'string'
+      ? role.name
+          .replace(/[\p{Cc}\s]+/gu, ' ')
+          .trim()
+          .slice(0, 32) || 'kamu'
+      : 'kamu';
+  };
   const random =
     typeof customRandom === 'function'
       ? customRandom
       : seededRandom(`cockpit-dialogue:${roleKeys.join(':')}`);
-  const previousScript = new Map();
   const seenArrivals = new Map();
-  const lastSpotQuipAt = new Map();
   const comments = new Map();
   let clock = 0;
   let nextAt = FIRST_WAIT_SECONDS;
@@ -266,11 +260,13 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
   let conversation = null;
   let sequence = 0;
 
+  // Accumulated frame fractions must not postpone an exact deadline.
+  const hasReached = (deadline) => clock >= deadline - 1e-9;
+
   function clear() {
     conversation = null;
     comments.clear();
     seenArrivals.clear();
-    lastSpotQuipAt.clear();
     nextAt = clock + FIRST_WAIT_SECONDS;
     enabled = false;
   }
@@ -283,20 +279,14 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
   }
 
   function pickScript() {
-    const poolKey = 'chat';
-    const previous = previousScript.get(poolKey);
-    let index = Math.floor(random() * CHAT.length);
-    if (index === previous) index = (index + 1) % CHAT.length;
-    previousScript.set(poolKey, index);
-    return CHAT[index];
+    return CHAT[Math.floor(random() * CHAT.length)];
   }
 
-  function begin(snapshot, activities) {
+  function begin(snapshot, activities, blockedRoles) {
     const available = roleKeys
-      .filter((roleKey) => !comments.has(roleKey))
+      .filter((roleKey) => !comments.has(roleKey) && !blockedRoles.has(roleKey))
       .map((roleKey) => eligibleAgent(snapshot, activities, roleKey))
-      .filter(Boolean)
-      .filter((agent) => !SOLO_DESTINATIONS.has(agent.destinationId));
+      .filter(Boolean);
     const speakers = available.filter((speaker) =>
       available.some((peer) => peer !== speaker && compatiblePair(speaker, peer))
     );
@@ -306,11 +296,7 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
       .filter((peer) => peer !== speaker && compatiblePair(speaker, peer))
       .sort((first, second) => distance(speaker, first) - distance(speaker, second));
     if (!nearby.length) return;
-    const alternatives = nearby.slice(1);
-    const peer =
-      random() < 0.7 || !alternatives.length
-        ? nearby[0]
-        : alternatives[Math.floor(random() * alternatives.length)];
+    const peer = random() < 0.7 ? nearby[0] : nearby[Math.floor(random() * nearby.length)];
     const script = pickScript();
     conversation = {
       id: `ambient-${++sequence}`,
@@ -318,8 +304,8 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
       startedAt: clock,
       participants: [speaker, peer],
       script: [
-        script[0].replaceAll('{to}', names.get(peer.roleKey) || 'kamu'),
-        script[1].replaceAll('{to}', names.get(speaker.roleKey) || 'kamu')
+        script[0].replaceAll('{to}', nameOf(peer.roleKey)),
+        script[1].replaceAll('{to}', nameOf(speaker.roleKey))
       ]
     };
   }
@@ -328,7 +314,7 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
     for (const [roleKey, comment] of comments) {
       const current = eligibleAgent(snapshot, activities, roleKey);
       if (
-        clock - comment.startedAt >= COMMENT_SECONDS ||
+        hasReached(comment.startedAt + COMMENT_SECONDS) ||
         current?.signature !== comment.participant.signature
       ) {
         comments.delete(roleKey);
@@ -336,7 +322,7 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
     }
   }
 
-  function receiveArrivals(snapshot, activities) {
+  function receiveArrivals(snapshot, activities, blockedRoles) {
     for (const roleKey of roleKeys) {
       const arrivalId = arrivalIdOf(activities?.[roleKey]);
       if (arrivalId === null) continue;
@@ -345,31 +331,17 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
       const isNewArrival = previous !== undefined && arrivalId > previous;
       const destinationId = activities?.[roleKey]?.destinationId;
       const spot = SPOT_BY_DESTINATION[destinationId] || activities?.[roleKey]?.kind;
-      const hasSpotQuips = Boolean(QUIPS_BY_SPOT[spot]);
-
-      if (comments.has(roleKey)) continue;
-
-      let shouldQuip = false;
-      if (isNewArrival) {
-        if (random() < 0.55) {
-          shouldQuip = true;
-        }
-      } else if (
-        hasSpotQuips &&
-        clock - (lastSpotQuipAt.get(roleKey) ?? 0) >= SPOT_REPEAT_INTERVAL &&
-        !conversation?.participants.some((p) => p.roleKey === roleKey)
-      ) {
-        shouldQuip = true;
-      }
-
-      if (!shouldQuip) continue;
+      if (
+        comments.has(roleKey) ||
+        blockedRoles.has(roleKey) ||
+        conversation?.participants.some((p) => p.roleKey === roleKey) ||
+        !isNewArrival ||
+        random() >= 0.55
+      )
+        continue;
       const participant = eligibleAgent(snapshot, activities, roleKey);
       if (!participant) continue;
-      if (conversation?.participants.some((p) => p.roleKey === roleKey)) {
-        conversation = null;
-      }
       const lines = QUIPS_BY_SPOT[spot] || QUIPS_BY_KIND[participant.kind] || QUIP_FALLBACK;
-      lastSpotQuipAt.set(roleKey, clock);
       comments.set(roleKey, {
         id: `ambient-comment-${++sequence}`,
         participant,
@@ -382,7 +354,7 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
 
   function getDetails() {
     if (conversation) {
-      const replied = clock - conversation.startedAt >= REPLY_DELAY_SECONDS;
+      const replied = hasReached(conversation.startedAt + REPLY_DELAY_SECONDS);
       const lines = [
         { roleKey: conversation.participants[0].roleKey, text: conversation.script[0] }
       ];
@@ -415,8 +387,11 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
   function activeCandidates() {
     const candidates = [];
     if (conversation) {
-      const age = clock - conversation.startedAt;
-      if (age >= REPLY_DELAY_SECONDS && age < REPLY_DELAY_SECONDS + REPLY_SECONDS) {
+      const start = conversation.startedAt;
+      if (
+        hasReached(start + REPLY_DELAY_SECONDS) &&
+        !hasReached(start + REPLY_DELAY_SECONDS + REPLY_SECONDS)
+      ) {
         candidates.push({
           id: `${conversation.id}:1`,
           conversationId: conversation.id,
@@ -426,7 +401,7 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
           text: conversation.script[1]
         });
       }
-      if (age < OPENER_SECONDS) {
+      if (!hasReached(start + OPENER_SECONDS)) {
         candidates.push({
           id: `${conversation.id}:0`,
           conversationId: conversation.id,
@@ -451,7 +426,7 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
   }
 
   return {
-    update(deltaSeconds, snapshot, activities) {
+    update(deltaSeconds, snapshot, activities, blockedRoles = new Set()) {
       if (disposed) return [];
       const permitted =
         snapshot?.gates?.allowAmbient === true &&
@@ -462,10 +437,11 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
         clear();
         return [];
       }
-      clock += Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+      const delta = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+      clock += delta;
       if (!enabled) {
         enabled = true;
-        nextAt = clock + FIRST_WAIT_SECONDS;
+        nextAt = clock - delta + FIRST_WAIT_SECONDS;
         captureArrivals(activities);
       } else {
         updateComments(snapshot, activities);
@@ -474,21 +450,22 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
             eligibleAgent(snapshot, activities, roleKey)
           );
           if (
-            clock - conversation.startedAt >= REPLY_DELAY_SECONDS + REPLY_SECONDS ||
+            hasReached(conversation.startedAt + REPLY_DELAY_SECONDS + REPLY_SECONDS) ||
             !compatiblePair(current[0], current[1]) ||
             current.some(
               (participant, index) =>
                 participant.signature !== conversation.participants[index].signature
-            )
+            ) ||
+            conversation.participants.some((p) => blockedRoles.has(p.roleKey))
           ) {
             conversation = null;
           }
         }
-        receiveArrivals(snapshot, activities);
+        receiveArrivals(snapshot, activities, blockedRoles);
       }
-      if (!conversation && clock >= nextAt) {
+      if (!conversation && hasReached(nextAt)) {
         nextAt = clock + 7 + random() * 4.5;
-        begin(snapshot, activities);
+        begin(snapshot, activities, blockedRoles);
       }
       return activeCandidates();
     },
@@ -497,7 +474,6 @@ export function createAmbientDialogue(roles, { random: customRandom = null } = {
     dispose() {
       clear();
       disposed = true;
-      previousScript.clear();
     }
   };
 }

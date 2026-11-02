@@ -28,13 +28,14 @@ npm run build --workspace frontend
 
 See [platform documentation](src/README.md), [deployment and worker setup](src/DEPLOYMENT.md), [verification](src/VERIFICATION.md), and [upstream sources](src/UPSTREAM.md). `org/` and `workdir/` contain local state and attached codebases; both are excluded from Git.
 
-**Organization → Live Preview** opens the read-only 3D office in a nearly fullscreen
-floating window above Organization. Agent cards keep their original desk-camera focus.
-Use **Create missing cockpit profiles** once to add Orion, Nova, Atlas, Lyra and
-Axiom. The profiles remain paused until you attach their runtime/workdir and
-configure them. Orion reports to the workspace owner; the four specialists report
-to Orion. Existing agents are preserved. The preview observes real work started
-through chat or Actions and never starts work on its own.
+**Organization → Live Office** opens the standalone read-only office at `/office`
+in a new tab. `/organization/live-preview` uses the same standalone view.
+Agent cards focus their original desk; character name tags follow the character.
+Owner-only setup and mapping remain in the main application. The office observes
+real work started through chat or Actions and never starts work on its own.
+See the [current Live Office contracts](openspec/README.md) and
+[review/commit plan](src/cockpit/docs/live-office-review.md) for the accepted scope
+and verification limits.
 
 The React UI and Three.js scene are private npm workspaces under `src/frontend`
 and `src/cockpit`. Install web dependencies with `npm ci` from `src`; Docker builds

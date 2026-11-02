@@ -13,14 +13,69 @@ const VISUAL_ACTIVITIES = Object.freeze({
   settling: 'Menyesuaikan posisi duduk',
   walking: 'Berjalan di kantor',
   sofa: 'Duduk di sofa',
-  coffee: 'Menikmati kopi',
-  reading: 'Membaca',
+  tv: 'Menonton TV di lounge',
+  ps: 'Bermain PS di lounge',
+  coffee: 'Menikmati kopi di pantry',
+  water: 'Mengambil air di pantry',
+  guitar: 'Bermain gitar',
+  window: 'Bersantai di dekat jendela',
+  reading: 'Membaca di dekat rak buku',
   meeting: 'Duduk di area meeting',
   desk: 'Duduk di meja',
   board: 'Berdiri dekat papan'
 });
 
 const unavailable = () => ({ state: null, task: '', available: false });
+
+const DESTINATIONS = {
+  'sofa:left': ['tv', 'lounge'],
+  'sofa:right': ['ps', 'lounge'],
+  'coffee:left': ['coffee', 'pantry'],
+  'coffee:right': ['coffee', 'pantry'],
+  'pantry:water': ['water', 'pantry'],
+  'reading:left': ['reading', 'rak buku'],
+  'reading:right': ['reading', 'rak buku'],
+  guitar: ['guitar', 'spot gitar'],
+  window: ['window', 'jendela'],
+  'standing:hq': ['board', 'papan']
+};
+
+function visualActivity(sample) {
+  if (typeof sample === 'object' && typeof sample?.phase !== 'string') return null;
+  const kind = typeof sample === 'string' ? sample : sample?.kind;
+  if (!Object.hasOwn(VISUAL_ACTIVITIES, kind)) return null;
+  const destination =
+    kind === 'walking'
+      ? sample?.targetDestinationId || sample?.destinationId
+      : sample?.destinationId;
+  const target = DESTINATIONS[destination];
+  const activity = kind === 'sofa' && target ? target[0] : kind;
+  const place =
+    target?.[1] ||
+    (destination?.startsWith('meeting:')
+      ? 'area meeting'
+      : destination?.startsWith('desk:')
+        ? 'meja kerja'
+        : null);
+  return {
+    kind: activity,
+    text: kind === 'walking' && place ? `Menuju ${place}` : VISUAL_ACTIVITIES[activity],
+    label: 'Suasana ilustratif'
+  };
+}
+
+export function didObservedRunSucceed(previous, next) {
+  return Boolean(
+    previous?.state === 'bekerja' &&
+    next?.state === 'siaga' &&
+    previous.available &&
+    next.available &&
+    previous.activeRunIds?.length === 1 &&
+    next.activeRunIds?.length === 0 &&
+    next.latestResult?.status === 'succeeded' &&
+    next.latestResult.runId === previous.activeRunIds[0]
+  );
+}
 
 export function createOfficePresentation(roles, { visible = true, reducedMotion = false } = {}) {
   const keys = [
@@ -55,19 +110,16 @@ export function createOfficePresentation(roles, { visible = true, reducedMotion 
       agents: Object.fromEntries(
         keys.map((key) => {
           const facts = operational.get(key) || unavailable();
-          const kind = motionAllowed && facts.state === 'siaga' ? visuals.get(key) : null;
+          const visual = motionAllowed && facts.state === 'siaga' ? visuals.get(key) : null;
           return [
             key,
             {
               operational: { ...facts },
-              visual: kind
-                ? { kind, text: VISUAL_ACTIVITIES[kind], label: 'Suasana ilustratif' }
-                : null,
+              visual: visual ? { ...visual } : null,
               workingBubble:
                 dataFresh && isVisible && facts.state === 'bekerja'
                   ? {
                       kind: 'work',
-                      cls: 'hi',
                       text: facts.task || ROLE_DESCRIPTIONS[key],
                       label: 'Tugas publik'
                     }
@@ -105,14 +157,30 @@ export function createOfficePresentation(roles, { visible = true, reducedMotion 
               validAgent
                 ? {
                     state: agent.state,
+                    ...(Array.isArray(agent.activeRunIds) &&
+                    agent.activeRunIds.every(
+                      (id) => typeof id === 'string' && id.length > 0 && id.length <= 128
+                    )
+                      ? { activeRunIds: [...agent.activeRunIds] }
+                      : {}),
+                    ...(typeof agent.latestResult?.runId === 'string' &&
+                    agent.latestResult.runId.length > 0 &&
+                    agent.latestResult.runId.length <= 128 &&
+                    ['succeeded', 'failed', 'timed_out', 'interrupted', 'cancelled'].includes(
+                      agent.latestResult.status
+                    )
+                      ? {
+                          latestResult: {
+                            runId: agent.latestResult.runId,
+                            status: agent.latestResult.status
+                          }
+                        }
+                      : {}),
                     ...(typeof agent.runtimeHint === 'string'
                       ? { runtimeHint: agent.runtimeHint.slice(0, 180) }
                       : {}),
                     ...(Object.hasOwn(agent, 'latestFailure')
                       ? { latestFailure: agent.latestFailure === true }
-                      : {}),
-                    ...(agent.state === 'siaga' && agent.cardState === 'selesai'
-                      ? { cardState: 'selesai' }
                       : {}),
                     ...(agent.state === 'siaga' && typeof agent.resultHint === 'string'
                       ? { resultHint: agent.resultHint.slice(0, 180) }
@@ -134,12 +202,16 @@ export function createOfficePresentation(roles, { visible = true, reducedMotion 
         nextOperational = new Map();
       }
       for (const key of keys) {
-        if (operational.get(key)?.state !== nextOperational.get(key)?.state) visuals.delete(key);
+        if (operational.get(key)?.state !== nextOperational.get(key)?.state) {
+          visuals.delete(key);
+        }
       }
       connection = nextConnection;
       operational = nextOperational;
       dataFresh = nextFresh;
-      if (!allowAmbient()) visuals.clear();
+      if (!allowAmbient()) {
+        visuals.clear();
+      }
     },
     setEnvironment(environment = {}) {
       if (disposed || !environment || typeof environment !== 'object') return;
@@ -152,7 +224,9 @@ export function createOfficePresentation(roles, { visible = true, reducedMotion 
       if (Object.hasOwn(environment, 'reducedMotion')) {
         prefersReducedMotion = environment.reducedMotion !== false;
       }
-      if (!allowAmbient()) visuals.clear();
+      if (!allowAmbient()) {
+        visuals.clear();
+      }
     },
     setVisualActivities(samples) {
       if (disposed) return;
@@ -160,9 +234,10 @@ export function createOfficePresentation(roles, { visible = true, reducedMotion 
       if (!allowAmbient() || !samples || typeof samples !== 'object') return;
       for (const key of keys) {
         if (operational.get(key)?.state !== 'siaga' || !Object.hasOwn(samples, key)) continue;
-        const kind = samples[key];
-        if (typeof kind === 'string' && Object.hasOwn(VISUAL_ACTIVITIES, kind)) {
-          visuals.set(key, kind);
+        const sample = samples[key];
+        const visual = visualActivity(sample);
+        if (visual) {
+          visuals.set(key, visual);
         }
       }
     },

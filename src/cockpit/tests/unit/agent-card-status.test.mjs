@@ -13,7 +13,6 @@ test('card labels follow reference vocabulary while keeping operational states',
   for (const [state, label] of [
     ['bekerja', 'Bekerja'],
     ['siaga', 'Santai'],
-    ['selesai', 'Selesai'],
     ['gagal', 'Gagal']
   ]) {
     assert.equal(getAgentCardStatus(state, 'live').label, label);
@@ -27,7 +26,7 @@ test('offline, error, loading, stale and unknown states do not claim live activi
     assert.equal(status.state, null);
     assert.equal(status.description, 'Status belum tersedia');
   }
-  for (const state of [undefined, null, 'santai', 'unknown']) {
+  for (const state of [undefined, null, 'santai', 'selesai', 'unknown']) {
     assert.equal(getAgentCardStatus(state, 'live').state, null);
   }
 });

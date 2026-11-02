@@ -150,16 +150,15 @@ glow, dan glassmorphism yang tidak mempunyai fungsi hierarchy.
   Atas konfirmasi pemilik, pill kartu memakai `Menunggu`; title pill dan nama
   aksesibilitas kartu tetap memuat Menunggu keputusan. Ini label ringkas,
   bukan pemotongan atau perubahan status API.
-  Santai berarti tidak ada tugas aktif. Sesuai arahan pemilik 7 Oktober 2026,
-  kartu menampilkan Selesai selama 60 detik setelah run berakhir, kemudian
-  kembali Santai. Hasil run, termasuk gagal atau terhenti, tetap terpisah.
-  State API tidak diganti.
-- Subteks kartu berasal dari status runtime atau hasil run terakhir, mengikuti
-  pola Kantor Agent. Kartu tidak memakai aktivitas dekoratif sebagai status.
-  Label Suasana ilustratif tetap dipakai pada dialog lokal scene.
+  Santai berarti tidak ada tugas aktif. Sesuai revisi pemilik 2 November 2026,
+  run yang selesai langsung kembali Santai tanpa pill Selesai sementara.
+  Hasil run, termasuk gagal atau terhenti, tetap terpisah. State API tidak diganti.
+- Kartu memakai aktivitas scene sebagai deskripsi saat Santai dan konteks menunggu
+  tugas baru; fakta kegagalan, offline dan menunggu keputusan tetap diprioritaskan.
+  Provenance suasana ilustratif tersedia pada detail, tanpa memenuhi kartu/bubble.
 - Judul kantor memakai nama folder workdir project terpilih atau workdir unik
   agent yang terpetakan dalam scope; beberapa workdir diberi label eksplisit.
-- Live memakai format WIB `HH:mm:ss`; Riwayat dan Aktivitas memakai `HH.mm`.
+- Live dan Aktivitas memakai format WIB `HH:mm:ss`; Riwayat memakai `HH.mm`.
   Nama kartu tampil utuh; jabatan boleh disembunyikan pada ruang sempit tetapi
   tetap tersedia dalam DOM. Orion memakai jabatan Lab Director.
 - Nama di kiri dan pill status di kanan satu baris bila semua header muat.
@@ -187,8 +186,8 @@ utama dari status operasional.
 - Tahap pertama memprioritaskan berjalan, sofa/TV-balapan, kopi, membaca, dan
   interaksi area meeting. Game/gitar menyusul setelah gerak serta pose dasar
   stabil. Duduk di meeting tidak mengklaim rapat kerja berlangsung.
-- Dialog lokal berlangsung bergantian antar-karakter yang berdekatan dan sesuai
-  kegiatan visualnya. Perubahan status membatalkan dialog serta balasan tertunda.
+- Dialog lokal memilih karakter idle yang memenuhi gate kegiatan; peluang 70%
+  memilih peer terdekat, sedangkan cabang lainnya dapat lintas zona. Perubahan status membatalkan dialog serta balasan tertunda.
 - Revisi yang dikonfirmasi pemilik memakai ritme kantor-agent: jalan 1,6
   unit/detik, jadwal tujuan 38 sampai 72 detik, percobaan dialog tiap 7 sampai
   11,5 detik, dan balasan setelah 2,3 detik. Kecepatan, gait, dan pose dasar
@@ -197,11 +196,11 @@ utama dari status operasional.
   oleh polling/resume. Ritme ini mengganti pilihan cadence santai awal.
 - Bubble mengambil permukaan putih, border krem, ukuran 220px desktop/150px
   mobile, padding, tail, dan shadow rujukan agar bahasa visualnya cocok dengan
-  name tag. Font sistem memakai ukuran relatif; provenance tetap kecil dan
-  terlihat, bukan hanya tooltip. Dialog selalu sesuai zona visual.
-- Bubble kerja dipisahkan dari dialog fiksi. API saat ini hanya menyediakan
-  kalimat tugas generik; fallback memakai Bekerja dan uraian role berlabel
-  Deskripsi peran. Event lama tidak diubah menjadi pekerjaan aktif.
+  name tag. Font sistem memakai ukuran relatif; provenance tersedia pada detail karakter,
+  sementara bubble memprioritaskan isi singkat yang terbaca.
+- Bubble kerja memakai langkah nyata dari API ketika tersedia. Metadata yang
+  tidak tersedia tetap memakai fallback jujur. Riwayat lama tidak diubah menjadi
+  pekerjaan aktif; mobile menaruh informasi kerja pada kartu, bukan bubble.
 - Batas bersama untuk bubble dialog, kerja, dan event ialah dua pada desktop
   dan satu pada ponsel. Prioritas karakter terpilih atau status kerja menjaga
   keterbacaan; rincian tetap tersedia pada DOM. Name tag dan pill kartu bukan
@@ -299,3 +298,27 @@ terpilih tetap dibedakan dari jumlah papan dan antrean yang berlaku untuk lab.
 Perubahan visual selesai hanya jika design read masih terpenuhi, alasan keputusan
 dicatat, build lulus, seluruh kontrol diuji, lima viewport lulus, console bersih,
 fallback bekerja, dan screenshot telah dibandingkan dengan acceptance criteria.
+
+## Owner amendment: passive presentation and readable bubbles (2026-11-02)
+
+This supersedes the earlier completion/visual-label/bubble styling choices above.
+The feed contains only name, HH:mm:ss and action, with no badges or run navigation.
+Cards return directly to Santai after completion, describe the current scene and
+use waiting context instead of Kegiatan visual. Real failure/offline/waiting facts
+remain explicit; completed outcomes remain in the separate history panel.
+
+All bubbles use the existing white surface/tail and dark text. Work/event previews
+are 48 graphemes, dialogue 96, with a three-line desktop/two-line mobile inner span
+so the tail is not clipped. Mobile work belongs on cards, matching the reference.
+Full public text and provenance are available in character details rather than
+repeated on every card or inside the short bubble. No extra palette/motion is added.
+
+The rig faces +Z, making anatomical left +X despite legacy arm variable names.
+Guitar orientation uses a proper Z rotation with a raised neck and outward-facing
+soundboard. It has a flat acoustic body, six strings/tuners and real frets; hand
+targets account for palm radius and clear the neck/body and torso. A static holding
+pose is retained for explicit guitar activity under reduced motion.
+
+Bubble penyelesaian Beres hanya muncul untuk hasil succeeded yang ID-nya cocok
+dengan satu run yang sebelumnya terlihat Bekerja pada data segar. Status Santai,
+hasil sukses lama, metadata kosong, serta run gagal/dibatalkan tidak cukup.

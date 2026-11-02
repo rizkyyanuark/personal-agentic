@@ -88,7 +88,6 @@ test('all valid operational states remain public facts, but only working gets a 
     if (agent.workingBubble) {
       assert.deepEqual(agent.workingBubble, {
         kind: 'work',
-        cls: 'hi',
         text: 'Kalimat status publik',
         label: 'Tugas publik'
       });
@@ -97,7 +96,7 @@ test('all valid operational states remain public facts, but only working gets a 
   }
 });
 
-test('each canonical working role surfaces its real task text with kind work and cls hi', () => {
+test('each canonical working role surfaces its real task text with kind work without a highlight class', () => {
   const presentation = createOfficePresentation(OFFICE_ROLES);
   const state = publicState();
   for (const { key } of OFFICE_ROLES) {
@@ -110,7 +109,7 @@ test('each canonical working role surfaces its real task text with kind work and
   assert.equal(new Set(descriptions.map(({ text }) => text)).size, OFFICE_ROLES.length);
   assert.ok(
     descriptions.every(
-      ({ kind, label, cls }) => kind === 'work' && label === 'Tugas publik' && cls === 'hi'
+      ({ kind, label, cls }) => kind === 'work' && label === 'Tugas publik' && cls === undefined
     )
   );
 });
@@ -332,7 +331,10 @@ test('samples accept only fixed local kinds for idle roles and ignore caller-sup
     sofa: 'Duduk di sofa',
     meeting: 'Duduk di area meeting',
     desk: 'Duduk di meja',
-    board: 'Berdiri dekat papan'
+    board: 'Berdiri dekat papan',
+    guitar: 'Bermain gitar',
+    water: 'Mengambil air di pantry',
+    window: 'Bersantai di dekat jendela'
   };
   for (const [kind, text] of Object.entries(expected)) {
     presentation.setVisualActivities({ [IDLE]: kind });
@@ -342,12 +344,7 @@ test('samples accept only fixed local kinds for idle roles and ignore caller-sup
       label: 'Suasana ilustratif'
     });
   }
-  for (const sample of [
-    'game',
-    'guitar',
-    'Sedang membaca task',
-    { kind: 'sofa', text: 'private' }
-  ]) {
+  for (const sample of ['game', 'Sedang membaca task', { kind: 'sofa', text: 'private' }]) {
     presentation.setVisualActivities({ [IDLE]: sample, archived_model_validator: 'sofa' });
     assert.equal(presentation.getSnapshot().agents[IDLE].visual, null);
     assert.equal(
@@ -357,6 +354,50 @@ test('samples accept only fixed local kinds for idle roles and ignore caller-sup
   }
   presentation.setVisualActivities(Object.create({ [IDLE]: 'sofa' }));
   assert.equal(presentation.getSnapshot().agents[IDLE].visual, null);
+});
+
+test('walking descriptions identify desks, board, meeting, and unknown destinations', () => {
+  const presentation = createOfficePresentation(OFFICE_ROLES);
+  presentation.receive(publicState());
+  for (const [targetDestinationId, text] of [
+    ['desk:data_engineer', 'Menuju meja kerja'],
+    ['standing:hq', 'Menuju papan'],
+    ['meeting:0', 'Menuju area meeting'],
+    ['unknown', 'Berjalan di kantor']
+  ]) {
+    presentation.setVisualActivities({
+      [IDLE]: { kind: 'walking', phase: 'walking', destinationId: 'sofa:left', targetDestinationId }
+    });
+    assert.equal(presentation.getSnapshot().agents[IDLE].visual.text, text);
+  }
+});
+
+test('scene destinations describe idle cards without creating work history', () => {
+  const presentation = createOfficePresentation(OFFICE_ROLES);
+  const state = publicState('live', { office: { workspaceId: 'first', groupId: null } });
+  presentation.receive(state);
+  const activity = (kind, destinationId, phase, arrivalId) =>
+    presentation.setVisualActivities({ [IDLE]: { kind, destinationId, phase, arrivalId } });
+  activity('sofa', 'sofa:left', 'seated', 1);
+  assert.equal(presentation.getSnapshot().agents[IDLE].visual.text, 'Menonton TV di lounge');
+  activity('walking', 'pantry:water', 'walking', 1);
+  assert.equal(presentation.getSnapshot().agents[IDLE].visual.text, 'Menuju pantry');
+  activity('water', 'pantry:water', 'standing', 2);
+  assert.equal(presentation.getSnapshot().agents[IDLE].visual.text, 'Mengambil air di pantry');
+  for (let i = 3; i < 110; i++) activity('water', 'pantry:water', 'standing', i);
+  presentation.receive(state);
+  assert.equal('visualFeed' in presentation.getSnapshot(), false);
+  assert.deepEqual(presentation.getSnapshot().agents[IDLE].operational, {
+    state: 'siaga',
+    task: 'Belum ada tugas tercatat',
+    available: true
+  });
+  presentation.receive({ ...state, office: { workspaceId: 'second', groupId: null } });
+  activity('sofa', 'sofa:right', 'seated', 110);
+  assert.equal('visualFeed' in presentation.getSnapshot(), false);
+  assert.equal(presentation.getSnapshot().agents[IDLE].visual.text, 'Bermain PS di lounge');
+  presentation.dispose();
+  assert.equal('visualFeed' in presentation.getSnapshot(), false);
 });
 
 test('operational task normalization matches the 180-character workstation boundary', () => {

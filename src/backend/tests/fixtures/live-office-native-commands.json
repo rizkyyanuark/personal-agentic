@@ -1,0 +1,22 @@
+[
+  {
+    "type": "item.completed",
+    "item": {
+      "id": "item_2",
+      "type": "command_execution",
+      "command": "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -Command 'Get-Content -LiteralPath src/cart.js, package.json'",
+      "exit_code": 0,
+      "status": "completed"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "id": "item_10",
+      "type": "command_execution",
+      "command": "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -Command \"node --input-type=module -e \\\"import { total } from './src/cart.js'; console.log(JSON.stringify({ total: total([{ price: 12, quantity: 3 }, { price: 5, quantity: 2 }]), empty: total([]) }));\\\"\"",
+      "exit_code": 0,
+      "status": "completed"
+    }
+  }
+]

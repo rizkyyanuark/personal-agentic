@@ -176,15 +176,24 @@ function cardSubtext(agent, presentation) {
   if (agent.operational.state !== 'siaga') {
     return 'Status agent belum tersedia.';
   }
-  return boundedText(agent.operational.resultHint, 180) || 'Menunggu tugas baru.';
+  if (gates.allowAmbient && agent.visual?.text && !agent.operational.latestFailure) {
+    return 'Menunggu tugas baru.';
+  }
+  return agent.operational.latestFailure
+    ? boundedText(agent.operational.resultHint, 180) || 'Percobaan terakhir gagal'
+    : 'Menunggu tugas baru.';
 }
 
 export function projectAgentCardPresentation(agent, presentation) {
   const operational = agent?.operational;
-  const description = operational?.available ? boundedText(operational.task, 180) : '';
+  const visual =
+    presentation.gates?.allowAmbient && operational?.state === 'siaga' && !operational.latestFailure
+      ? boundedText(agent.visual?.text, 180)
+      : '';
+  const description = visual || (operational?.available ? boundedText(operational.task, 180) : '');
   return {
     status: getAgentCardStatus(
-      operational?.available ? operational.cardState || operational.state : null,
+      operational?.available ? operational.state : null,
       presentation.connection
     ),
     task: description || 'Status tugas belum tersedia.',
@@ -643,7 +652,13 @@ export function setupHUD(
     const agent = lastPresentation.agents?.[activeRoleKey];
     const gates = lastPresentation.gates;
     const fresh = gates?.dataFresh === true && gates.visible === true;
-    const activityText = cardSubtext(agent, lastPresentation);
+    const activityText =
+      agent?.operational?.state === 'siaga' &&
+      gates.allowAmbient &&
+      agent.visual?.text &&
+      !agent.operational.latestFailure
+        ? boundedText(agent.visual.text, 180)
+        : cardSubtext(agent, lastPresentation);
     const paragraphs = [
       fresh && agent?.operational?.state === 'bekerja' ? `Bekerja · ${activityText}` : activityText
     ];
@@ -790,11 +805,19 @@ export function setupHUD(
     }
   }
 
+  let feedSignature = null;
   function renderFeed(state, connection) {
     if (!feedList) return;
-    feedList.replaceChildren();
     const fresh = connection === 'live' || connection === 'empty';
     const feed = fresh && Array.isArray(state.feed) ? state.feed : [];
+    const signature = JSON.stringify([
+      fresh,
+      feed,
+      [...roleByKey.values()].map(({ key, name, role, color }) => [key, name, role, color])
+    ]);
+    if (signature === feedSignature) return;
+    feedSignature = signature;
+    feedList.replaceChildren();
     if (feedCount) feedCount.textContent = fresh ? metric(feed.length) : '-';
     if (!fresh) {
       feedList.append(
@@ -813,10 +836,14 @@ export function setupHUD(
       return;
     }
 
-    for (const item of feed.slice(0, 30)) {
+    for (const item of feed) {
       const role = roleByKey.get(item?.role);
       const archivedLabel = archivedFeedRoleByKey.get(item?.role);
       const row = element('li');
+      row.dataset.source = 'operational';
+      if (item.runId) row.dataset.runId = item.runId;
+      if (item.stepIndex !== null && item.stepIndex !== undefined)
+        row.dataset.stepIndex = String(item.stepIndex);
       const avatar = element(
         'span',
         'feed-avatar',
@@ -837,22 +864,22 @@ export function setupHUD(
       const parsed = parseDate(item?.time);
       if (parsed) {
         time.dateTime = parsed.toISOString();
-        time.textContent = clockTime(parsed);
+        time.textContent = liveTime(parsed);
       } else {
         time.textContent = boundedText(item?.time, 32);
       }
       meta.append(time);
       content.append(meta);
+      const description = boundedText(item?.text, 600) || 'Aktivitas tanpa rincian.';
       content.append(
-        element('div', 'feed-text', boundedText(item?.text, 600) || 'Aktivitas tanpa rincian.')
+        element(
+          'div',
+          'feed-text',
+          item.stepState === 'failed' && !/gagal/i.test(description)
+            ? `Gagal: ${description}`
+            : description
+        )
       );
-      if (boundedText(item?.tool, 60)) {
-        const toolBadge = element('span', 'feed-tool', boundedText(item.tool, 60));
-        if (role) {
-          toolBadge.style.borderColor = roleColor(role);
-        }
-        content.append(toolBadge);
-      }
       row.append(avatar, content);
       feedList.append(row);
     }
@@ -920,6 +947,7 @@ export function setupHUD(
       renderConnection(lastState, presentation);
       renderAgents(presentation);
       renderNarrative();
+      if (lastState) renderFeed(lastState, lastConnection);
     },
     updateNarrative(narrative) {
       receiveNarrative(narrative);

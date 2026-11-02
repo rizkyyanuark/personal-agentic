@@ -214,9 +214,9 @@ export function createFurnitureScene({ anisotropy = 1, assetBase = '/cockpit-ass
   const cabinet = box(pantry, [2.4, 0.77, 0.92], [0, 0.565, -0.02], cabinetMaterial, true);
   cabinet.name = 'pantry_cabinet';
   box(pantry, [2.28, 0.18, 0.76], [0, 0.09, 0.04], cabinetMaterial, true);
-  const counter = box(pantry, [2.5, 0.05, 0.96], [0, 0.97, 0], darkOak, true);
+  const counter = box(pantry, [2.4, 0.05, 0.96], [0, 0.97, 0], darkOak, true);
   counter.name = 'pantry_countertop';
-  box(pantry, [2.5, 0.46, 0.025], [0, 1.225, -0.4675], cabinetMaterial);
+  box(pantry, [2.4, 0.46, 0.025], [0, 1.225, -0.4675], cabinetMaterial);
   for (const x of [-0.8, 0, 0.8]) {
     box(pantry, [0.76, 0.71, 0.028], [x, 0.565, 0.455], cabinetMaterial);
     box(pantry, [0.16, 0.022, 0.036], [x, 0.81, 0.488], metal);
@@ -288,7 +288,12 @@ export function createFurnitureScene({ anisotropy = 1, assetBase = '/cockpit-ass
   // Water Dispenser with Blue Gallon Bottle
   const dispenser = new THREE.Group();
   dispenser.name = 'pantry_dispenser';
-  dispenser.position.set(1.6, 0, -0.27);
+  dispenser.position.set(
+    FURNITURE_LAYOUT.dispenser.x,
+    ROOM_LAYOUT.floorY,
+    FURNITURE_LAYOUT.dispenser.z
+  );
+  dispenser.rotation.y = FURNITURE_LAYOUT.dispenser.heading;
   box(dispenser, [0.36, 0.8, 0.42], [0, 0.58, 0], whitePlastic, true);
   box(dispenser, [0.34, 0.18, 0.28], [0, 0.09, 0.07], whitePlastic, true);
   box(dispenser, [0.24, 0.26, 0.05], [0, 0.54, 0.205], metal);
@@ -332,12 +337,9 @@ export function createFurnitureScene({ anisotropy = 1, assetBase = '/cockpit-ass
     [0, 1.14, 0],
     new THREE.MeshStandardMaterial({ color: 0x4896db, transparent: true, opacity: 0.55 })
   );
-  pantry.add(dispenser);
+  furniture.add(dispenser);
 
-  // Align the actual rear envelope; the inset plinth clears the wall skirting.
-  const pantryBounds = new THREE.Box3().setFromObject(pantry);
   const insideBackWall = ROOM_LAYOUT.min[2] + 0.18 / 2;
-  pantry.position.z += insideBackWall + 0.03 - pantryBounds.min.z;
   pantry.updateMatrixWorld(true);
   pantry.userData.wallClearance = new THREE.Box3().setFromObject(pantry).min.z - insideBackWall;
   pantry.userData.front = '+Z';

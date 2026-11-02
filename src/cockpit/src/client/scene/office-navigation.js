@@ -28,14 +28,8 @@ const obstacles = [
   rectangle('sofa', FURNITURE_LAYOUT.lounge.x, FURNITURE_LAYOUT.lounge.z, 2.1, 0.9),
   rectangle('coffee-table', FURNITURE_LAYOUT.lounge.x, FURNITURE_LAYOUT.lounge.z - 1.05, 1.3, 0.65),
   rectangle('tv', FURNITURE_LAYOUT.tv.x, FURNITURE_LAYOUT.tv.z, 2.2, 0.45),
-  rectangle('pantry', FURNITURE_LAYOUT.pantry.x, FURNITURE_LAYOUT.pantry.z - 0.12, 2.5, 0.96),
-  rectangle(
-    'dispenser',
-    FURNITURE_LAYOUT.pantry.x + 1.6,
-    FURNITURE_LAYOUT.pantry.z - 0.39,
-    0.36,
-    0.42
-  ),
+  rectangle('pantry', FURNITURE_LAYOUT.pantry.x, FURNITURE_LAYOUT.pantry.z - 0.02, 2.4, 0.96),
+  rectangle('dispenser', FURNITURE_LAYOUT.dispenser.x, FURNITURE_LAYOUT.dispenser.z, 0.55, 0.36),
   rectangle('bookshelf', FURNITURE_LAYOUT.bookshelf.x, FURNITURE_LAYOUT.bookshelf.z, 0.42, 2.3),
   ...FURNITURE_LAYOUT.plants.map((plant) =>
     circle(`plant:${plant.zone}`, plant.x, plant.z, 0.3 * plant.scale)
@@ -189,9 +183,15 @@ export const OFFICE_ACTIVITY_DESTINATIONS = Object.freeze([
     DIRECTOR_ANCHOR.heading,
     DIRECTOR_ANCHOR
   ),
-  destination('coffee:left', 'coffee', 'pantry', [6.7, ROOM_LAYOUT.floorY, -5.65], Math.PI),
-  destination('coffee:right', 'coffee', 'pantry', [7.55, ROOM_LAYOUT.floorY, -5.65], Math.PI),
-  destination('pantry:water', 'water', 'pantry', [8.65, ROOM_LAYOUT.floorY, -5.65], Math.PI),
+  destination('coffee:left', 'coffee', 'pantry', [7.5, ROOM_LAYOUT.floorY, -5.45], Math.PI),
+  destination('coffee:right', 'coffee', 'pantry', [8.25, ROOM_LAYOUT.floorY, -5.45], Math.PI),
+  destination(
+    'pantry:water',
+    'water',
+    'pantry',
+    [8.5, ROOM_LAYOUT.floorY, -4.8],
+    Math.atan2(0.55, -0.65)
+  ),
   destination(
     'reading:left',
     'reading',

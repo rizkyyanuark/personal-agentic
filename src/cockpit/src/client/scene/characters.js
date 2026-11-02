@@ -51,62 +51,76 @@ function part(group, geometry, material, position, shadow = false) {
 }
 
 export function createGuitarMesh() {
-  const g = new THREE.Group();
+  const guitar = new THREE.Group();
   const wood = new THREE.MeshStandardMaterial({ color: 0xb8743b, roughness: 0.5 });
   const darkWood = new THREE.MeshStandardMaterial({ color: 0x3b2314, roughness: 0.6 });
   const neckWood = new THREE.MeshStandardMaterial({ color: 0x633919, roughness: 0.5 });
   const fretWood = new THREE.MeshStandardMaterial({ color: 0x231710, roughness: 0.7 });
-  const holeMat = new THREE.MeshBasicMaterial({ color: 0x18110b });
-  const pegMat = new THREE.MeshStandardMaterial({
-    color: 0xd8dce2,
-    roughness: 0.3,
-    metalness: 0.8
+  const metal = new THREE.MeshStandardMaterial({ color: 0xd8dce2, roughness: 0.3, metalness: 0.8 });
+  const outline = new THREE.Shape();
+  outline.moveTo(-0.19, 0);
+  outline.bezierCurveTo(-0.19, -0.08, -0.12, -0.13, -0.055, -0.105);
+  outline.bezierCurveTo(-0.012, -0.085, 0.008, -0.07, 0.045, -0.105);
+  outline.bezierCurveTo(0.09, -0.175, 0.235, -0.175, 0.235, 0);
+  outline.bezierCurveTo(0.235, 0.175, 0.09, 0.175, 0.045, 0.105);
+  outline.bezierCurveTo(0.008, 0.07, -0.012, 0.085, -0.055, 0.105);
+  outline.bezierCurveTo(-0.12, 0.13, -0.19, 0.08, -0.19, 0);
+  const bodyGeometry = new THREE.ExtrudeGeometry(outline, {
+    depth: 0.07,
+    bevelEnabled: true,
+    bevelThickness: 0.006,
+    bevelSize: 0.006,
+    bevelSegments: 2,
+    curveSegments: 16
   });
-
-  // 1. Lower bout (wide resonant body base)
-  const lowerBout = new THREE.Mesh(new THREE.SphereGeometry(0.13, 20, 14), wood);
-  lowerBout.scale.set(1.1, 1.22, 0.36);
-  lowerBout.position.set(0.09, 0, 0);
-
-  // 2. Upper bout (waist and upper curves)
-  const upperBout = new THREE.Mesh(new THREE.SphereGeometry(0.1, 18, 12), wood);
-  upperBout.scale.set(0.95, 1.02, 0.34);
-  upperBout.position.set(-0.07, 0, 0);
-
-  // 3. Soundhole (dark inlaid circular aperture)
-  const soundhole = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.038, 0.005, 18), holeMat);
-  soundhole.rotation.x = Math.PI / 2;
-  soundhole.position.set(-0.02, 0, 0.065);
-
-  // 4. Bridge & saddle on lower bout face
-  const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.075, 0.012), darkWood);
-  bridge.position.set(0.14, 0, 0.065);
-
-  // 5. Neck (straight shaft centered on X axis, extends from -0.16 to -0.60)
-  const neck = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.038, 0.024), neckWood);
-  neck.position.set(-0.38, 0, 0.01);
-
-  // 6. Fretboard (dark rosewood strip on top of neck)
-  const fretboard = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.04, 0.006), fretWood);
-  fretboard.position.set(-0.37, 0, 0.024);
-
-  // 7. Headstock (seamless continuation of neck from -0.59 to -0.71)
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.055, 0.026), darkWood);
-  head.position.set(-0.65, 0, 0.012);
-
-  // 8. Tuning Pegs (4 metal knobs directly on the headstock)
-  const pegGeo = new THREE.CylinderGeometry(0.006, 0.006, 0.016, 8);
-  const p1 = new THREE.Mesh(pegGeo, pegMat);
-  p1.position.set(-0.68, 0.032, 0.012);
-  const p2 = new THREE.Mesh(pegGeo, pegMat);
-  p2.position.set(-0.62, 0.032, 0.012);
-  const p3 = new THREE.Mesh(pegGeo, pegMat);
-  p3.position.set(-0.68, -0.032, 0.012);
-  const p4 = new THREE.Mesh(pegGeo, pegMat);
-  p4.position.set(-0.62, -0.032, 0.012);
-
-  g.add(lowerBout, upperBout, soundhole, bridge, neck, fretboard, head, p1, p2, p3, p4);
-  return g;
+  bodyGeometry.translate(0, 0, -0.035);
+  part(guitar, bodyGeometry, wood, [0, 0, 0], true).name = 'guitar_body';
+  part(
+    guitar,
+    new THREE.CircleGeometry(0.038, 24),
+    new THREE.MeshBasicMaterial({ color: 0x18110b }),
+    [-0.02, 0, 0.042]
+  ).name = 'guitar_soundhole';
+  part(guitar, new THREE.BoxGeometry(0.022, 0.075, 0.012), darkWood, [0.14, 0, 0.047]).name =
+    'guitar_bridge';
+  part(guitar, new THREE.BoxGeometry(0.44, 0.038, 0.024), neckWood, [-0.38, 0, 0.022]).name =
+    'guitar_neck';
+  part(guitar, new THREE.BoxGeometry(0.42, 0.04, 0.006), fretWood, [-0.37, 0, 0.037]).name =
+    'guitar_fretboard';
+  part(guitar, new THREE.BoxGeometry(0.12, 0.055, 0.026), darkWood, [-0.65, 0, 0.022]).name =
+    'guitar_headstock';
+  const pegGeometry = new THREE.CylinderGeometry(0.006, 0.006, 0.016, 8);
+  for (const side of [-1, 1]) {
+    for (let index = 0; index < 3; index++) {
+      part(guitar, pegGeometry, metal, [-0.69 + index * 0.04, side * 0.032, 0.022]).name =
+        'guitar_tuner';
+    }
+  }
+  const stringPoints = [];
+  for (let index = 0; index < 6; index++) {
+    const y = (index - 2.5) * 0.0064;
+    stringPoints.push(0.14, y, 0.055, -0.65, y, 0.045);
+  }
+  const fretPoints = [];
+  for (let index = 1; index <= 10; index++) {
+    const x = -0.6 + 0.74 * (1 - Math.pow(2, -index / 12));
+    fretPoints.push(x, -0.019, 0.041, x, 0.019, 0.041);
+  }
+  for (const [name, points] of [
+    ['guitar_strings', stringPoints],
+    ['guitar_frets', fretPoints]
+  ]) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    const lines = new THREE.LineSegments(
+      geometry,
+      new THREE.LineBasicMaterial({ color: 0xc7c2ad })
+    );
+    lines.name = name;
+    guitar.add(lines);
+  }
+  guitar.userData.contacts = { neck: [-0.43, 0, 0.11], strum: [-0.02, 0, 0.125] };
+  return guitar;
 }
 
 export function createCharactersScene() {
@@ -274,12 +288,14 @@ export function createCharactersScene() {
     handTablet.visible = cfg.key === 'hq_lab_director';
     hips.add(handTablet);
 
-    // 5. Acoustic guitar attached to spine/torso
+    const guitarMount = new THREE.Group();
+    hips.add(guitarMount);
     const handGuitar = createGuitarMesh();
-    handGuitar.position.set(0.04, 0.22, 0.22);
-    handGuitar.rotation.set(-0.12, 0.18, -0.52);
+    handGuitar.position.set(0.02, 0.36, 0.34);
+    // Facing +Z, anatomical left is +X; rotate the neck upward without reflecting the soundboard.
+    handGuitar.rotation.z = Math.PI + 0.35;
     handGuitar.visible = false;
-    hips.add(handGuitar);
+    guitarMount.add(handGuitar);
 
     // =======================================================================
     // Legs (Pivoted at hips)
@@ -345,6 +361,7 @@ export function createCharactersScene() {
       handBook,
       handTablet,
       handGuitar,
+      guitarMount,
       state: 'offline',
       seat: null
     };

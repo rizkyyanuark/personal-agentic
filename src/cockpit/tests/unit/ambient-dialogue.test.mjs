@@ -6,6 +6,122 @@ import {
   createAmbientDialogue
 } from '../../src/client/ui/ambient-dialogue.js';
 
+function idlePair() {
+  const roles = [
+    { key: 'data_engineer', name: 'Nova' },
+    { key: 'data_scientist', name: 'Atlas' }
+  ];
+  const snapshot = {
+    gates: { allowAmbient: true, dataFresh: true, visible: true, reducedMotion: false },
+    agents: Object.fromEntries(
+      roles.map(({ key }) => [key, { operational: { available: true, state: 'siaga' } }])
+    )
+  };
+  const activities = Object.fromEntries(
+    roles.map(({ key }, index) => [
+      key,
+      {
+        phase: 'standing',
+        kind: index ? 'window' : 'guitar',
+        destinationId: index ? 'window' : 'guitar',
+        arrivalId: 1,
+        position: [index, 0, 0]
+      }
+    ])
+  );
+  return { roles, snapshot, activities };
+}
+
+test('guitar and window participate, while work and lifecycle cancel delayed replies', () => {
+  for (const interruption of ['working', 'walking', 'hidden', 'stale', 'reduced', 'blocked']) {
+    const { roles, snapshot, activities } = idlePair();
+    const dialogue = createAmbientDialogue(roles, { random: () => 0 });
+    dialogue.update(0, snapshot, activities);
+    const opener = dialogue.update(4, snapshot, activities);
+    assert.equal(opener.length, 1);
+    assert.equal(opener[0].roleKey, 'data_engineer');
+    if (interruption === 'working') snapshot.agents.data_scientist.operational.state = 'bekerja';
+    if (interruption === 'walking') activities.data_scientist.phase = 'walking';
+    if (interruption === 'hidden') snapshot.gates.visible = false;
+    if (interruption === 'stale') snapshot.gates.dataFresh = false;
+    if (interruption === 'reduced') snapshot.gates.reducedMotion = true;
+    const blocked = interruption === 'blocked' ? new Set(['data_scientist']) : new Set();
+    assert.equal(dialogue.update(2.3, snapshot, activities, blocked).length, 0, interruption);
+    dialogue.dispose();
+    assert.equal(dialogue.update(20, snapshot, activities).length, 0);
+  }
+});
+
+test('dialogue uses the current local identity after role mapping updates', () => {
+  const { roles, snapshot, activities } = idlePair();
+  const dialogue = createAmbientDialogue(roles, { random: () => 0 });
+  roles[1].name = '  Nama\nLokal  ';
+  dialogue.update(0, snapshot, activities);
+  assert.equal(
+    dialogue.update(4, snapshot, activities)[0].text,
+    'Nama Lokal, main bola di PS yuk! Yang kalah traktir bakso'
+  );
+});
+
+test('stationary characters never repeat quips without a new arrival', () => {
+  const { roles, snapshot, activities } = idlePair();
+  delete snapshot.agents.data_scientist;
+  delete activities.data_scientist;
+  const dialogue = createAmbientDialogue(roles.slice(0, 1), { random: () => 0 });
+  dialogue.update(0, snapshot, activities);
+  assert.equal(dialogue.update(30, snapshot, activities).length, 0);
+  activities.data_engineer.arrivalId++;
+  const quip = dialogue.update(0.01, snapshot, activities);
+  assert.equal(quip.length, 1);
+  assert(QUIPS_BY_SPOT.guitar.includes(quip[0].text));
+  assert.equal(dialogue.update(4.2, snapshot, activities).length, 0);
+  assert.equal(dialogue.update(30, snapshot, activities).length, 0);
+});
+
+test('deadlines use active time, retry without eligible peers, and do not catch up after stalls', () => {
+  const { roles, snapshot, activities } = idlePair();
+  const dialogue = createAmbientDialogue(roles, { random: () => 0 });
+  snapshot.agents.data_scientist.operational.available = false;
+  dialogue.update(0, snapshot, activities);
+  assert.equal(dialogue.update(4, snapshot, activities).length, 0);
+  snapshot.agents.data_scientist.operational.available = true;
+  assert.equal(dialogue.update(6.999, snapshot, activities).length, 0);
+  assert.equal(dialogue.update(0.001, snapshot, activities)[0].turn, 'opener');
+  assert.equal(dialogue.update(2.299, snapshot, activities).length, 1);
+  assert.equal(dialogue.update(0.001, snapshot, activities).length, 2);
+  assert.equal(dialogue.update(2.499, snapshot, activities).length, 2);
+  assert.deepEqual(
+    dialogue.update(0.001, snapshot, activities).map((c) => c.turn),
+    ['reply']
+  );
+  assert.equal(dialogue.update(1.7, snapshot, activities).length, 0);
+  assert.equal(dialogue.update(0.499, snapshot, activities).length, 0);
+  assert.equal(dialogue.update(0.001, snapshot, activities)[0].turn, 'opener');
+  const stalled = dialogue.update(50, snapshot, activities);
+  assert.equal(stalled.length, 1);
+  assert.equal(stalled[0].turn, 'opener');
+  assert.equal(dialogue.update(0, snapshot, activities)[0].id, stalled[0].id);
+});
+
+test('the random peer branch includes the nearest peer and can select a farther one', () => {
+  for (const [branch, peer, expected] of [
+    [0.69, 0.99, 'data_scientist'],
+    [0.7, 0, 'data_scientist'],
+    [0.7, 0.99, 'third']
+  ]) {
+    const { roles, snapshot, activities } = idlePair();
+    roles.push({ key: 'third', name: 'Lyra' });
+    snapshot.agents.third = { operational: { available: true, state: 'siaga' } };
+    activities.third = { ...activities.data_scientist, position: [9, 0, 0] };
+    const values = [0, 0, branch, ...(branch >= 0.7 ? [peer] : []), 0];
+    const dialogue = createAmbientDialogue(roles, { random: () => values.shift() ?? 0 });
+    dialogue.update(0, snapshot, activities);
+    dialogue.update(4, snapshot, activities);
+    const reply = dialogue.update(2.3, snapshot, activities).find((c) => c.turn === 'reply');
+    assert.equal(reply.roleKey, expected);
+  }
+});
+
 test('CHAT table contains exactly 40 canonical Indonesian banter pairs', () => {
   assert.equal(CHAT.length, 40);
   for (const [opener, reply] of CHAT) {
@@ -85,11 +201,10 @@ test('ambient dialogue triggers two-way CHAT between idle agents with name subst
     }
   };
 
-  // First step initializes arrival tracking and wait timer
   dialogue.update(0, snapshot, activities);
 
-  // Advance time beyond FIRST_WAIT_SECONDS (1.5s)
-  const candidates = dialogue.update(2.0, snapshot, activities);
+  assert.equal(dialogue.update(3.999, snapshot, activities).length, 0);
+  const candidates = dialogue.update(0.001, snapshot, activities);
   assert.ok(candidates.length > 0, 'Dialogue opener candidate emitted');
 
   const opener = candidates.find((c) => c.turn === 'opener');
@@ -101,11 +216,28 @@ test('ambient dialogue triggers two-way CHAT between idle agents with name subst
       !CHAT.some((p) => p[0].includes('{to}') && p[0] === opener.text)
   );
 
-  // Advance time to reply delay (2.5s)
-  const replyCandidates = dialogue.update(2.5, snapshot, activities);
+  assert.equal(
+    dialogue.update(2.299, snapshot, activities).some((c) => c.turn === 'reply'),
+    false
+  );
+  const replyCandidates = dialogue.update(0.0011, snapshot, activities);
   const reply = replyCandidates.find((c) => c.turn === 'reply');
   assert.ok(reply, 'Reply candidate found after delay');
   assert.notEqual(reply.roleKey, opener.roleKey, 'Reply comes from partner');
+  assert.equal(
+    replyCandidates.some((c) => c.turn === 'opener'),
+    true
+  );
+  const afterOpener = dialogue.update(2.5, snapshot, activities);
+  assert.equal(
+    afterOpener.some((c) => c.turn === 'opener'),
+    false
+  );
+  assert.equal(
+    afterOpener.some((c) => c.turn === 'reply'),
+    true
+  );
+  assert.equal(dialogue.update(1.7, snapshot, activities).length, 0);
 });
 
 test('receiveArrivals triggers spot-specific quip upon new arrival with 55% probability and spot lookup', () => {

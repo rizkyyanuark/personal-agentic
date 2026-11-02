@@ -1,9 +1,10 @@
 # Visual acceptance checklist
 
 Integration note (2026-10-06): run the package `test:e2e` command against the
-real personal-agentic Rust service. The integrated suite checks nine viewport
-sizes documented in `../../VERIFICATION.md`, including short portrait and
-landscape. The integrated view preserves the original virtual-kantor design;
+real personal-agentic Rust service. The standalone context suite verifies real
+entrypoints, camera, auth, filtering, transport and reduced motion. The presentation
+suite additionally captures widths 320/390/768/1024/1440 and a working mobile card.
+See `../../VERIFICATION.md` for commands and current scope. The integrated view preserves the original virtual-kantor design;
 computed styles are compared against its untouched CSS. Camera controls retain their original behavior. Agent
 identity uses Organization `position`, while `role` remains a description.
 The original metrics include Token diproses, using stored usage with explicit
@@ -38,6 +39,21 @@ setelah migrasi; pengujian slice sementara harus menyebut apa yang belum selesai
 - [ ] Sudut awal dapat dipulihkan setelah focus dan orbit.
 
 ## 3. Lighting dan material
+
+Idle activity acceptance:
+
+- [ ] Gitar mengikuti torso; tangan penahan menyentuh neck dan tangan pemetik bergerak
+      di area senar. Periksa semua profil karakter dan beberapa fase dari kamera utama,
+      depan serta samping; berjalan atau mulai bekerja menyembunyikan gitar.
+- [ ] Keempat meja tidak memakai desk mat; keyboard dan mouse bertumpu pada meja.
+- [ ] Counter pantry X/Z (8.2, -6.45), pot (6.6, -6.4), dispenser dan target interaksi
+      berada dalam ruang; karakter dapat mendekat, berinteraksi, dan pergi tanpa stuck.
+- [ ] Kartu/detail menjelaskan TV, PS, kopi, air, gitar, jendela, buku dan meeting,
+      termasuk tujuan berjalan. Kegiatan santai hanya muncul pada kartu/detail;
+      feed menyimpan langkah pekerjaan nyata dan bertahan setelah reload.
+- [ ] Ukur lima percakapan: awal 4 detik, interval 7 sampai 11.5 detik,
+      pembuka 4.8 detik, balasan mulai pada detik 2.3 dan berakhir pada detik 6.5.
+      Hidden/stale, reduced motion, berjalan dan kerja nyata membatalkan dialog.
 
 - [ ] Arah cahaya, fill, dan shadow menghasilkan volume yang jelas.
 - [ ] Tidak ada material yang overexposed atau tampak emissive tanpa alasan.
@@ -169,3 +185,22 @@ Known uncertainty: none/list
 ```
 
 Perubahan dengan satu hasil FAIL belum siap dikirim atau di-deploy.
+
+Work-activity follow-up: idle scene transitions appear on cards/details only.
+The left panel retains actual work after completion/reload, shows HH:mm:ss,
+coalesces each step and marks failure explicitly, without run links or badges.
+Check keyboard focus, the mobile Feed tab and all five viewport widths against
+the current source-built API/provider, without injected activity.
+
+Latest owner-approved presentation: no feed links/badges, no transient Selesai card
+state, no Kegiatan visual card label. Work previews are 48 graphemes on a uniform
+white bubble; full public detail is in card/character detail. Mobile suppresses work
+bubbles. Inspect actual playing guitar front/three-quarter views and verify positive
+mesh determinant, raised anatomical-left neck, six strings/tuners and palm/torso
+clearances. Earlier trace-link expectations are superseded by this display-only scope.
+
+Completion regression: observe one actual working run before its terminal result.
+Succeeded for the same run may produce one Beres; failed/cancelled must produce
+none. Capture real native failure and normal API cancellation, retaining terminal
+history and profile/workdir integrity. An automatic failure review is another run,
+not the original failed run; track direct IDs, not message ID alone.

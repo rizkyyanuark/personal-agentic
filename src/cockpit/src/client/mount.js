@@ -25,7 +25,7 @@ import {
   disposeCharacterLabels
 } from './ui/labels.js';
 import { setupHUD } from './ui/hud.js';
-import { createOfficePresentation } from './ui/office-presentation.js';
+import { createOfficePresentation, didObservedRunSucceed } from './ui/office-presentation.js';
 import { createAmbientDialogue } from './ui/ambient-dialogue.js';
 import { createBubbleCoordinator } from './ui/bubble-coordinator.js';
 import { OFFICE_CONFIG } from '../shared/office-contract.js';
@@ -369,9 +369,10 @@ export function mountCockpit(container, options = {}) {
   });
   const eventBubbles = new Map();
   let lastTick = performance.now();
+  let snapshotContext = null;
 
   function publishVisualActivities(renderHUD = true) {
-    presentation.setVisualActivities(activityController.getSamples());
+    presentation.setVisualActivities(activityController.getActivities());
     presentationSnapshot = presentation.getSnapshot();
     for (const [key, entity] of Object.entries(entities)) {
       entity.visualActivity = presentationSnapshot.agents[key]?.visual || null;
@@ -381,16 +382,17 @@ export function mountCockpit(container, options = {}) {
 
   function updateBubblePresentation(delta = 0) {
     const { gates, agents } = presentationSnapshot;
-    const candidates = dialogue.update(
-      delta,
-      presentationSnapshot,
-      activityController.getActivities()
-    );
     const now = performance.now();
     for (const [key, event] of eventBubbles) {
       if (event.expiresAt <= now || !gates.dataFresh || !gates.visible) eventBubbles.delete(key);
-      else candidates.push(event);
     }
+    const candidates = dialogue.update(
+      delta,
+      presentationSnapshot,
+      activityController.getActivities(),
+      new Set(eventBubbles.keys())
+    );
+    for (const event of eventBubbles.values()) candidates.push(event);
     for (const [roleKey, agent] of Object.entries(agents)) {
       if (agent.workingBubble) {
         candidates.push({
@@ -435,7 +437,6 @@ export function mountCockpit(container, options = {}) {
               id: `lifecycle:${key}:start:${performance.now()}`,
               roleKey: key,
               kind: 'work',
-              cls: 'hi',
               text: 'Siap, saya kerjakan!',
               expiresAt: performance.now() + 3600
             });
@@ -451,15 +452,15 @@ export function mountCockpit(container, options = {}) {
               });
             }
           } else if (
-            prevOperational.state === 'bekerja' &&
-            ['siaga', 'selesai'].includes(operational.state)
+            previous.gates?.dataFresh &&
+            previous.gates?.visible &&
+            didObservedRunSucceed(prevOperational, operational)
           ) {
             const isDirector = key === 'hq_lab_director';
             eventBubbles.set(key, {
               id: `lifecycle:${key}:done:${performance.now()}`,
               roleKey: key,
               kind: 'work',
-              cls: 'hi',
               text: isDirector ? 'Beres, menunggu instruksi berikutnya' : 'Beres!',
               expiresAt: performance.now() + (isDirector ? 3800 : 3600)
             });
@@ -545,7 +546,6 @@ export function mountCockpit(container, options = {}) {
         id: `event:${signature}`,
         roleKey: latest.role,
         kind: 'event',
-        cls: latest.tool ? 'hi' : '',
         text: latest.text,
         expiresAt: performance.now() + 4800
       });
@@ -566,6 +566,7 @@ export function mountCockpit(container, options = {}) {
   }
 
   function handleVisibilityChange() {
+    lastTick = performance.now();
     presentation.setEnvironment({
       visible: !document.hidden,
       reducedMotion: reducedMotion.matches
@@ -636,7 +637,7 @@ export function mountCockpit(container, options = {}) {
     updateCharacterLabelPositions(labels, entities, camera);
     renderer.render(scene, camera);
     labelsRenderer.render(scene, camera);
-    updateBubblePresentation(delta);
+    updateBubblePresentation(elapsed);
     sceneDirty = false;
     lastRender = performance.now();
 
@@ -736,6 +737,12 @@ export function mountCockpit(container, options = {}) {
     setWorkspace,
     updateState(snapshot) {
       if (disposed) return;
+      const context = JSON.stringify([snapshot.workspace_id, snapshot.group_id, snapshot.mapping]);
+      if (snapshotContext !== null && snapshotContext !== context) {
+        dialogue.clear();
+        eventBubbles.clear();
+      }
+      snapshotContext = context;
       const state = projectCockpitSnapshot(snapshot);
       applyIdentities(state);
       receiveState(state);

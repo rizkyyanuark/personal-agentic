@@ -3,4 +3,4 @@ import type { CockpitEventKind } from "./CockpitEventKind";
 import type { OfficeRole } from "./OfficeRole";
 import type { RunActivity } from "./RunActivity";
 
-export type CockpitEvent = { id: number, kind: CockpitEventKind, office_role: OfficeRole, agent_id: string, run_id: string, status: string, created_at: string, summary: string, activity: RunActivity | null, };
+export type CockpitEvent = { id: number, kind: CockpitEventKind, office_role: OfficeRole, agent_id: string, run_id: string, group_id: string, status: string, created_at: string, summary: string, activity: RunActivity | null, };

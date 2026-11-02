@@ -282,12 +282,12 @@ test('actual palm centers reach both keyboard-side targets within one millimeter
       poseAt(entity, seat, state, 123, true);
       nearVector(
         position(entity.leftHand).toArray(),
-        [desk.x - 0.032, ROOM_LAYOUT.floorY + 0.9, desk.z + 0.212],
+        [desk.x - 0.032, ROOM_LAYOUT.floorY + 0.896, desk.z + 0.232],
         `${seat.id} left palm`
       );
       nearVector(
         position(entity.rightHand).toArray(),
-        [desk.x - 0.218, ROOM_LAYOUT.floorY + 0.9, desk.z + 0.212],
+        [desk.x - 0.218, ROOM_LAYOUT.floorY + 0.896, desk.z + 0.232],
         `${seat.id} right palm`
       );
     }
@@ -358,6 +358,12 @@ test('real keyboard GLB keycaps sit within one centimeter of palms using actual 
       disposeAfter(context, workstation.group);
       workstation.group.updateWorldMatrix(true, true);
       assert(keyboard, `${desk.key} attaches a real keyboard`);
+      near(
+        bounds(keyboard).min.y,
+        ROOM_LAYOUT.floorY + 0.7825,
+        `${desk.key} keyboard rests on the desktop`,
+        0.001
+      );
       const entity = entities[desk.key];
       poseAt(entity, DESK_SEATS[index], 'bekerja', 99, true);
       for (const [side, hand] of [
@@ -512,6 +518,33 @@ test('only working desk hands type subtly, while feet, head, HQ, and reduced-mot
   }
 });
 
+test('every character keeps both hands on guitar contacts through strumming', (context) => {
+  const entities = createFixture(context);
+  for (const entity of Object.values(entities)) {
+    entity.root.position.set(-1.4, ROOM_LAYOUT.floorY, 2.6);
+    entity.root.rotation.y = 0.35;
+    entity.state = 'siaga';
+    for (const time of [0, 0.13, 0.4, 1, 2.3]) {
+      applyCharacterPose(entity, DIRECTOR_ANCHOR, time, false, { activity: 'guitar' });
+      entity.root.updateWorldMatrix(true, true);
+      const { neck, strum } = entity.handGuitar.userData.contacts;
+      const neckWorld = entity.handGuitar.localToWorld(new THREE.Vector3().fromArray(neck));
+      const strumWorld = entity.handGuitar.localToWorld(new THREE.Vector3().fromArray(strum));
+      assert(
+        neckWorld.distanceTo(position(entity.rightHand)) < 0.001,
+        `${entity.cfg.key} neck contact`
+      );
+      assert(
+        strumWorld.distanceTo(position(entity.leftHand)) <= 0.031,
+        `${entity.cfg.key} strum contact`
+      );
+      assert.equal(entity.handGuitar.visible, true);
+    }
+    applyCharacterPose(entity, DIRECTOR_ANCHOR, 3, false, { walking: true, neutral: true });
+    assert.equal(entity.handGuitar.visible, false);
+  }
+});
+
 test('idle activities toggle corresponding 3D dynamic props (guitar, gamepad, mug, book)', (context) => {
   const entities = createFixture(context);
   const nova = entities.data_engineer;
@@ -537,4 +570,67 @@ test('idle activities toggle corresponding 3D dynamic props (guitar, gamepad, mu
   applyCharacterPose(nova, seat, 1.0, false, { activity: 'reading' });
   assert.equal(nova.handBook.visible, true);
   assert.equal(nova.handMug.visible, false);
+});
+
+test('guitars face forward with raised anatomical-left necks, six strings and surface clearances', (context) => {
+  const entities = createFixture(context);
+  for (const entity of Object.values(entities)) {
+    entity.root.rotation.y = 0.35;
+    entity.state = 'siaga';
+    const guitar = entity.handGuitar;
+    const body = guitar.getObjectByName('guitar_body');
+    const fretboard = guitar.getObjectByName('guitar_fretboard');
+    body.geometry.computeBoundingBox();
+    fretboard.geometry.computeBoundingBox();
+    assert.equal(
+      guitar.getObjectByName('guitar_strings').geometry.attributes.position.count / 2,
+      6
+    );
+    assert.equal(guitar.children.filter((child) => child.name === 'guitar_tuner').length, 6);
+    for (const reduced of [false, true]) {
+      for (const time of [0, 0.13, 1, 2.3]) {
+        applyCharacterPose(entity, DIRECTOR_ANCHOR, time, reduced, {
+          activity: 'guitar',
+          deltaSeconds: 1 / 60
+        });
+        entity.root.updateWorldMatrix(true, true);
+        assert(guitar.matrixWorld.determinant() > 0, 'No reflected mesh.');
+        const undoLean = entity.poseScratch.bodyRotation.clone().invert();
+        const origin = entity.hips
+          .worldToLocal(guitar.getWorldPosition(new THREE.Vector3()))
+          .applyQuaternion(undoLean);
+        const head = entity.hips
+          .worldToLocal(
+            guitar.getObjectByName('guitar_headstock').getWorldPosition(new THREE.Vector3())
+          )
+          .applyQuaternion(undoLean);
+        assert(
+          head.x > origin.x + 0.5 && head.y > origin.y + 0.15,
+          'Front +Z means anatomical left +X; neck rises toward that side.'
+        );
+        const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+          guitar.getWorldQuaternion(new THREE.Quaternion())
+        );
+        const front = new THREE.Vector3(0, 0, 1).applyQuaternion(
+          entity.root.getWorldQuaternion(new THREE.Quaternion())
+        );
+        assert(normal.dot(front) > 0.99, 'Soundboard faces away from torso.');
+        assert(
+          origin.z + body.geometry.boundingBox.min.z > 0.28,
+          'Body clears the actual 0.26-radius torso by at least 2cm.'
+        );
+        const picking = guitar.worldToLocal(position(entity.leftHand));
+        const fretting = guitar.worldToLocal(position(entity.rightHand));
+        assert(
+          picking.z - CHARACTER_RIG.handRadius > body.geometry.boundingBox.max.z,
+          'Picking palm clears soundboard.'
+        );
+        assert(
+          fretting.z - CHARACTER_RIG.handRadius >=
+            fretboard.position.z + fretboard.geometry.boundingBox.max.z - 0.0001,
+          'Fretting palm contacts the fretboard face without entering the neck.'
+        );
+      }
+    }
+  }
 });

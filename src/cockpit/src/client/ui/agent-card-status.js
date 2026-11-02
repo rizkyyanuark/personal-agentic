@@ -2,7 +2,6 @@ const STATUS = {
   bekerja: { label: 'Bekerja', description: 'Bekerja', color: '#176d42' },
   menunggu_persetujuan: { label: 'Menunggu', description: 'Menunggu keputusan', color: '#795300' },
   siaga: { label: 'Santai', description: 'Tidak ada tugas aktif', color: '#706b64' },
-  selesai: { label: 'Selesai', description: 'Run baru saja berakhir', color: '#176d42' },
   gagal: { label: 'Gagal', description: 'Gagal', color: '#a6402d' },
   queued: { label: 'Antrean', description: 'Run menunggu giliran', color: '#706b64' },
   starting: { label: 'Memulai', description: 'Runtime memulai run', color: '#176d42' },

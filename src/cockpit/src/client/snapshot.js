@@ -64,6 +64,24 @@ const TOOL_LABELS = {
   delegating: 'Delegasi',
   other: 'Aktivitas'
 };
+const OPERATIONS = {
+  read_file: 'Membaca',
+  search_files: 'Mencari file',
+  write_file: 'Menulis',
+  edit_file: 'Mengubah',
+  build: 'Menjalankan: Build aplikasi',
+  test: 'Menjalankan: Jalankan tes',
+  git_status: 'Menjalankan: Cek status git',
+  git_diff: 'Menjalankan: Periksa perubahan git',
+  git_log: 'Menjalankan: Periksa riwayat git',
+  lint: 'Menjalankan: Periksa lint',
+  format: 'Menjalankan: Format kode',
+  typecheck: 'Menjalankan: Periksa tipe',
+  install: 'Menjalankan: Pasang dependency',
+  python_script: 'Menjalankan skrip Python',
+  node_script: 'Menjalankan skrip Node.js',
+  node_eval: 'Menjalankan: Evaluasi JavaScript dengan Node.js'
+};
 
 function eventToolLabel(event) {
   if (typeof event?.tool === 'string' && event.tool.trim()) {
@@ -85,7 +103,22 @@ function activityText(activity) {
     activity.state === 'failed'
       ? 'Langkah pekerjaan gagal'
       : labels[activity.state === 'active' ? 0 : 1];
-  const file = text(activity.relative_file, 160);
+  const files = Array.isArray(activity.relative_files)
+    ? activity.relative_files
+        .slice(0, 8)
+        .map((file) => text(file, 160))
+        .filter(Boolean)
+    : [];
+  const file = files.length ? files.join(', ') : text(activity.relative_file, 160);
+  const operation = OPERATIONS[activity.operation];
+  if (operation) {
+    const description = file ? `${operation} ${file}` : operation;
+    return activity.state === 'failed'
+      ? `Gagal: ${description}`
+      : activity.state === 'completed'
+        ? `${description} (selesai)`
+        : description;
+  }
   return file ? `${label} · ${file}` : label;
 }
 
@@ -182,19 +215,18 @@ export function projectCockpitSnapshot(snapshot) {
     }
     const latest = slot.in_scope ? slot.latest_result : null;
     const resultLabel = latest && RESULTS[latest.status];
-    const finishedAge = time(latest?.ended_at)
-      ? Date.parse(snapshot.generated_at) - Date.parse(latest.ended_at)
-      : null;
     const idleResult = state === 'siaga' && slot.active_runs.length === 0 && resultLabel;
     agents[role.key] = {
       state,
       runtimeHint,
+      activeRunIds: slot.in_scope
+        ? slot.active_runs.map((run) => text(run.id, 128)).filter(Boolean)
+        : [],
+      latestResult:
+        latest && resultLabel ? { runId: text(latest.id, 128), status: latest.status } : null,
       ...(idleResult
         ? {
-            resultHint: `Tugas terakhir: ${resultLabel}`,
-            ...(finishedAge !== null && finishedAge >= 0 && finishedAge < 60000
-              ? { cardState: 'selesai' }
-              : {})
+            resultHint: `Tugas terakhir: ${resultLabel}`
           }
         : {}),
       latestFailure:
@@ -225,19 +257,32 @@ export function projectCockpitSnapshot(snapshot) {
       });
     }
   }
-  const feed = snapshot.events.slice(0, 30).map((event) => {
-    if (!OFFICE_ROLES.some((role) => role.key === event.office_role) || !time(event.created_at))
-      throw new TypeError('Invalid cockpit event');
-    return {
-      id: text(String(event.id)),
-      role: event.office_role,
-      kind: text(event.kind, 64),
-      status: text(event.status, 32),
-      text: text(event.summary),
-      time: event.created_at,
-      tool: eventToolLabel(event)
-    };
-  });
+  const feed = snapshot.events
+    .filter(
+      (event) => event.kind !== 'activity_updated' && event.activity?.category !== 'responding'
+    )
+    .slice(0, 100)
+    .map((event) => {
+      if (!OFFICE_ROLES.some((role) => role.key === event.office_role) || !time(event.created_at))
+        throw new TypeError('Invalid cockpit event');
+      return {
+        id: text(String(event.id)),
+        role: event.office_role,
+        kind: text(event.kind, 64),
+        status: text(event.status, 32),
+        text: text(event.summary, 600),
+        time: event.created_at,
+        tool: eventToolLabel(event),
+        runId: text(event.run_id, 128),
+        groupId: text(event.group_id, 128),
+        stepIndex: Number.isSafeInteger(event.activity?.step_index)
+          ? event.activity.step_index
+          : null,
+        stepState: ['active', 'completed', 'failed'].includes(event.activity?.state)
+          ? event.activity.state
+          : null
+      };
+    });
   return {
     source: 'personal-agentic',
     connection: 'live',
@@ -263,6 +308,7 @@ export function projectCockpitSnapshot(snapshot) {
       tokens,
       history: history.sort((a, b) => Date.parse(b.time) - Date.parse(a.time)),
       groupId: snapshot.group_id,
+      workspaceId: snapshot.workspace_id,
       setupRequired: snapshot.setup_required === true
     }
   };
