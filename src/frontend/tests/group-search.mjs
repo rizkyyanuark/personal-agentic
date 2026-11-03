@@ -7,7 +7,13 @@ const expect = playwrightExpect.configure({ timeout: 30000 });
 
 export async function verifyGroupSearch({ page, request, call, state, until, directory, base, ownerKey }) {
   assert(process.env.AE_TEST_DISPOSABLE === "true" && ["localhost", "127.0.0.1"].includes(new URL(base).hostname), "Use only a disposable loopback controller");
-  const beforeRuns = (await state()).runs.length;
+  const beforeState = await state();
+  const beforeRuns = beforeState.runs.length;
+  const existingMessages = await Promise.all(beforeState.groups.filter(group => !group.deleted_at).map(async group => ({
+    groupId: group.id,
+    messages: await call(`/groups/${encodeURIComponent(group.id)}/messages?limit=200`, undefined, "GET"),
+  })));
+  assert(existingMessages.every(group => group.messages.length < 200), "Use small disposable message histories so preservation covers the entire fixture");
   const settleMotion = async locator => locator.evaluate(async element => {
     await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => null)));
   });
@@ -43,6 +49,27 @@ export async function verifyGroupSearch({ page, request, call, state, until, dir
   assert.equal(requests, 1);
   await expect(toast).toHaveCount(0);
   record("Explicit Enter and active-group message isolation; no passive requests or success toast");
+  const apiSearch = async (group, value, media) => request.get(`/api/search?${new URLSearchParams({ group_id: group.id, q: value, ...(media ? { semantic: "true", media } : {}) })}`);
+  const baseline = await (await apiSearch(a, marker)).json();
+  const messageIds = result => result.messages.map(message => message.id);
+  const normalizationCases = [];
+  for (const edge of ["  ", "\t", "\u00a0", "\u0085", "\ufeff", "\u2003\u3000"]) {
+    const value = `${edge}${marker}${edge}`;
+    const direct = await apiSearch(a, value);
+    assert.equal(direct.status(), 200);
+    assert.deepEqual(messageIds(await direct.json()), messageIds(baseline));
+    await search(value);
+    await expect(dialog.locator(".search-results article")).toHaveCount(1);
+    await expect(dialog.locator(".group-search-state")).toHaveText(`1 result for “${marker}”`);
+    normalizationCases.push({ edgeCodePoints: Array.from(edge, value => value.codePointAt(0)), resultIds: messageIds(baseline) });
+  }
+  assert.deepEqual(messageIds(await (await apiSearch(a, `\r\n${marker}\r\n`)).json()), messageIds(baseline));
+  await query().fill(marker.toLowerCase()); await query().press("Enter");
+  await expect(dialog.locator(".search-results article")).toHaveCount(1);
+  assert.deepEqual(messageIds(await (await apiSearch(a, marker.toLowerCase())).json()), messageIds(baseline));
+  assert.equal((await (await apiSearch(a, `${marker} in`)).json()).messages.length, 1);
+  assert.equal((await (await apiSearch(a, `${marker}  in`)).json()).messages.length, 0);
+  record("Normalized UI/direct-API result identities agree across Unicode edges, Enter/button and ASCII case; internal spaces are preserved");
   await search(`nothing-matches-${suffix}`);
   await expect(dialog.locator(".search-results")).toContainText("No messages found in this group.");
   await query().fill("   "); await submit().click();
@@ -53,7 +80,27 @@ export async function verifyGroupSearch({ page, request, call, state, until, dir
   assert.equal(requests, invalidBefore);
   await search("🚀".repeat(250));
   await expect(dialog.locator(".search-results")).toContainText("No messages found");
+  await search(` \ufeff${"🚀".repeat(250)}\t`);
+  await expect(dialog.locator(".search-results")).toContainText("No messages found");
+  for (const media of [undefined, "documents", "images"]) {
+    for (const value of ["🚀".repeat(250), ` \ufeff${"🚀".repeat(250)}\t`]) {
+      assert.equal((await apiSearch(a, value, media)).status(), 200);
+    }
+    for (const value of [" \t\r\n\u00a0\u0085\ufeff", "🚀".repeat(251)]) {
+      const invalid = await apiSearch(a, value, media);
+      assert.equal(invalid.status(), 400);
+      assert.match((await invalid.json()).error, /UTF-8 bytes/);
+    }
+  }
   record("Successful empty state, whitespace and exact UTF-8 limit with invalid queries not submitted");
+  for (const media of ["documents", "images"]) {
+    await dialog.getByRole("tab", { name: media === "documents" ? "Documents" : "Images", exact: true }).click();
+    await search(marker);
+    await expect(dialog.locator(".search-results")).toContainText(`No searchable indexed ${media} yet.`);
+    assert.equal((await (await apiSearch(a, marker, media)).json()).indexed_artifact_count, 0);
+  }
+  await dialog.getByRole("tab", { name: "Messages", exact: true }).click();
+  record("Empty Knowledge has mode-specific zero-indexed guidance without indexing or agent work");
 
   async function delayed(action, fail = false) {
     let release, resolveStarted, resolveDone, deliveryError;
@@ -89,6 +136,9 @@ export async function verifyGroupSearch({ page, request, call, state, until, dir
   await expect(toast).toHaveCount(0);
   await delayed(async () => { await dialog.getByRole("tab", { name: "Documents", exact: true }).click(); });
   await expect(dialog.locator(".search-results article")).toHaveCount(0);
+  await delayed(async () => { await dialog.getByRole("tab", { name: "Images", exact: true }).click(); });
+  await expect(dialog.locator(".search-results")).not.toContainText("No searchable indexed documents yet.");
+  await expect(dialog.locator(".group-search-state")).toContainText("Enter a query");
   await dialog.getByRole("tab", { name: "Messages", exact: true }).click();
   await delayed(async () => { await query().fill("new draft after obsolete failure"); }, true);
   await expect(toast).toHaveCount(0);
@@ -138,21 +188,48 @@ export async function verifyGroupSearch({ page, request, call, state, until, dir
 
   const docResponse = await request.post("/api/artifacts", { multipart: { group_id: a.id, file: { name: "profile-search-notes.md", mimeType: "text/plain", buffer: Buffer.from("Workspace account profile and local group search. Rust controller and native Windows projects.") } } });
   assert(docResponse.ok()); const document = await docResponse.json();
+  await open(a);
+  await expect(dialog).toContainText("indexed Knowledge files");
+  await expect(dialog).toContainText("Workdir files and chat links are not indexed automatically");
+  await dialog.getByRole("tab", { name: "Documents", exact: true }).click();
+  await search("native Windows projects");
+  await expect(dialog.locator(".search-results")).toContainText("No searchable indexed documents yet.");
+  assert.equal((await (await apiSearch(a, marker, "documents")).json()).indexed_artifact_count, 0);
+  assert.equal((await state()).artifacts.find(file => file.id === document.id).status, "stored");
+  await close();
   await call(`/artifacts/${document.id}/index`);
   const indexState = async id => until(async () => { const artifact = (await state()).artifacts.find(x => x.id === id); return artifact && artifact.status !== "indexing" ? artifact : false; }, 600000);
   const indexedDoc = await indexState(document.id); assert.equal(indexedDoc.status, "indexed", indexedDoc.error);
+  assert.equal((await (await apiSearch(a, "native Windows projects", "documents")).json()).indexed_artifact_count, 1);
+  assert.deepEqual(await (await apiSearch(a, marker, "images")).json(), { artifacts: [], indexed_artifact_count: 0 });
   const canvas = await page.context().newPage(); await canvas.setViewportSize({ width: 256, height: 256 });
   await canvas.setContent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><rect width="240" height="240" fill="white"/><circle cx="120" cy="120" r="90" fill="red"/></svg>');
   const png = await canvas.screenshot(); await canvas.close();
   const pictureResponse = await request.post("/api/artifacts", { multipart: { group_id: a.id, file: { name: "profile-search-red-circle.png", mimeType: "image/png", buffer: png } } });
   assert(pictureResponse.ok()); const picture = await pictureResponse.json(); await call(`/artifacts/${picture.id}/index`);
   const indexedPicture = await indexState(picture.id); assert.equal(indexedPicture.status, "indexed", indexedPicture.error);
+  const imageOnlyGroup = await call("/groups", { id: "", name: `Image-only ${suffix}`, description: "Disposable image readiness acceptance" });
+  const imageOnlyResponse = await request.post("/api/artifacts", { multipart: { group_id: imageOnlyGroup.id, file: { name: "isolated-red-circle.png", mimeType: "image/png", buffer: png } } });
+  assert(imageOnlyResponse.ok()); const imageOnly = await imageOnlyResponse.json();
+  await call(`/artifacts/${imageOnly.id}/index`);
+  const indexedOnlyImage = await indexState(imageOnly.id); assert.equal(indexedOnlyImage.status, "indexed", indexedOnlyImage.error);
+  assert.deepEqual(await (await apiSearch(imageOnlyGroup, marker, "documents")).json(), { artifacts: [], indexed_artifact_count: 0 });
+  assert.equal((await (await apiSearch(imageOnlyGroup, "red circle", "images")).json()).indexed_artifact_count, 1);
   await open(a);
   await dialog.getByRole("tab", { name: "Documents", exact: true }).click();
   await search("native Windows projects"); await expect(dialog.locator(".search-results a")).toContainText(document.name);
+  const indexedDocuments = await (await apiSearch(a, "  native Windows projects  ", "documents")).json();
+  assert.equal(indexedDocuments.indexed_artifact_count, 1);
+  assert(indexedDocuments.artifacts.some(file => file.id === document.id));
+  await expect(dialog.locator(".search-results")).not.toContainText("No searchable indexed");
   assert.equal((await request.get(`/api/artifacts/${document.id}`)).status(), 200);
   await dialog.getByRole("tab", { name: "Images", exact: true }).click();
   await search("a red circle on a white background"); await expect(dialog.locator(".search-results a").first()).toContainText(picture.name);
+  const indexedImages = await (await apiSearch(a, "  a red circle on a white background  ", "images")).json();
+  assert.equal(indexedImages.indexed_artifact_count, 1);
+  assert(indexedImages.artifacts.some(file => file.id === picture.id));
+  assert.equal((await request.get(`/api/artifacts/${picture.id}`)).status(), 200);
+  record("Real stored/document-only/image-only/both-ready Knowledge states have scoped availability and actual indexed text/image matches");
   await settleMotion(dialog);
   await page.screenshot({ path: path.join(directory, "group-search-indexed-image.png"), fullPage: true });
   await close(); await open(b); await dialog.getByRole("tab", { name: "Documents", exact: true }).click(); await search("native Windows projects");
@@ -195,6 +272,9 @@ export async function verifyGroupSearch({ page, request, call, state, until, dir
   });
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Search unavailable: select a group to search", exact: true })).toBeDisabled();
+  const inaccessible = await apiSearch(a, marker, "documents");
+  assert.equal(inaccessible.status(), 400);
+  assert.equal((await inaccessible.json()).indexed_artifact_count, undefined);
   await page.goto("/groups/general/chat");
   await page.getByRole("button", { name: "Search #General", exact: true }).click();
   await expect(query()).toHaveValue(""); await expect(dialog.locator(".search-results article")).toHaveCount(0); await close();
@@ -229,9 +309,18 @@ export async function verifyGroupSearch({ page, request, call, state, until, dir
   await macContext.close();
   record("Command+K and matching Mac hint verified with browser platform override; native macOS hardware is not claimed");
   const anonymous = await page.context().browser().newContext({ baseURL: base });
-  assert.equal((await anonymous.request.get(`/api/search?group_id=${a.id}&q=${marker}`)).status(), 401); await anonymous.close();
+  assert.equal((await anonymous.request.get(`/api/search?group_id=${a.id}&q=${marker}`)).status(), 401);
+  assert.equal((await anonymous.request.get(`/api/search?group_id=${a.id}&q=${marker}&semantic=true&media=documents`)).status(), 401); await anonymous.close();
   record("Anonymous search denied and zero agent runs");
-  const result = { checkedAt: new Date().toISOString(), checks, layouts, requests, groups: [a.id, b.id], indexedArtifacts: [document.id, picture.id], runsBefore: beforeRuns, runsAfter: (await state()).runs.length,
+  const afterState = await state();
+  for (const kind of ["agents", "artifacts"]) {
+    for (const item of beforeState[kind]) assert.deepEqual(afterState[kind].find(current => current.id === item.id), item, `Preserve pre-existing ${kind}: ${item.id}`);
+  }
+  for (const group of existingMessages) {
+    assert.deepEqual(await call(`/groups/${encodeURIComponent(group.groupId)}/messages?limit=200`, undefined, "GET"), group.messages, `Preserve pre-existing messages: ${group.groupId}`);
+  }
+  assert.equal(afterState.runs.length, beforeRuns);
+  const result = { checkedAt: new Date().toISOString(), checks, normalizationCases, layouts, requests, groups: [a.id, b.id, imageOnlyGroup.id], indexedArtifacts: [document.id, picture.id, imageOnly.id], indexedAvailability: { documentOnly: 1, imageOnly: 1, bothReady: { documents: indexedDocuments.indexed_artifact_count, images: indexedImages.indexed_artifact_count } }, preservedExistingState: true, runsBefore: beforeRuns, runsAfter: afterState.runs.length,
     mocks: false, canceledDeliveries, hardwareSimulation: "navigator.platform is overridden only in a separate browser context for the macOS shortcut branch; no API or search results are mocked.", faultInjection: "One local network request is intentionally aborted; real successful responses are delayed for race tests without changing their content.", base };
   await writeFile(path.join(directory, "group-search-receipt.json"), JSON.stringify(result, null, 2));
   return result;

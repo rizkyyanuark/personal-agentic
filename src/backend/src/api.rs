@@ -1762,31 +1762,49 @@ fn document_search() -> String {
 }
 async fn search(State(app): State<App>, Query(query): Query<SearchQuery>) -> ApiResult<Value> {
     let _: Group = app.store.get("groups", &query.group_id)?;
+    let normalized = query
+        .q
+        .trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     ensure!(
-        !query.q.trim().is_empty() && query.q.len() <= 1000,
-        "Search query must contain 1–1000 characters"
+        !normalized.is_empty() && normalized.len() <= 1000,
+        "Search query must contain 1–1,000 UTF-8 bytes after trimming whitespace"
     );
     if query.semantic {
         ensure!(
             ["documents", "images"].contains(&query.media.as_str()),
             "Choose documents or images for semantic search"
         );
+        let valid = app
+            .store
+            .list::<Artifact>("artifacts")?
+            .into_iter()
+            .filter(|a| {
+                a.group_id == query.group_id
+                    && a.in_knowledge
+                    && a.status == "indexed"
+                    && a.media_type.starts_with(if query.media == "images" {
+                        "image/"
+                    } else {
+                        "text/"
+                    })
+            })
+            .collect::<Vec<_>>();
+        let indexed_artifact_count = valid.len();
+        if indexed_artifact_count == 0 {
+            return Ok(Json(json!({"artifacts":[], "indexed_artifact_count":0})));
+        }
         let hits = app
             .knowledge
             .clone()
-            .search(query.q, query.group_id.clone(), query.media == "images")
+            .search(
+                normalized.to_owned(),
+                query.group_id.clone(),
+                query.media == "images",
+            )
             .await?;
-        let valid = app.store.list::<Artifact>("artifacts")?;
         let results = hits
             .into_iter()
-            .filter(|h| {
-                valid.iter().any(|a| {
-                    a.id == h["id"]
-                        && a.group_id == query.group_id
-                        && a.in_knowledge
-                        && a.status == "indexed"
-                })
-            })
+            .filter(|h| valid.iter().any(|a| a.id == h["id"]))
             .map(|mut hit| {
                 if let Some(a) = valid.iter().find(|a| a.id == hit["id"]) {
                     hit["name"] = json!(a.name);
@@ -1794,9 +1812,11 @@ async fn search(State(app): State<App>, Query(query): Query<SearchQuery>) -> Api
                 hit
             })
             .collect::<Vec<_>>();
-        Ok(Json(json!({"artifacts":results})))
+        Ok(Json(
+            json!({"artifacts":results, "indexed_artifact_count":indexed_artifact_count}),
+        ))
     } else {
-        let matches=app.store.read(|c|{let mut q=c.prepare("SELECT data FROM messages WHERE json_extract(data,'$.group_id')=? AND instr(lower(json_extract(data,'$.body')),lower(?))>0 ORDER BY rowid DESC LIMIT 50")?;q.query_map(params![query.group_id,query.q],|r|r.get::<_,String>(0))?.map(|r|Ok(serde_json::from_str::<Message>(&r?)?)).collect::<Result<Vec<_>>>()})?;
+        let matches=app.store.read(|c|{let mut q=c.prepare("SELECT data FROM messages WHERE json_extract(data,'$.group_id')=? AND instr(lower(json_extract(data,'$.body')),lower(?))>0 ORDER BY rowid DESC LIMIT 50")?;q.query_map(params![query.group_id,normalized],|r|r.get::<_,String>(0))?.map(|r|Ok(serde_json::from_str::<Message>(&r?)?)).collect::<Result<Vec<_>>>()})?;
         Ok(Json(json!({"messages":matches})))
     }
 }
