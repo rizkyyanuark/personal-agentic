@@ -64,7 +64,7 @@ export function useAccountProfile({ user, workspaceId, displayName, onDisplayNam
 
   function setDraft(value: string) {
     setState({ scope, draft: value, saved: false });
-    feedback.clear();
+    if (feedback.result?.kind !== "error") feedback.clear();
   }
   return { draft, saved: state.scope === scope && state.saved, feedback, validation, changed, pending, setDraft, save, checkSaved };
 }

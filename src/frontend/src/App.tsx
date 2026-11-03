@@ -350,7 +350,6 @@ export default function App({
   }, [groupId, sideChatId]);
   const [newAgent, setNewAgent] = useState(false);
   const [newAgentProject, setNewAgentProject] = useState("");
-  const [projectTeamOpen, setProjectTeamOpen] = useState(true);
   const [groupEditor, setGroupEditor] = useState<Group | null>(null);
   const searchContext = JSON.stringify([user, workspaceId, data?.groups.some(item => item.id === groupId) ? groupId : null, role, authenticated]);
   const [searchState, setSearchState] = useState({ scope: searchContext, open: false });
@@ -390,6 +389,7 @@ export default function App({
     window.addEventListener("popstate", onNav);
     window.addEventListener("ae:navigate", onNav);
     return () => {
+      navLifetimeRef.current += 1;
       window.removeEventListener("popstate", onNav);
       window.removeEventListener("ae:navigate", onNav);
     };
@@ -1540,12 +1540,15 @@ export default function App({
             {tab === "Workspace settings" && <section className="user-settings"><div className="settings-page"><header className="settings-page-heading"><p className="settings-kicker">SETTINGS</p><h1>Workspace</h1><p>Manage your workspace, people, and their access.</p></header>{workspaceSettings}</div></section>}
             {tab === "User settings" && <UserSettings role={role} user={user} controllerAccess={controllerAccess} workstations={data?.workstations ?? []} onRefresh={refresh} enrollmentToken={enrollmentToken} onEnrollmentTokenChange={setEnrollmentToken}/>}
             </section>}
-            {tab === "Structure" && group?.project && data && <div className="project-structure-view">{projectTeamOpen && <ProjectTeam key={`${group.id}:${JSON.stringify(group.project.members)}`} group={group} agents={data.agents} onSaved={refresh} onClose={() => setProjectTeamOpen(false)} onAdd={() => { setNewAgentProject(groupId); setNewAgent(true); }}/>}<Suspense fallback={<div className="empty-state">Opening project structure…</div>}><OrganizationChart key={groupId} workstations={data.workstations ?? []}
+            {tab === "Structure" && group?.project && data && <div className="project-structure-view"><ProjectTeam key={`${workspaceId}:${group.id}:${JSON.stringify(group.project.members)}`}
+              group={group} agents={data.agents} onSaved={refresh} onAdd={() => { setNewAgentProject(groupId); setNewAgent(true); }}/>
+              <Suspense fallback={<div className="empty-state">Opening project structure…</div>}><OrganizationChart key={groupId} workstations={data.workstations ?? []}
               projectName={group.name} layoutPath={`/organization/layout?group_id=${encodeURIComponent(groupId)}`}
               agents={data.agents.filter(a=>group.project!.members.some(m=>m.agent_id===a.id)).map(a=>({...a,reports_to:group.project!.members.find(m=>m.agent_id===a.id)?.manager_id??null,workdir:group.project!.workdir}))}
-              connections={Object.fromEntries(group.project.members.map(m=>[m.agent_id,data.project_connections?.[groupId]]))} savedLayout={data.project_layouts?.[groupId]??{}}
-              onDeletedAgents={()=>setProjectTeamOpen(true)} selected={selectedAgent} onSelect={id => go({ agentId: id, section: "Profile", runId: null })}
-              onAdd={()=>{setNewAgentProject(groupId);setNewAgent(true);}}/></Suspense></div>}
+              connections={Object.fromEntries(group.project!.members.map(m=>[m.agent_id,data.project_connections?.[groupId]]))} savedLayout={data.project_layouts?.[groupId]??{}}
+              selected={selectedAgent} onSelect={id => go({ agentId: id, section: "Profile", runId: null })}
+              onAdd={()=>{setNewAgentProject(groupId);setNewAgent(true);}}/></Suspense>
+            </div>}
             {(tab === "Organization" || tab === "Live Preview") && (
               <Suspense
                 fallback={
@@ -1709,7 +1712,6 @@ export default function App({
             return;
           }
           if (agent.project_id) {
-            setProjectTeamOpen(true);
             go({ groupId: agent.project_id, view: "Structure", agentId: agent.id, section: "Profile", runId: null });
           } else {
             setSelectedAgent(agent.id);
@@ -1720,10 +1722,11 @@ export default function App({
         agents={organizationAgents}
         workstations={data?.workstations ?? []}
         onClose={() => setGroupEditor(null)}
-        onSaved={async (saved) => {
+        getNavigationLifetime={() => navLifetimeRef.current}
+        onSaved={async (saved, submitLifetime) => {
           await refresh();
+          if (saved.project && !groupEditor.id && submitLifetime !== undefined && navLifetimeRef.current !== submitLifetime) return;
           go(saved.deleted_at ? { view: "Organization", agentId: null, runId: null } : { groupId: saved.id, view: saved.project && !groupEditor.id ? "Structure" : "Chat", agentId: null, runId: null });
-          if (saved.project && !groupEditor.id) setProjectTeamOpen(true);
           setReply(null); setAttachments([]);
         }} />}
       {role === "owner" && group && authenticated && <GroupSearch key={searchScope} open={searchOpen} onOpenChange={setSearchOpen} groupId={group.id} groupName={group.name} inputRef={searchInput} returnFocus={returnSearchFocus} />}

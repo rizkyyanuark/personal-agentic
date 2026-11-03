@@ -126,7 +126,7 @@ export async function verifyWorkspaceNavigation({ page, request, call, state, un
   await expandBtn.hover();
   await expect(page.locator(".action-tooltip-popup").filter({ hasText: "Expand navigation" })).toBeVisible();
   await page.keyboard.press("Tab");
-  await expect(page.locator(".action-tooltip-popup")).toBeVisible();
+  await expect(page.locator(".action-tooltip-popup[data-open]").filter({ hasText: "Action board" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".action-tooltip-popup")).toHaveCount(0);
 
