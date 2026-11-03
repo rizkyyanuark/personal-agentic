@@ -928,7 +928,32 @@ Use a disposable loopback controller with its exact backend revision, current fr
 
 From `src/frontend`, set `AE_TEST_URL`, `AE_TEST_ORG`, `AE_TEST_DISPOSABLE=true` and `AE_TEST_MATRIX_CREDENTIALS_FILE` (a private JSON file containing `human.username`, `human.password`, `human.user_id`). Run `node tests/native-smoke.mjs account-profile` with `AE_TEST_PROFILE_PHASE=prepare`, restart only the disposable controller, and capture its container ID, PID/start time before/after and endpoint readiness latency in `container-restart.json` under the harness verification directory. Then run the same command with `AE_TEST_PROFILE_PHASE=verify`; it confirms persistence/login and restores original names/deletes its test workspaces. Use `cleanup` if interrupted. The existing test distinguishes inline invalid-field guidance from one save outcome toast. A local aborted PUT exposes saved-value inspection; delayed real PUT/GET responses exercise workspace ownership.
 
-Run `node tests/native-smoke.mjs group-search` against the same disposable controller. The suite creates two groups, ordinary messages without recipients, a document and a red-circle image, and indexes them through the real knowledge API. It verifies keyword/document/image matches, file access, group isolation, explicit submission, UTF-8 limits, request cancellation, one error toast and keyboard/responsive behavior. Successful search responses must remain real. Route delays and a deliberate request abort are failure/timing injection only, documented in its receipt. Keep actual model-cache/index dependencies available locally; report a missing dependency rather than replacing successful results with mocks or using a server fallback.
+Run `node tests/native-smoke.mjs group-search` against the same disposable controller. The suite creates three groups, ordinary messages without recipients, a document and two red-circle images, and indexes the files through the real knowledge API. It verifies keyword/document/image matches, file access, group isolation, explicit submission, UTF-8 limits, request cancellation, one error toast and keyboard/responsive behavior. Successful search responses must remain real. Route delays and a deliberate request abort are failure/timing injection only, documented in its receipt. Keep actual model-cache/index dependencies available locally; report a missing dependency rather than replacing successful results with mocks or using a server fallback.
+
+Search trims Unicode White_Space and U+FEFF at both the UI and API boundary before
+checking a nonempty query of at most 1,000 UTF-8 bytes. Internal spaces remain
+significant. Compare actual result IDs for plain/padded queries, ASCII case and
+Enter/button submission. Include NBSP, U+0085, U+FEFF, whitespace-only input,
+250/251 four-byte emoji and a padded 1,000-byte query through both boundaries.
+The byte limit applies after normalization; direct API validation errors are 400.
+
+Semantic `/api/search` responses retain `artifacts` and add
+`indexed_artifact_count`: distinct indexed Knowledge artifacts in the selected
+workspace/group and media mode (`text/` for Documents, `image/` for Images).
+Stored/indexing/failed/deleted/non-Knowledge records do not count. A zero count
+returns an empty list without starting an embedding query; nonempty-corpus index
+failures remain HTTP errors. This count describes persisted metadata, not vector
+store integrity or the number of query matches. The frontend keeps a missing
+count unknown for older responses rather than interpreting it as zero.
+
+Verify distinct UI states for no indexed documents/images, an actual empty result
+with indexed content, and a failed request. Scope guidance names the active
+project/group and explains that workdir files and chat links are not indexed
+automatically. Searching never uploads/indexes files or starts an agent task.
+The real suite additionally covers empty/stored/document-only/image-only/both-ready
+states and stale availability. Run `node --experimental-strip-types --test tests/group-search.test.mjs` for
+pure normalization/empty-copy contracts; these fixtures are presentation-only
+proof, not substitutes for the real indexed document/image acceptance above.
 
 Search opens through the active-group sidebar action or Ctrl+K (Windows/Linux) / Command+K (macOS), outside other editors/dialogs. The shortcut focuses the query if Search is already open. Typing and mode changes never search; only Enter or Search submits. Repeat the no-provider navigation suite with `node tests/native-smoke.mjs workspace-navigation`, preserving rail/resize/mobile drawer behavior. Run `npm run lint` and `npm run build` after final edits; an isolated build can use `--outDir ../../.state/<change>/frontend-dist` so the running user's mounted bundle stays unchanged.
 

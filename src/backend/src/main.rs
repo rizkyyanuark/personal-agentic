@@ -11,6 +11,8 @@ mod codex_usage;
 mod coordination;
 mod fleet;
 mod group_scope;
+#[cfg(test)]
+mod group_search_tests;
 mod knowledge;
 mod matrix;
 mod matrix_onboarding;
