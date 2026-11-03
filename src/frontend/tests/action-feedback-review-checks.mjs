@@ -3,6 +3,7 @@ import path from "node:path";
 import { writeFile } from "node:fs/promises";
 import { expect as playwrightExpect } from "@playwright/test";
 import { selectValue } from "./value-picker.mjs";
+import { verifyProjectTeamEditor } from "./project-team-editor.mjs";
 
 const expect = playwrightExpect.configure({ timeout: 30000 });
 
@@ -104,8 +105,9 @@ export async function verifyActionFeedbackReviewChecks({ page, call, _state, org
   const existingAgent = (await call("/state", undefined, "GET")).agents.find(a => !a.deleted_at);
   assert(existingAgent, "Expected existing agent");
 
+  proof.projectTeamEditor = await verifyProjectTeamEditor({ page, call, teamProject, existingAgent, org, directory, base });
+
   await page.goto(`${base}/projects/${teamProject.id}/structure`);
-  await page.getByRole("button", { name: "Manage team", exact: true }).click();
   const teamSection = page.locator(".project-team-editor");
   await expect(teamSection).toBeVisible();
 
@@ -189,6 +191,8 @@ export async function verifyActionFeedbackReviewChecks({ page, call, _state, org
 
   let restorePostCount = 0;
   let failRestoreStateRead = false;
+  let restoreRecovery;
+  let releaseRestoreRecovery;
   const restorePostHandler = async route => {
     if (route.request().method() === "POST") {
       restorePostCount += 1;
@@ -199,6 +203,10 @@ export async function verifyActionFeedbackReviewChecks({ page, call, _state, org
     return route.continue();
   };
   const failRestoreStateHandler = async route => {
+    if (restoreRecovery && route.request().method() === "GET") {
+      await restoreRecovery;
+      return route.continue();
+    }
     if (failRestoreStateRead && route.request().method() === "GET") {
       return route.abort("failed");
     }
@@ -219,14 +227,17 @@ export async function verifyActionFeedbackReviewChecks({ page, call, _state, org
     await dismissToasts();
     await expect(retryRestore).toBeVisible();
 
-    failRestoreStateRead = false;
+    restoreRecovery = new Promise(resolve => { releaseRestoreRecovery = resolve; });
     await retryRestore.click();
+    failRestoreStateRead = false;
+    releaseRestoreRecovery();
     const restoreSuccessToast = page.locator(".action-toast:not([data-ending-style])").filter({ hasText: `${groupToArchive.name} restored.` });
     await expect(restoreSuccessToast).toHaveCount(1);
     assert.equal(restorePostCount, 1, "Group restore mutation count must remain 1 on retry");
     proof.findings.push({ finding: "C-ArchivedGroups", restoreCount: restorePostCount, recoveryRetained: true });
   } finally {
     failRestoreStateRead = false;
+    releaseRestoreRecovery?.();
     await page.unroute(`**/api/groups/${groupToArchive.id}/restore`, restorePostHandler);
     await page.unroute("**/api/state", failRestoreStateHandler);
     await dismissToasts();
@@ -874,10 +885,15 @@ export async function verifyActionFeedbackReviewChecks({ page, call, _state, org
 
   // Invite user in UI
   const inviteUser = `@tester_${suffix}:example.invalid`;
+  await page.getByRole("button", { name: "Invite teammate", exact: true }).click();
+  const inviteDialog = page.getByRole("dialog", { name: "Invite teammate", exact: true });
+  await inviteDialog.getByRole("tab", { name: "Existing Matrix account", exact: true }).click();
   await page.locator("#workspace-invite").fill(inviteUser);
   await page.getByRole("button", { name: "Invite", exact: true }).click();
   const inviteToast = page.locator(".action-toast:not([data-ending-style])").filter({ hasText: `Invited ${inviteUser} to ${uiWsRename}.` });
   await expect(inviteToast).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(inviteDialog).toHaveCount(0);
   await dismissToasts();
 
   const personRow = page.locator(".settings-person").filter({ hasText: inviteUser });
@@ -949,6 +965,9 @@ export async function verifyActionFeedbackReviewChecks({ page, call, _state, org
       data: { user: `@intruder_${suffix}:matrix-invite.local`, role: "member" }
     });
     assert.equal(unauthInviteRes.status(), 403, "Member cannot invite; returns HTTP 403 Forbidden");
+
+    const unauthorizedTeamSave = await memberPage.request.post("/api/groups", { data: teamProject });
+    assert.equal(unauthorizedTeamSave.status(), 403, "Member cannot save a project team");
 
     // Verify SQLite data intact
     const checkWs = (await call("/tenants", undefined, "GET")).find(t => t.id === uiWs.id);

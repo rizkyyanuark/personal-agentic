@@ -8,8 +8,8 @@ import type { Group } from "./bindings/Group";
 import { ValuePicker } from "./ValuePicker";
 import { PendingIcon, useActionFeedback } from "./ActionFeedback";
 
-export function ProjectTeam({ group, agents, onSaved, onAdd, onClose }: {
-  group: Group; agents: Agent[]; onSaved: () => Promise<void>; onAdd: () => void; onClose: () => void;
+export function ProjectTeam({ group, agents, onSaved, onAdd }: {
+  group: Group; agents: Agent[]; onSaved: () => Promise<void>; onAdd: () => void;
 }) {
   const [members, setMembers] = useState(group.project?.members ?? []);
   const [chosen, setChosen] = useState("");
@@ -56,7 +56,7 @@ export function ProjectTeam({ group, agents, onSaved, onAdd, onClose }: {
     return success;
   }
   return <section className="project-team-editor" aria-label="Project team and reporting structure">
-    <header><div><h2>Project team</h2><p>Bring in organization agents or create a dedicated project agent. Set reporting lines below.</p></div><Button variant="ghost" onClick={onClose}>Hide team editor</Button></header>
+    <header><div><h2>Project team</h2><p>Bring in organization agents or create a dedicated project agent. Set reporting lines below.</p></div></header>
     <div className="project-team-add">
       <Label htmlFor="project-add-member">Organization agent</Label>
       <ValuePicker id="project-add-member" searchable value={chosen} disabled={busy} onValueChange={setChosen} options={[{ value: "", label: "Choose an agent" }, ...available.map(a => ({ value: a.id, label: `${a.name}${a.position ? ` · ${a.position}` : ""}` }))]} />

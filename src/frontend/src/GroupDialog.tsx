@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Archive, RotateCcw, Trash2, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,8 +14,9 @@ import type { Group } from "./bindings/Group";
 import type { Agent } from "./bindings/Agent";
 import { ActionStatus, PendingIcon, useActionFeedback } from "./ActionFeedback";
 
-export function GroupDialog({ controllerAccess, group, agents, workstations, onClose, onSaved }: {
-  controllerAccess: boolean; group: Group; agents: Agent[]; workstations: Workstation[]; onClose: () => void; onSaved: (group: Group) => Promise<void>;
+export function GroupDialog({ controllerAccess, group, agents, workstations, onClose, onSaved, getNavigationLifetime }: {
+  controllerAccess: boolean; group: Group; agents: Agent[]; workstations: Workstation[]; onClose: () => void; onSaved: (group: Group, submitLifetime?: number) => Promise<void>;
+  getNavigationLifetime?: () => number;
 }) {
   const [draft, setDraft] = useState(group);
   const [people, setPeople] = useState<{user:string;role:string}[]>([]);
@@ -23,6 +24,7 @@ export function GroupDialog({ controllerAccess, group, agents, workstations, onC
   const [confirm, setConfirm] = useState<"archive" | "delete" | null>(null);
   const [error, setError] = useState("");
   const [acknowledged, setAcknowledged] = useState<Group | null>(null);
+  const acknowledgedLifetime = useRef<number | undefined>(undefined);
   const feedback = useActionFeedback(`group:${group.id || (group.project ? "new-project" : "new-group")}`);
   const busy = feedback.pending !== null;
   useEffect(()=>{void api<{user:string;role:string}[]>("/people").then(setPeople,e=>setError(String(e)));},[]);
@@ -49,6 +51,7 @@ export function GroupDialog({ controllerAccess, group, agents, workstations, onC
     return `${name} saved. Review scheduled tasks in their tab.`;
   }
   async function perform(operation: string, action: () => Promise<Group>) {
+    const submitLifetime = getNavigationLifetime?.();
     setError("");
     let closing = false;
     await feedback.run(operation, async () => {
@@ -61,7 +64,8 @@ export function GroupDialog({ controllerAccess, group, agents, workstations, onC
         return { kind: "warning", message: `${draft.name}: the change could not be confirmed. Your draft is retained. Review the saved ${draft.project ? "project" : "group"} before trying again.` };
       }
       setAcknowledged(saved); setDraft(saved);
-      try { await onSaved(saved); }
+      acknowledgedLifetime.current = submitLifetime;
+      try { await onSaved(saved, submitLifetime); }
       catch { return { kind: "warning", message: `${resultMessage(saved, operation)} The view could not refresh. Retry refresh without repeating the change.` }; }
       closing = true; onClose();
       return { kind: "success", message: resultMessage(saved, operation) };
@@ -71,7 +75,7 @@ export function GroupDialog({ controllerAccess, group, agents, workstations, onC
     if (!acknowledged) return;
     let closing = false;
     await feedback.run("refresh", async () => {
-      await onSaved(acknowledged);
+      await onSaved(acknowledged, acknowledgedLifetime.current);
       closing = true; onClose();
       return { kind: "success", message: `${acknowledged.name}: saved changes are now displayed.` };
     }, { toast: () => closing, errorMessage: "The change was acknowledged, but the view still could not refresh. Retry refresh without repeating the change." });

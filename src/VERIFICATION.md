@@ -462,6 +462,45 @@ exact revision, proof and pending dependencies in the release issue/MR, followin
 the [deployment runbook](../docs/deployment.md). The historical `CI-003` contract
 remains in the local OpenSpec archive and is not included in a fresh clone.
 
+## Project Structure team editor
+
+Use an isolated loopback controller and disposable organization. From
+`src/frontend`, set `AE_TEST_URL`, `AE_TEST_ORG`, `AE_TEST_DISPOSABLE=true` and run
+`node tests/native-smoke.mjs action-feedback-review`, followed by
+`node tests/native-smoke.mjs workspace-navigation` on a fresh disposable fixture.
+The review suite needs actual workdir validation, readable native model metadata
+for configuration creation, and local Synapse accounts for its existing access
+checks. Supply `AE_TEST_MATRIX_USER_ID`, `AE_TEST_MATRIX_USERNAME` and
+`AE_TEST_MATRIX_PASSWORD` privately. Do not publish credentials or substitute
+successful API/catalog responses. These phases create configuration, not provider
+tasks; verify unchanged agent-run counts. Fixture setup writes remain explicit.
+
+Project team is shown directly on every Structure entry/reload/re-entry.
+Manage team and Hide team editor are absent; there is no disclosure state,
+programmatic heading focus or jump-to-editor behavior. Verify normal keyboard
+access to member/Reports to controls and no horizontal overflow at 320/390px.
+Unsaved selections remain local to the active visit. Leaving Structure discards
+the unsaved draft; merely viewing or navigating never saves or starts agent work.
+
+The maintained review phase calls `tests/project-team-editor.mjs`. Its receipt
+`project-team-editor.json` records editor visibility, absent disclosure controls,
+real membership/Reports to persistence and removal, reporting-cycle rejection,
+unchanged global reporting, zero navigation-only mutations and zero new runs.
+Screenshots `project-team-320.png`, `project-team-390.png` and
+`project-team-1440.png` cover narrow/desktop layouts and reduced motion. These do
+not claim a manual screen-reader session. Successful project/dedicated-agent
+creation still shows Structure and its selected profile; cancelled/failed/stale
+completion must not redirect another context. Organization retains Deleted agents.
+
+Held real responses are timing injection, not fabricated success. The existing
+team save/failed-refresh case must prove one mutation and read-only Retry refresh,
+including Create project agent's guard. Anonymous and actual Matrix Member team
+writes must be rejected. Retain the account Profile lost-save-response/edited-draft
+GET-only recovery check. If that hook changes, also run
+`node tests/native-smoke.mjs account-profile-navigation` with the private local
+Matrix credentials file in `AE_TEST_MATRIX_CREDENTIALS_FILE`. Keep receipts and
+screenshots under the disposable organization's ignored verification path.
+
 ## Organization Live Preview
 
 ### Live Office work activity

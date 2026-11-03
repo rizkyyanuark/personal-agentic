@@ -286,7 +286,7 @@ export function OrganizationChart({
   agents: Agent[];
   savedLayout: ChartLayout;
   connections: Partial<Record<string, Connection>>;
-  onDeletedAgents: () => void;
+  onDeletedAgents?: () => void;
   selected: string | null;
   onSelect: (id: string) => void;
   onAdd: () => void;
@@ -393,9 +393,9 @@ export function OrganizationChart({
               <Settings2 size={16} /> Assign desks
             </Button>
           )}
-          <Button variant="outline" onClick={onDeletedAgents}>
-            {projectName ? "Manage team" : "Deleted agents"}
-          </Button>
+          {!projectName && onDeletedAgents && <Button variant="outline" onClick={onDeletedAgents}>
+            Deleted agents
+          </Button>}
           <Button onClick={onAdd}>
             <Plus size={16} /> Add agent
           </Button>
