@@ -1,5 +1,0 @@
-- [x] 1. Remove feed navigation/badges and completed-card state; replace visual card labels with useful context; preserve genuine failure/waiting states and regressions.
-- [x] 2. Unify bubble palette, bound previews and visible lines, retain full details, and suppress mobile work bubbles; verify long text and Unicode.
-- [x] 3. Correct guitar orientation and soundboard geometry/strings/frets, palm contacts and torso clearance; verify all rigs under normal/reduced motion.
-- [x] 4. Complete required checks and real API/browser/provider verification, inspect screenshots, update docs and save audit/Antislop receipts. No commit, push or deploy.
-- [x] 5. Gate Beres on a succeeded terminal result matching the single observed working run; regress stale/ambiguous/failure/cancelled outcomes, verify real local success/failure/cancel through native runtime and API, and update review/proof without commit/push/deploy.

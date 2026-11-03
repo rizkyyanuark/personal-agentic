@@ -33,9 +33,9 @@ in a new tab. `/organization/live-preview` uses the same standalone view.
 Agent cards focus their original desk; character name tags follow the character.
 Owner-only setup and mapping remain in the main application. The office observes
 real work started through chat or Actions and never starts work on its own.
-See the [current Live Office contracts](openspec/README.md) and
-[review/commit plan](src/cockpit/docs/live-office-review.md) for the accepted scope
-and verification limits.
+See the [Live Office review record](src/cockpit/docs/live-office-review.md) for
+the accepted scope and verification limits. Detailed OpenSpec contracts remain
+local and are not included in a fresh clone.
 
 The React UI and Three.js scene are private npm workspaces under `src/frontend`
 and `src/cockpit`. Install web dependencies with `npm ci` from `src`; Docker builds
@@ -43,7 +43,7 @@ one frontend bundle served by Rust on the same origin. See [the cockpit workspac
 
 ## Development contracts
 
-Use [the AI-assisted development workflow](docs/development.md), [the architecture map](ARCHITECTURE.md), and [change contracts](openspec/README.md) when developing this product. GitLab Issues own priority and work status; versioned contracts own scope, scenarios, task dependencies and acceptance evidence. Changes to API, data, access, runtime or deployment need a contract; small fixes use the MR checklist. [AGENTS.md](AGENTS.md) defines the required real-product proof.
+Use [the development workflow](docs/development.md), [contribution rules](CONTRIBUTING.md), and [architecture map](ARCHITECTURE.md). GitLab issues/MRs record approved scope, acceptance criteria, decisions and evidence summaries. OpenSpec proposals, specs and tasks remain local; changes to behavior, API, data, access, runtime or deployment need an approved contract, while small fixes use the MR checklist. [AGENTS.md](AGENTS.md) defines agent authority and required proof. Publication needs permission; merge needs separate permission and triggers the automatic release described in the [deployment runbook](docs/deployment.md).
 
 ## Development and releases
 

@@ -106,4 +106,6 @@ neither a previous stop marker nor a previous progress file for a new workload.
 
 Docker semantics: [image removal](https://docs.docker.com/reference/cli/docker/image/rm/)
 and [builder-specific cache pruning](https://docs.docker.com/reference/cli/docker/buildx/prune/).
-Contract and acceptance: [OPS-001](../../openspec/changes/archive/2026-10-14-OPS-001-host-hygiene-and-resource-governance/proposal.md).
+Historical contract: `OPS-001`, retained in the local OpenSpec archive and not
+included in a fresh clone. The operational commands and checks are documented in
+this runbook.

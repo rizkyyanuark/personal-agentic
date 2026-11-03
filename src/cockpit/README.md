@@ -15,8 +15,8 @@ the camera. Scene selection never navigates to agent configuration.
 The original virtual-kantor HUD, typography and mobile dock remain, scoped to
 container dimensions. The earlier floating React overlay and its focus-trap suite
 are retained as legacy code/tests, not the current entrypoint. See
-[review and commit plan](docs/live-office-review.md) and the current contract index
-in [OpenSpec](../../openspec/README.md).
+[review and commit plan](docs/live-office-review.md) for the shared delivery record.
+Detailed OpenSpec contracts remain local and are not included in a fresh clone.
 
 Mapped identity labels read the Organization `position`, never its long `role`
 description. Empty mapped positions omit the badge; unmapped slots retain their
