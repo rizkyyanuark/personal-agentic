@@ -458,7 +458,9 @@ read-only behavior must still hold.
 Packaged native ARM64 image smoke runs on protected main and uses actual
 SQLite/auth/UI/cockpit/asset paths. Local AMD64 acceptance does not establish
 latest ARM64 CI, installed production helper or release activation. Record the
-exact revision, proof and pending dependencies in [CI-003](../openspec/changes/archive/2026-10-14-CI-003-simple-automatic-releases/proposal.md).
+exact revision, proof and pending dependencies in the release issue/MR, following
+the [deployment runbook](../docs/deployment.md). The historical `CI-003` contract
+remains in the local OpenSpec archive and is not included in a fresh clone.
 
 ## Organization Live Preview
 

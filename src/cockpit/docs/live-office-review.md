@@ -58,8 +58,11 @@ The condition and wording existed at HEAD, so this was not introduced by the
 original diff. The owner subsequently authorized correcting it: actual succeeded
 outcome must match the observed working run ID. This is now implemented and real
 success/failure/cancel cases verify Beres counts 1/0/0. See
-[completion verification](../../../openspec/changes/refine-live-office-presentation/verification-completion.md)
+the local OpenSpec record
+`openspec/changes/refine-live-office-presentation/verification-completion.md`
 for implementation, run IDs, automatic review distinction and remaining limits.
+That detailed record is not included in a fresh clone; the outcome above is the
+shared summary, not a replacement for its original execution evidence.
 
 The baseline also references missing general `docs/development.md` and
 `docs/deployment.md`; those repository-wide documentation gaps predate this batch.

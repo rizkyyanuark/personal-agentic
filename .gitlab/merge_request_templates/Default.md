@@ -1,25 +1,52 @@
 ## Ringkasan Perubahan
 
-<!-- Tuliskan 1-2 kalimat ringkas mengenai apa yang berubah dan apa manfaatnya bagi pengguna atau sistem. Hindari kata hiasan tanpa bukti seperti seamless, robust, atau cutting-edge. -->
+<!-- Jelaskan masalah, perilaku sebelum/sesudah dan manfaatnya dalam 1-2 kalimat. -->
+
+## Scope dan Kriteria Selesai
+
+<!-- Tautkan issue; gunakan Closes #N bila merge menyelesaikannya. Ringkas scope,
+acceptance criteria, keputusan penting dan yang di luar scope. Review harus cukup
+tanpa chat privat atau OpenSpec lokal. -->
 
 ## Kategori Perubahan
 
-- [ ] `feat`: Penambahan fungsionalitas atau fitur baru
-- [ ] `fix`: Perbaikan bug atau kesalahan logika
-- [ ] `chore`: Pemeliharaan, dependensi, atau konfigurasi repositori
-- [ ] `refactor`: Perapihan struktur kode tanpa mengubah perilaku luar
-- [ ] `docs`: Pembaruan dokumentasi atau panduan kerja
+- [ ] `feat`: Fungsionalitas baru
+- [ ] `fix`: Perbaikan perilaku atau logika
+- [ ] `chore`: Pemeliharaan, dependency atau konfigurasi
+- [ ] `refactor`: Penataan kode tanpa perubahan perilaku luar
+- [ ] `docs`: Dokumentasi
 
 ## Bukti Pengujian Nyata
 
-Semua perubahan wajib melalui pengujian nyata sebelum merge disetujui. Lengkapi tabel berikut dengan perintah aktual yang dijalankan dan hasil konkretnya:
+<!-- Isi baris sesuai scope dengan perintah, exit code/status dan hasil aktual.
+Jangan mempertahankan contoh hasil seolah sudah diuji. Untuk docs-only, catat
+pemeriksaan diff/link/source dan bahwa runtime tidak berubah. Sebutkan dependency
+nyata, mocks beserta alasan, kegagalan awal dan batas bukti. Raw state/log privat
+tetap ignored; jangan unggah credential. -->
 
-| No | Cakupan / Skenario | Perintah yang Dijalankan | Hasil (Exit Code / Status) | Bukti / Catatan Singkat |
-|---|---|---|---|---|
-| 1 | Uji fungsional / unit | `npm test` atau `cargo test` | Pass (exit code 0) | Seluruh test suite lulus |
-| 2 | Verifikasi integrasi | `curl` endpoint atau CLI run | HTTP 200 / output valid | Bukti payload terverifikasi |
+| Cakupan / Skenario | Perintah / Jalur yang Diuji | Exit Code / Status | Hasil Aktual dan Bukti |
+| --- | --- | --- | --- |
 
 ## Dampak Produksi dan Rencana Rollback
 
-- **Dampak sistem**: Apakah perubahan ini membutuhkan migrasi data, variabel lingkungan (`.env`) baru, atau restart container?
-- **Rencana rollback**: Jika verifikasi pasca rilis gagal, tindakan konkret apa yang harus dilakukan (contoh: revert commit, gunakan image sebelumnya)?
+- Dampak UI/API dan pekerjaan aktif:
+- Migrasi, kompatibilitas schema, env/config atau dependency baru:
+- Worker yang membutuhkan paket/upgrade, atau tidak terdampak:
+- Smoke pasca rilis dan batas izin pengujiannya:
+- Tindakan rollback, target/kompatibilitas dan risiko data:
+
+<!-- Isi setiap poin; "tidak ada" jika sudah diverifikasi. Merge ke protected main
+memicu deploy otomatis setelah pemeriksaan main sukses. Jangan menjanjikan
+rollback image membalik migrasi atau memulihkan database. -->
+
+## Kesiapan Merge
+
+- [ ] Diff direview; hanya file dalam scope, tanpa credential/state/build.
+- [ ] Bukti lokal sesuai revisi; keterbatasan dinyatakan.
+- [ ] Pipeline MR SHA terbaru lulus dan temuan review diselesaikan.
+- [ ] Squash commits dan Delete source branch dipilih.
+- [ ] Pemilik memberi izin merge dengan memahami deploy otomatis setelahnya.
+
+<!-- Buat Ready setelah review lokal; CI boleh masih berjalan. Checklist merge
+tidak otomatis selesai saat MR dibuat. Draft untuk pekerjaan yang belum selesai
+atau permintaan eksplisit. Jangan aktifkan auto-merge tanpa izin. -->

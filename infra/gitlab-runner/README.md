@@ -31,7 +31,8 @@ HTTP 200, maximum 1,108 ms, without OOM or restart. The backend job took 29 minu
 host swap peaked at 3,327 MiB and available RAM fell to 270 MiB. Linking creates
 substantial swap/I/O load. This verifies the observed bounded build and does not
 establish capacity for concurrent projects; detailed proof is in
-[CI-003](../../openspec/changes/archive/2026-10-14-CI-003-simple-automatic-releases/proposal.md).
+`CI-003` in the local OpenSpec archive (not included in a fresh clone). See the
+[deployment runbook](../../docs/deployment.md) for the shared release procedure.
 
 Preserve the image registration's `buildkit-seccomp.json`, `buildkit.apparmor`
 and `infra/ci/buildkit-runc.sh` for the restricted keyring operation. Verification

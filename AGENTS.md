@@ -1,4 +1,45 @@
-\# AGENTS.md
+# AGENTS.md
+
+## Shared development and release policy
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md), [docs/development.md](docs/development.md)
+and, for releases, [docs/deployment.md](docs/deployment.md). These versioned
+documents are the shared reference across agents and chats. Recheck the current
+checkout, source and GitLab state; earlier chat reports are dated evidence.
+Explicit task instructions control the authorized scope. Do not change CI,
+project settings or a different MR as incidental cleanup.
+
+- After scope and implementation are approved, complete local coding, relevant
+  verification and diff review without asking about each routine step. Create a
+  work branch from current GitLab main before coding. Preserve dirty work; a
+  separate worktree is an option, not a requirement.
+- Prepare a concrete reviewed diff, then obtain publication permission for
+  commit/push/MR together. Permission for only a subset remains limited to that
+  subset. Never commit as incidental housekeeping.
+- After publication is authorized, monitor CI to completion and fix failures
+  within scope, including corrective commits/pushes. Do not weaken checks. Ask
+  before expanding scope or changing infrastructure. Report external blockers
+  rather than retrying indefinitely. Explicit stop instructions still apply.
+- Create an MR Ready after local implementation, tests and review are complete.
+  Draft is for unfinished work, unresolved scope or an explicit request. Ready
+  does not authorize merge. Keep auto-merge off unless explicitly approved.
+- Merge requires separate explicit owner permission. With current CI, that also
+  authorizes automatic production release after main checks. If told to merge
+  without deploying, stop before merge and explain the conflict.
+- After authorized merge, monitor main and perform relevant non-destructive
+  release checks. Agent tasks, paid provider calls and data-changing production
+  tests require explicit scope/permission. Merge permission does not grant
+  blanket permission for database restore, rollback or server changes.
+  Source fixes after merge use a new branch/MR with appropriate authorization;
+  never direct-push main or reuse a merged MR's publication permission.
+- Keep OpenSpec artifacts local. Record approved scope, acceptance criteria,
+  decisions and sanitized evidence in the issue/MR so other agents can continue
+  without private chat or local contracts. Do not force-add ignored OpenSpec or
+  silently remove already tracked history.
+- Documentation-only changes need diff/link/source checks, not an invented
+  runtime proof or unsolicited production execution. Report that runtime was
+  unchanged. Existing product proof rules below apply to code/behavior changes.
+
 
 
 

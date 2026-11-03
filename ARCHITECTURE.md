@@ -53,6 +53,6 @@ GitLab self-hosted menjadi canonical; GitHub adalah downstream mirror. Dev dan p
 
 ## Perubahan arsitektur
 
-Perubahan API, auth, session, schema, artifact/path, runtime atau release memerlukan kontrak eksplisit. [Indeks kontrak Live Office](openspec/README.md) mencatat scope dan precedence perubahan kantor yang sedang ditinjau. Tambahkan ADR ketika keputusan memengaruhi beberapa capability. Pertahankan boundary yang ada sebelum membuat modul/persistence paralel.
+Perubahan API, auth, session, schema, artifact/path, runtime atau release memerlukan kontrak eksplisit. OpenSpec dikelola lokal; issue/MR menyimpan ringkasan scope, keputusan dan acceptance yang dapat dibaca bersama sesuai [panduan development](docs/development.md). Tambahkan ADR ketika keputusan memengaruhi beberapa capability. Pertahankan boundary yang ada sebelum membuat modul/persistence paralel.
 
 [UPSTREAM](src/UPSTREAM.md) mencatat CCCC/Paperclip dan provenance komponen. Gunakan source reference untuk keputusan teknis; jangan menganggap kedua proyek mempunyai environment, adapter atau kebijakan development yang sama dengan personal-agentic.
