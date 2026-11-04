@@ -248,6 +248,14 @@ export async function verifyAccountProfile({ page, call, org, directory, base, o
       const ownerMe = await call("/me", undefined, "GET");
       assert.equal(ownerMe.user, "owner");
       assert.equal(ownerMe.matrix, true, "GET /me retains the existing matrix field");
+      try {
+        const directories = await call("/workspaces/directories", undefined, "GET");
+        assert(typeof directories.path === "string" && directories.path.length > 0, "Directory response must include its default path");
+        assert(Array.isArray(directories.roots) && Array.isArray(directories.folders), "Directory response must include roots and folders arrays");
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Profile prepare directory preflight failed: ${reason}. Check controller availability and bootstrap-owner access in the default workspace.`);
+      }
       const suffix = randomUUID().slice(0, 8);
       manifest = { version: 1, base, createdAt: proof.at, workspaces: [], owner: { user: "owner", originalName: ownerMe.display_name ?? null }, member: { user: human.user_id } };
       await writeFile(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
@@ -370,19 +378,19 @@ export async function verifyAccountProfile({ page, call, org, directory, base, o
       const deniedAction = { id: randomUUID(), group_id: "general", title: `Denied profile action ${suffix}`, body: "No provider execution", assignee_id: "", planned_start: null, status: "backlog", revision: 0 };
       await api(memberContext, "/actions", { method: "POST", data: deniedAction, workspace: workspaceA.id, status: 403 });
       await api(memberContext, `/tenants/${workspaceA.id}/members`, { method: "POST", data: { user: human.user_id, role: "owner" }, status: 403 });
-      await api(memberContext, "/workspaces/directories?path=/workdir", { workspace: workspaceA.id, status: 403 });
+      await api(memberContext, "/workspaces/directories", { workspace: workspaceA.id, status: 403 });
       await switchWorkspace(memberPage, workspaceB.id);
       await assertProfile(memberPage, human.user_id, manifest.member.name, "owner");
       await menuPermissions(memberPage, { owner: true, controller: false });
-      await api(memberContext, "/workspaces/directories?path=/workdir", { workspace: workspaceB.id, status: 403 });
+      await api(memberContext, "/workspaces/directories", { workspace: workspaceB.id, status: 403 });
       await switchWorkspace(ownerPage, workspaceA.id);
       await assertProfile(ownerPage, "owner", manifest.owner.name, "owner");
       await menuPermissions(ownerPage, { owner: true, controller: false });
-      await api(ownerContext, "/workspaces/directories?path=/workdir", { workspace: workspaceA.id, status: 403 });
+      await api(ownerContext, "/workspaces/directories", { workspace: workspaceA.id, status: 403 });
       await switchWorkspace(ownerPage, "default");
       await assertProfile(ownerPage, "owner", manifest.owner.name, "owner");
       await menuPermissions(ownerPage, { owner: true, controller: true });
-      await api(ownerContext, "/workspaces/directories?path=/workdir", { workspace: "default" });
+      await api(ownerContext, "/workspaces/directories", { workspace: "default" });
       assert.deepEqual(await avatarSnapshot(ownerPage), originalAvatars, "Account edits must preserve real agent avatar initials and colors");
       proof.cases.push({ scenario: "two browser identities and workspace roles", owner: "owner", member: human.user_id, memberRoles: ["member", "owner"], memberActionStatus: 403, controllerRestricted: true, permissionAwareMenu: true, agentAvatarsUnchanged: true });
       const staleResponses = [];
@@ -479,7 +487,7 @@ export async function verifyAccountProfile({ page, call, org, directory, base, o
       await assertProfile(ownerPage, "owner", manifest.owner.name, "owner");
       await switchWorkspace(memberPage, workspace.id);
       await assertProfile(memberPage, manifest.member.user, manifest.member.name, workspace.memberRole);
-      await api(memberContext, "/workspaces/directories?path=/workdir", { workspace: workspace.id, status: 403 });
+      await api(memberContext, "/workspaces/directories", { workspace: workspace.id, status: 403 });
     }
     assert.deepEqual(await snapshots(ownerContext, manifest.workspaces), manifest.before);
     await switchWorkspace(ownerPage, "default");
