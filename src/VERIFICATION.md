@@ -305,28 +305,86 @@ own restart result.
 ## Account profile verification
 
 The `account-profile` phase uses two real browser contexts, the owner-key login
-and an existing human account on the local Matrix fixture. Supply the ignored
-fixture credentials file via `AE_TEST_MATRIX_CREDENTIALS_FILE`; never put the
-password or owner key in a command or receipt. Run from `src/frontend` against a
-disposable candidate with its Matrix homeserver reachable:
+and an existing human account on a local Matrix homeserver. Use a disposable
+loopback controller with matching backend/frontend revisions, real SQLite and
+ONNX Runtime, the installed Playwright dependencies and Microsoft Edge (or set
+`AE_TEST_BROWSER_EXECUTABLE`). The private credentials JSON must contain
+`human.username`, `human.password` and `human.user_id`. Never put a password or
+owner key in a command or public receipt. This phase creates no agent/provider
+task; do not run it against an ordinary organization or production.
+
+### Windows native prepare and recovery
+
+Start the native controller with its own organization and local Matrix settings.
+Pass paths as separate, quoted arguments; a path such as `Profile fixtures/Profilé
+org` must work without creating a Unix `/workdir` directory. Set `AE_TEST_ORG` to
+that existing organization and `AE_TEST_MATRIX_CREDENTIALS_FILE` to its private
+fixture file. From `src/frontend`:
 
 ```powershell
+$env:AE_TEST_URL = 'http://127.0.0.1:18862'
+$env:AE_TEST_ORG = (Resolve-Path $env:AE_TEST_ORG).Path
+$env:AE_TEST_MATRIX_CREDENTIALS_FILE = (Resolve-Path $env:AE_TEST_MATRIX_CREDENTIALS_FILE).Path
+$env:AE_TEST_DISPOSABLE = 'true'
+$env:AE_TEST_NO_PROVIDER = 'true'
 $env:AE_TEST_PROFILE_PHASE = 'prepare'
 node tests/native-smoke.mjs account-profile
-# From the repository root, restart the same candidate with the host verifier.
-# Its receipt must be available in the browser runner's evidence directory.
-$env:AE_TEST_PROFILE_PHASE = 'verify'
+# After inspecting the prepared fixture, explicitly restore its owned state.
+$env:AE_TEST_PROFILE_PHASE = 'cleanup'
 node tests/native-smoke.mjs account-profile
 ```
 
 Prepare tests 64/65 Unicode scalar input through the actual form, trim,
 clear/fallback, reload, plain-text rendering, invalid API payloads, auth/origin
 denials, independent owner/Matrix names, workspace roles and menu permissions.
-Verify resumes the same authenticated sessions after a real host restart, checks
-identity/profile/membership and agent state, and cleans up only its own fixtures.
+Before creating workspaces or changing names, prepare calls
+`GET /api/workspaces/directories` without a fixed path and requires a nonempty
+default path plus `roots` and `folders` arrays. A failure identifies the directory
+preflight and bootstrap-owner/default-workspace requirement. Restricted contexts
+must still return exactly 403; using the default directory does not relax access.
+An unfinished private manifest must be cleaned up before starting another prepare.
+
+Cleanup is explicit, not an automatic rollback guarantee. It restores recorded
+names, soft-deletes recorded workspaces and revokes recorded browser sessions.
+It does not run the prepare directory preflight. A failure before a fixture write
+needs no fixture rollback; after interruption, recovery depends on the manifest
+having recorded the affected fixture and the controller/Matrix being reachable.
 Private browser storage states live in ignored `account-profile/` evidence with
 restricted permissions; only sanitized `prepare.json`/`verify.json` and screenshots
-are review artifacts. `AE_TEST_PROFILE_PHASE=cleanup` recovers an interrupted run.
+are review artifacts. Record cleanup success separately and check restored names,
+soft deletions, old-session 401 responses, unrelated memberships/agents and zero
+actions/runs. Negative acceptance should use a real non-default workspace 403
+before any suite writes, then a separately recorded prepare interrupted by losing
+an actual committed PUT response. Label this network fault injection; successful
+API responses and persistence must remain real.
+
+### Docker prepare, restart and verify
+
+Native prepare/cleanup does not prove restart persistence. `verify` still requires
+the existing host Docker receipt; native-process restart support is outside this
+suite's contract. Use a separate owned container matching the application revision,
+with a loopback port and its organization/evidence mounted on the host. Reuse its
+URL, private Matrix file and organization across all three commands below. From
+`src/frontend`, after setting the same disposable flags as above:
+
+```powershell
+$env:AE_TEST_URL = 'http://127.0.0.1:18863'
+$env:AE_TEST_CONTAINER = 'profile-path-11-controller'
+$env:AE_TEST_EVIDENCE_DIR = Join-Path $env:AE_TEST_ORG '.state/verification'
+$env:AE_TEST_PROFILE_PHASE = 'prepare'
+node tests/native-smoke.mjs account-profile
+node ../scripts/verify-candidate-restart.mjs
+$env:AE_TEST_PROFILE_PHASE = 'verify'
+node tests/native-smoke.mjs account-profile
+```
+
+The host helper restarts only that container and writes `container-restart.json`
+in `AE_TEST_EVIDENCE_DIR`. Verify requires a real container ID, changed start time
+and PID, a restart after prepare, and measured endpoint readiness. It resumes the
+same authenticated sessions, checks persisted names/memberships and exact 403
+directory denials, then cleans its fixtures. Missing or invalid receipts must
+fail; never invent a receipt to make native verification pass. If interrupted,
+use the explicit cleanup command above against this same container organization.
 
 The existing `action-feedback-review` phase separately proves PUT A commits while
 its response is lost, draft B remains after **Check saved profile**, and only one
@@ -967,7 +1025,11 @@ do not commit them. This section documents checks, not a claim they have run.
 
 Use a disposable loopback controller with its exact backend revision, current frontend assets, real SQLite, local Synapse and an existing disposable Matrix account. Do not run these mutations against a normal local organization or production. No worker or agent task is needed. Keep credentials and receipts in ignored `.state` paths.
 
-From `src/frontend`, set `AE_TEST_URL`, `AE_TEST_ORG`, `AE_TEST_DISPOSABLE=true` and `AE_TEST_MATRIX_CREDENTIALS_FILE` (a private JSON file containing `human.username`, `human.password`, `human.user_id`). Run `node tests/native-smoke.mjs account-profile` with `AE_TEST_PROFILE_PHASE=prepare`, restart only the disposable controller, and capture its container ID, PID/start time before/after and endpoint readiness latency in `container-restart.json` under the harness verification directory. Then run the same command with `AE_TEST_PROFILE_PHASE=verify`; it confirms persistence/login and restores original names/deletes its test workspaces. Use `cleanup` if interrupted. The existing test distinguishes inline invalid-field guidance from one save outcome toast. A local aborted PUT exposes saved-value inspection; delayed real PUT/GET responses exercise workspace ownership.
+Follow [Account profile verification](#account-profile-verification) for Windows
+prepare/cleanup, directory prerequisites and the separate Docker restart contract.
+The existing test distinguishes inline invalid-field guidance from one save
+outcome toast. A local aborted PUT exposes saved-value inspection; delayed real
+PUT/GET responses exercise workspace ownership.
 
 Run `node tests/native-smoke.mjs group-search` against the same disposable controller. The suite creates three groups, ordinary messages without recipients, a document and two red-circle images, and indexes the files through the real knowledge API. It verifies keyword/document/image matches, file access, group isolation, explicit submission, UTF-8 limits, request cancellation, one error toast and keyboard/responsive behavior. Successful search responses must remain real. Route delays and a deliberate request abort are failure/timing injection only, documented in its receipt. Keep actual model-cache/index dependencies available locally; report a missing dependency rather than replacing successful results with mocks or using a server fallback.
 
