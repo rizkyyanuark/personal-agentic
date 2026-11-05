@@ -88,6 +88,26 @@ try {
     results.push({ scenario: "real service restart preserves classification and profiles", status: "Passed", modelCount: catalog.models.length });
   } else {
     assert.equal(host.location, "unspecified", "Seed the candidate with a genuine legacy record without location");
+    let controllerWorkdir;
+    try {
+      let controllerPath = process.env.AE_TEST_CONTROLLER_WORKDIR;
+      if (controllerPath === undefined) {
+        const directories = await call("/workspaces/directories");
+        assert(typeof directories?.path === "string" && directories.path.trim(), "Directory response must include a nonempty default path");
+        assert(Array.isArray(directories.roots) && Array.isArray(directories.folders), "Directory response must include roots and folders arrays");
+        controllerPath = directories.path;
+      }
+      assert(controllerPath.trim(), "AE_TEST_CONTROLLER_WORKDIR must not be empty");
+      const probe = await call("/workspaces/probe", { path: controllerPath, harness: "antigravity", ssh_host: null, runtime_id: null });
+      assert(typeof probe?.workspace?.path === "string" && probe.workspace.path.trim(), "Probe response must include a nonempty workspace path");
+      assert.equal(probe.workspace.ssh_host, null, "Controller prerequisite must not use SSH");
+      assert.equal(probe.workspace.runtime_id, null, "Controller prerequisite must not use a registered runtime");
+      controllerWorkdir = probe.workspace.path;
+      results.push({ scenario: "controller directory prerequisite", status: "Passed", source: process.env.AE_TEST_CONTROLLER_WORKDIR === undefined ? "controller default" : "explicit override", directory: controllerWorkdir, sshHost: null, runtimeId: null });
+    } catch (error) {
+      const reason = (error instanceof Error ? error.message : String(error)).replaceAll(token, "[REDACTED]");
+      throw new Error(`Workstation location initial controller prerequisite failed: ${reason}. Check the controller directory or AE_TEST_CONTROLLER_WORKDIR; AE_TEST_WORKDIR is the SSH path.`);
+    }
     const anonymous = await fetch(`${base}/api/workstations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workstation: host }) });
     assert.equal(anonymous.status, 401);
     const invalid = await context.request.post("/api/workstations", { data: { workstation: { ...host, location: "unsupported" } } });
@@ -105,7 +125,7 @@ try {
     await page.keyboard.press("Enter");
     await expectValue(page.locator("#host-location"), "local_host");
     await page.getByRole("button", { name: "Save workstation", exact: true }).click();
-    await expect(page.getByRole("status").filter({ hasText: "Workstation saved" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Action notifications" }).getByText(`${host.name}: workstation saved. Test the connection before attaching a workdir.`, { exact: true })).toBeVisible();
     await page.reload();
     await page.getByRole("button", { name: "SSH workstations", exact: true }).click();
     await page.getByRole("navigation", { name: "Saved workstations" }).getByRole("button", { name: /Workspace/ }).click();
@@ -197,8 +217,9 @@ try {
     await expectValue(page.locator("#workstation-host"), alias);
     assert.equal(await selectedGroup(page.locator("#workstation-host")), "Saved SSH");
     assert.match((await readOptions(page.locator("#workstation-host"))).find(option => option.value === alias)?.label ?? "", /Existing SSH alias/);
-    const direct = await call("/workspaces/probe", { path: "/workdir", harness: "antigravity", ssh_host: null });
+    const direct = await call("/workspaces/probe", { path: controllerWorkdir, harness: "antigravity", ssh_host: null, runtime_id: null });
     assert.equal(direct.workspace.ssh_host, null);
+    assert.equal(direct.workspace.runtime_id, null);
     const missing = await context.request.post("/api/workspaces/probe", { data: { path: workdir, harness: "antigravity", ssh_host: "ws-location-unavailable" } });
     assert.equal(missing.status(), 400);
     const failed = await context.request.get(`/api/harness/settings?harness=antigravity&ssh_host=${encodeURIComponent(remote.id)}`);
