@@ -450,7 +450,23 @@ sessions, credentials, or configuration must not be edited for this smoke.
 
 From `src`, set private `AE_TEST_URL`, `AE_TEST_OWNER_KEY_FILE`,
 `AE_TEST_WORKSTATION_ID`, `AE_TEST_SSH_ALIAS`, `AE_TEST_WORKDIR`,
-`AE_TEST_PROOF_DIR`, and `AE_TEST_DISPOSABLE=true`, then run:
+`AE_TEST_PROOF_DIR`, and `AE_TEST_DISPOSABLE=true`.
+
+`AE_TEST_WORKDIR` is the directory on the SSH workstation. The controller uses
+its own default directory from `GET /api/workspaces/directories`. Set the optional
+`AE_TEST_CONTROLLER_WORKDIR` only when the fixture needs another existing
+controller directory. These paths can differ and are interpreted on their target
+machines, not resolved against the browser runner. Windows controller paths may
+contain spaces and Unicode; a Linux controller need not have a `/workdir` mount.
+An explicitly empty or invalid override fails rather than selecting another path.
+
+Before `initial` changes any workstation, agent or project, it validates the
+discovered directory response and probes the selected directory with no SSH host
+or registered runtime. A failure reports the `initial` controller prerequisite
+and leaves those application entities unchanged. Choose a readable absolute
+directory that is not a filesystem root; a directory that can be browsed may
+still be unsuitable as an attached workdir. The later direct-execution check
+probes the verified controller path again. SSH checks retain their original target.
 
 Run the client where its disposable owner key is already available. On Linux,
 set `AE_TEST_BROWSER_EXECUTABLE` to the installed Chromium executable; otherwise
@@ -471,6 +487,64 @@ unavailable target, and failed-catalog refusal. It records desktop/mobile and CS
 zoom screenshots and checks that no provider task was added. The restart phase
 checks the same saved ID, location, agent/project state and catalog after a real
 service restart. Screenshots and the private restart manifest stay outside Git.
+
+Controller-directory preflight runs only during `initial`; `restart` keeps its
+existing SSH/candidate prerequisites and does not require the override or a new
+directory-discovery request. Capture real candidate PID/start identity and
+readiness around the restart. Catalog reads do not authorize agent/inference tasks.
+
+The acceptance matrix uses a Windows browser runner for both controllers:
+
+| Controller | Initial controller directory | SSH directory | Restart |
+| --- | --- | --- | --- |
+| Windows native | Discovered parent of the disposable org, with spaces and Unicode in that parent | Existing directory on the SSH account | Stop the recorded owned PID, start the same binary with the same org/arguments, wait for health readiness |
+| Linux container | Explicit `/data/controller-fixture`, with no `/workdir` mount | A different existing directory on the same SSH account | `docker --context desktop-linux restart $containerName`, retaining the container ID and data, then wait for health readiness |
+
+From `src` in PowerShell, after setting the candidate URL, private owner-key
+file, workstation ID, SSH alias, proof directory and disposable flag above:
+
+```powershell
+$env:AE_TEST_WORKDIR = "/home/ubuntu/workstation-location-test"
+Remove-Item Env:AE_TEST_CONTROLLER_WORKDIR -ErrorAction SilentlyContinue
+node frontend/tests/workstation-location.mjs initial
+```
+
+For the separate Linux candidate, use its own URL/key/workstation/proof inputs
+and set `$env:AE_TEST_CONTROLLER_WORKDIR = "/data/controller-fixture"` before
+the same initial command. The SSH path must exist on the selected test account;
+the path above is the acceptance fixture, not a required application directory.
+After each candidate's real restart and readiness check, run:
+
+```powershell
+$env:AE_TEST_CONTROLLER_WORKDIR = "invalid-unused-restart-path"
+node frontend/tests/workstation-location.mjs restart
+```
+
+Verify no new discovery/local-probe request occurs in restart. Keep phase exit
+codes, source hashes, PID/start or container/start identity, readiness, screenshots
+and run counts in ignored evidence. The Windows parent directory itself must
+contain Unicode; putting Unicode only in the org's final path component does
+not exercise a Unicode directory returned by default discovery.
+
+The Linux controller needs its own trusted SSH alias and access to the approved
+transport key; a Windows alias/key path is not portable into the container.
+Use fixture-only configuration with Linux ownership/permissions and mount only
+the approved transport key read-only. Keep provider login on the SSH account;
+do not copy provider credentials or mount the whole host SSH home. Confirm the
+chosen backend image can execute on the local Docker architecture before setup.
+The remote bridge needs Python 3.11+, Git and `agy models` returning a real,
+nonempty catalog within its 20-second timeout with stdin closed.
+
+Recovery is explicit. If controller preflight fails, correct the fixture directory
+and retry: workstation, agent and project mutations have not started. An unrelated
+failure later in `initial` can leave changed host locations and created records,
+while the restart manifest is written only after initial checks finish. Inspect
+owned fixture IDs and retain failure evidence before restoring those fixtures or
+starting a fresh disposable candidate. Restore the legacy `unspecified` starting
+condition only on the owned test workstation; do not bypass its assertion or
+invent a successful manifest. Preserve successful initial fixtures until restart
+verification finishes, then restore or dispose only owned resources and revoke
+their sessions. No automatic rollback for every interruption is promised.
 
 Local is an owner-declared host location, not verification of machine identity or
 host-key trust. Application environment means the container on Docker, and the
