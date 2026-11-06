@@ -153,6 +153,8 @@ async fn main() -> Result<()> {
         model::Message::export_all_to(&directory)?;
         model::Event::export_all_to(&directory)?;
         cockpit::CockpitState::export_all_to(&directory)?;
+        platform::public_office::PublicOfficeState::export_all_to(&directory)?;
+        platform::public_office::OfficePublication::export_all_to(&directory)?;
         codex_settings::CodexSettings::export_all_to(&directory)?;
         workspaces::DirectoryView::export_all_to(&directory)?;
         terminal::TerminalRun::export_all_to(&directory)?;

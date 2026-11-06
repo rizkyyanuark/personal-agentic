@@ -35,7 +35,7 @@ try {
   await expect(page.getByRole("img", { name: "Orion reports to Workspace owner", exact: true })).toHaveCount(1);
   for (const name of ["Nova", "Atlas", "Lyra", "Axiom"])
     await expect(page.getByRole("img", { name: `${name} reports to Orion`, exact: true })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Live Preview", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Workspace preview", exact: true })).toBeVisible();
   if (process.env.AE_TEST_ARRANGE_ORG === "true") {
     await page.getByRole("button", { name: "Auto arrange", exact: true }).click();
     await expect.poll(async () => {
@@ -45,7 +45,7 @@ try {
     await page.getByRole("button", { name: "Fit View", exact: true }).click();
   }
   await page.screenshot({ path: path.join(proofDirectory, "deployed-organization.png"), fullPage: true });
-  await page.getByRole("button", { name: "Live Preview", exact: true }).click();
+  await page.getByRole("button", { name: "Workspace preview", exact: true }).click();
   await expect(page).toHaveURL(`${base}/organization/live-preview`);
   const host = page.locator('[data-testid="cockpit-host"]');
   await expect(host).toHaveAttribute("data-ready", "true", { timeout: 20000 });
@@ -62,7 +62,7 @@ try {
   await page.screenshot({ path: path.join(proofDirectory, "deployed-live-preview.png"), fullPage: true });
   for (const method of ["button", "backdrop", "escape"]) {
     await closePreview(page, method);
-    await page.getByRole("button", { name: "Live Preview", exact: true }).click();
+    await page.getByRole("button", { name: "Workspace preview", exact: true }).click();
     await waitForScene(page);
   }
   const layouts = [];
@@ -73,7 +73,7 @@ try {
     layouts.push(await verifyPreviewProportions(page));
     await page.screenshot({ path: path.join(proofDirectory, `deployed-live-preview-${label}.png`), fullPage: true });
     await closePreview(page);
-    await page.getByRole("button", { name: "Live Preview", exact: true }).click();
+    await page.getByRole("button", { name: "Workspace preview", exact: true }).click();
     await waitForScene(page);
     await verifyOverlay(page);
     await verifyPreviewProportions(page);

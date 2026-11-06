@@ -727,21 +727,35 @@ Pair the receipt with cockpit unit/check output and the tested frontend build ha
 Clock/random control in unit tests verifies deadline boundaries and eligibility;
 it is not a substitute for actual rendered timestamps or real provider evidence.
 
-Build the real service and frontend, configure the isolated candidate with the idle
-smoke above, then run `npm run test:e2e --workspace cockpit` from `src` with the same
-private owner key and a separate `AE_TEST_PROOF_DIR`. The standalone suite checks
-the Organization button opening `/office`, the `/organization/live-preview` alias,
-four desk camera views and actual mesh bounds, desktop/mobile, reduced motion,
-offline/recovery, public-read/authenticated-write boundaries, remount, workspace
-isolation, and unchanged profiles/runs. It uses real HTTP, SQLite, assets and WebGL.
-It records two minutes of production bubble timestamps with no API interception.
+Before running this retained idle smoke against `/office`, explicitly publish
+the disposable candidate's default workspace in Workspace settings. A fresh
+organization starts unpublished; a signed-in cookie no longer selects the public
+office. This setup publishes only the owned test fixture, never production.
+
+For public/private office acceptance, build the backend/frontend from the same
+checkout. Set `AE_TEST_BINARY` to the resulting native controller, optionally
+`AE_TEST_PROOF_DIR` to an ignored evidence directory and `ORT_DYLIB_PATH` to its
+external ONNX Runtime library when needed. From `src`, run
+`npm run test:e2e --workspace cockpit`. It launches its own loopback controller
+with a fresh SQLite org; it does not use `AE_TEST_URL` or production credentials.
+The Edge browser suite verifies explicit owner publication, two anonymous contexts,
+a signed-in viewer with another private selection, ignored visitor selectors,
+desktop/mobile, actual mapped character meshes/focus, same-target mount retention,
+authenticated private preview/filtering, restart, switch/stop, revoked/deleted
+targets and offline recovery. A real workspace rename must update existing
+public viewer titles while preserving the canvas and selected camera. Labeled
+stored activity fixtures prove descriptive
+feed/aggregate updates without invoking a provider. Real response transport is
+deliberately delayed/aborted to exercise stale-response and uncertain-save recovery;
+no successful API payload is fabricated. Receipts/screenshots remain ignored.
+Cleanup unpublishes, soft-deletes owned workspaces, revokes fixture sessions and
+stops the owned service. Inspect the receipt and screenshots before claiming pass.
 
 The older overlay suite is retained as `npm run test:e2e:legacy --workspace cockpit`.
-It currently fails because this checkout routes both office URLs to StandaloneOffice,
-while the suite expects an overlay and a button named Live Preview. Do not claim
-its overlay/focus-trap coverage passes for the standalone page. The owner approved
-the standalone acceptance contract on 2026-11-02; the historical coverage below
-describes the retained legacy scripts.
+It covers the authenticated private dialog, not the public standalone page. Its
+Organization trigger is **Workspace preview**; public navigation is **Public Live
+Office**. Run it against an owned service with its existing URL/key requirements.
+Its overlay/focus-trap coverage is separate from the public viewer matrix above.
 
 Legacy invocation: run `node frontend/tests/cockpit-live.mjs` from `src`
 with `AE_TEST_URL`, `AE_TEST_OWNER_KEY` and optionally `AE_TEST_PROOF_DIR` set.

@@ -1,7 +1,7 @@
 # Visual acceptance checklist
 
 Integration note (2026-10-06): run the package `test:e2e` command against the
-real personal-agentic Rust service. The standalone context suite verifies real
+real personal-agentic Rust service. The public/private suite verifies real
 entrypoints, camera, auth, filtering, transport and reduced motion. The presentation
 suite additionally captures widths 320/390/768/1024/1440 and a working mobile card.
 See `../../VERIFICATION.md` for commands and current scope. The integrated view preserves the original virtual-kantor design;

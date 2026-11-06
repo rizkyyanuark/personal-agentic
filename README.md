@@ -28,8 +28,10 @@ npm run build --workspace frontend
 
 See [platform documentation](src/README.md), [deployment and worker setup](src/DEPLOYMENT.md), [verification](src/VERIFICATION.md), and [upstream sources](src/UPSTREAM.md). `org/` and `workdir/` contain local state and attached codebases; both are excluded from Git.
 
-**Organization → Live Office** opens the standalone read-only office at `/office`
-in a new tab. `/organization/live-preview` uses the same standalone view.
+**Organization → Public Live Office** opens `/office` in a new tab. Every visitor,
+including signed-in users, sees the workspace explicitly published by the bootstrap
+owner in Workspace settings. Nothing is published automatically. **Workspace preview**
+opens the authenticated `/organization/live-preview` with private workspace/team selection.
 Agent cards focus their original desk; character name tags follow the character.
 Owner-only setup and mapping remain in the main application. The office observes
 real work started through chat or Actions and never starts work on its own.

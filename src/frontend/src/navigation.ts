@@ -100,7 +100,7 @@ export function parseRoute(url: string): Route {
 }
 export function routePath(route: Route, group?: Named, agent?: Named): string {
   let path =
-    route.view === "Profile" ? "/settings/profile" : route.view === "Workspace settings" ? "/settings/workspace" : route.view === "User settings" ? "/settings/runtime" : route.view === "Action board" ? "/actions" : route.view === "Live Preview" ? "/office" : route.view === "Organization"
+    route.view === "Profile" ? "/settings/profile" : route.view === "Workspace settings" ? "/settings/workspace" : route.view === "User settings" ? "/settings/runtime" : route.view === "Action board" ? "/actions" : route.view === "Live Preview" ? "/organization/live-preview" : route.view === "Organization"
       ? "/organization"
       : `/${group?.project ? "projects" : "groups"}/${encodeURIComponent(group ? slug(group) : route.groupId)}/${route.view.toLowerCase().replaceAll(" ", "-")}`;
   if (route.view === "Organization" && route.agentId)

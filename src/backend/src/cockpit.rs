@@ -1287,7 +1287,7 @@ mod tests {
             json!({}),
         )
         .await?;
-        assert_eq!(anonymous.0, StatusCode::OK);
+        assert_eq!(anonymous.0, StatusCode::UNAUTHORIZED);
         for (method, path) in [
             (Method::POST, "/api/cockpit/setup"),
             (Method::PUT, "/api/cockpit/mapping"),
@@ -1529,7 +1529,7 @@ fn reported_tokens(usage: &Value) -> Option<u64> {
     (count <= MAX_SAFE_INTEGER).then_some(count)
 }
 
-fn snapshot(app: &App, filter: Option<&str>) -> Result<CockpitState> {
+pub(crate) fn snapshot(app: &App, filter: Option<&str>) -> Result<CockpitState> {
     app.store.read(|conn| {
         let saved = mapping(conn)?;
         let profiles: HashMap<_, _> = store::list::<Agent>(conn, "agents")?.into_iter().map(|agent| (agent.id.clone(), agent)).collect();
