@@ -384,10 +384,11 @@ export function OrganizationChart({
           <Button
             variant="outline"
             data-testid="open-live-preview"
-            onClick={onLivePreview || (() => window.open("/office", "_blank", "noreferrer"))}
+            onClick={onLivePreview || (() => { location.href = "/organization/live-preview"; })}
           >
-            Live Office
+            Workspace preview
           </Button>
+          <Button variant="outline" onClick={() => window.open("/office", "_blank", "noreferrer")}>Public Live Office</Button>
           {role === "owner" && !projectName && (
             <Button variant="outline" onClick={() => setDeskAssignmentOpen(true)}>
               <Settings2 size={16} /> Assign desks

@@ -253,7 +253,7 @@ export async function verifyTouchPreview(browser, base, token, snapshot, proofDi
     assert((await context.request.post("/api/login", { data: { token } })).ok());
     await context.addCookies([{ name: "ae_workspace", value: snapshot.workspace_id, url: base, sameSite: "Strict" }]);
     await page.goto("/organization");
-    await page.getByRole("button", { name: "Live Preview", exact: true }).tap();
+    await page.getByRole("button", { name: "Workspace preview", exact: true }).tap();
     await waitForScene(page);
     await verifySnapshotUI(page, snapshot);
     const card = cockpitHost(page).locator('.agent-card[data-role="data_engineer"]');
@@ -451,5 +451,5 @@ export async function closePreview(page, method = "button") {
   await expect(previewDialog(page)).toHaveCount(0);
   await expect(cockpitHost(page)).toHaveCount(0);
   await expect(page).toHaveURL(/\/organization$/);
-  await expect(page.getByRole("button", { name: "Live Preview", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Workspace preview", exact: true })).toBeFocused();
 }

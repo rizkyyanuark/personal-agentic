@@ -10,6 +10,7 @@ import { ArrowRight, Eye, EyeOff, LoaderCircle, Settings2, Plus, Users, Building
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./components/ui/dialog";
 import "./platform-settings.css";
 import { MatrixInvitations } from "./MatrixInvitations";
+import { PublicOfficeSettings } from "./PublicOfficeSettings";
 type Tenant = { id: string; name: string; deleted: boolean; role: string };
 type Person = { user: string; role: string };
 export function WorkspaceGate() {
@@ -252,6 +253,7 @@ function SelectedWorkspaceSettings({
   };
 
   return <>
+    {user === "owner" && <PublicOfficeSettings tenants={tenants} />}
     <section className="settings-card">
       <div className="settings-section-title"><Plus size={18}/><h2>Create a workspace</h2></div>
       <form className="settings-inline-form" onSubmit={e => {

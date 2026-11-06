@@ -124,7 +124,6 @@ const OrganizationChart = lazy(() =>
   })),
 );
 const LivePreview = lazy(() => import("./LivePreview"));
-import StandaloneOffice from "./StandaloneOffice";
 
 type Session = {
   harness: Harness;
@@ -648,13 +647,6 @@ export default function App({
     await refresh();
     return artifact;
   }
-
-  if (route.view === "Live Preview")
-    return (
-      <main className="standalone-office-viewport" style={{ width: "100vw", height: "100dvh", position: "fixed", inset: 0, zIndex: 1000, overflow: "hidden", margin: 0, padding: 0 }}>
-        <StandaloneOffice />
-      </main>
-    );
 
   if (authenticated !== true)
     return (
@@ -1566,7 +1558,7 @@ export default function App({
                     setSelectedAgent(id);
                   }}
                   onAdd={() => { setNewAgentProject(""); setNewAgent(true); }}
-                  onLivePreview={() => window.open("/office", "_blank", "noreferrer")}
+                  onLivePreview={() => navigate("/organization/live-preview")}
                   role={role}
                   workspaceId={workspaceId}
                   onRefresh={refresh}

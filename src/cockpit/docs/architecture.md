@@ -1,19 +1,33 @@
 # Integrated cockpit architecture
 
-The production user path is **Organization → Live Office**, which opens `/office`
-in a new tab. `/organization/live-preview` mounts the same `StandaloneOffice`
-component. It owns visible-document polling, cancellation and the optional
-`?group=<id>` filter. Leaving the route disposes animation, listeners, observers
-and GPU resources. There is no Organization backdrop or overlay close/focus trap
-on this path. Cards focus desk cameras; character tags track characters without
-navigation. Escape retains the scene camera/mobile-panel meaning.
+**Organization → Public Live Office** opens the standalone `/office` in a new tab.
+`StandaloneOffice` polls without credentials or caching and accepts no visitor
+workspace/team selectors. `/organization/live-preview` mounts authenticated
+`LivePreview`, preserving private workspace/team selection, owner mapping controls
+and dialog navigation. Both adapters dispose animation, listeners, observers and
+GPU resources on unmount. Cards focus desks; character tags follow characters.
 
 ## Data and authorization
 
-Rust provides `GET /api/cockpit/state`, optionally filtered by an active
-`group_id`. Public reads use the default workspace; authenticated reads use the
-selected workspace and existing workspace authorization. Setup/mapping writes
-remain owner-only. The endpoint
+`GET /api/public/office/state` returns schema version 1, `revision`, `status`,
+nullable `workspace` and nullable `snapshot`. Status is `published`, `unpublished`
+or `unavailable`. Only a published result includes workspace metadata/snapshot.
+Cookies, authorization, headers and query selectors cannot change its target.
+All responses, including errors, use `Cache-Control: no-store`.
+
+`GET/PUT /api/office/publication` requires the bootstrap owner. PUT accepts exactly
+`{ "workspace_id": "id" }` or `{ "workspace_id": null }` to stop. The selected
+workspace must be active with bootstrap-owner membership. A singleton platform
+SQLite row starts unpublished; revision increases only when the target changes.
+It survives restart. Revoked access, deletion or missing registry state removes
+public metadata/snapshot; explicit stop remains possible. Public reads recheck
+revision and eligibility after projection and return generic 503 on repeated
+publication races. No raw application/store object is serialized.
+
+`GET /api/cockpit/state` now requires sign-in (anonymous requests return 401),
+uses the authorized selected workspace and accepts an active `group_id` filter.
+Existing member-filtered reads and owner-only setup/mapping remain unchanged.
+The shared projection
 projects five persisted role-to-agent mappings from the selected workspace's
 real profiles, runs, questions, actions, and events. It exposes bounded descriptive activity and safe relative paths, never prompts,
 raw output, credential records, scripts or private absolute paths.
@@ -24,7 +38,7 @@ creates missing profiles paused and unattached, preserving existing agents;
 mapping an existing profile preserves its properties and reporting lines.
 Execution remains in the existing chat/Actions path.
 
-The API client supplies the current workspace header; Rust resolves that scope
+The private API client supplies the current workspace header; Rust resolves that scope
 and the optional group filter. React aborts stale requests and polls only while
 the document is visible. It
 marks failures, expiry, or loss of access clearly. The scene consumes

@@ -1,41 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { mountCockpit, type CockpitHandle } from "@personal-agentic/cockpit";
 import "@personal-agentic/cockpit/styles.css";
-import { api, ApiFailure } from "./api";
-import type { CockpitState } from "./bindings/CockpitState";
+import { api } from "./api";
+import { assertPublicOfficeState } from "./publicOfficeState";
 import "./LivePreview.css";
+
+type Notice = { title: string; detail: string; error?: boolean };
+const loading = { title: "Memuat kantor publik", detail: "Menghubungkan ke Live Office…" };
 
 export default function StandaloneOffice() {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
-  const cockpit = useRef<CockpitHandle | null>(null);
-  const [sceneError, setSceneError] = useState("");
-
-  const searchParams = new URLSearchParams(window.location.search);
-  const groupId = searchParams.get("group") || null;
-
-  useEffect(() => {
-    if (!host) return;
-    let active = true;
-    let handle: CockpitHandle | null = null;
-    void Promise.resolve().then(() => {
-      if (!active) return;
-      try {
-        handle = mountCockpit(host, {
-          assetBase: "/cockpit-assets/",
-          workspace: { title: "Live Office", detail: "Standalone Agent Office" },
-        });
-        cockpit.current = handle;
-        handle.setConnection("loading", "Connecting to live office...");
-      } catch (error) {
-        setSceneError(error instanceof Error ? error.message : String(error));
-      }
-    });
-    return () => {
-      active = false;
-      cockpit.current = null;
-      handle?.dispose();
-    };
-  }, [host]);
+  const [notice, setNotice] = useState<Notice | null>(loading);
 
   useEffect(() => {
     if (!host) return;
@@ -43,102 +18,98 @@ export default function StandaloneOffice() {
     let generation = 0;
     let request: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    cockpit.current?.setConnection("loading", "Loading workspace status...");
+    let staleTimer: ReturnType<typeof setTimeout> | null = null;
+    let handle: CockpitHandle | null = null;
+    let context = "";
+    let highestRevision = -1;
+
+    function clearScene() {
+      handle?.dispose();
+      handle = null;
+      context = "";
+      host!.replaceChildren();
+      if (staleTimer) clearTimeout(staleTimer);
+      staleTimer = null;
+    }
 
     async function poll() {
       if (stopped || document.hidden || request) return;
       const controller = new AbortController();
       request = controller;
       const current = ++generation;
-      let timedOut = false;
-      const deadline = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-      }, 10000);
+      const deadline = setTimeout(() => controller.abort(), 10000);
       try {
-        const query = groupId ? `?group_id=${encodeURIComponent(groupId)}` : "";
-        const next = await api<CockpitState>(`/cockpit/state${query}`, {
-          signal: controller.signal,
-        });
+        const next = await api<unknown>("/public/office/state", { signal: controller.signal, credentials: "omit", cache: "no-store" });
         if (stopped || controller.signal.aborted || current !== generation) return;
-        cockpit.current?.updateState(next);
-      } catch (error) {
-        if (stopped || (controller.signal.aborted && !timedOut) || current !== generation) return;
-        const text = timedOut
-          ? "Connection timed out. Reconnecting..."
-          : error instanceof Error
-            ? error.message
-            : String(error);
-        const status = error instanceof ApiFailure ? error.status : null;
-        const blocked = status === 401 || status === 403;
-        cockpit.current?.setConnection(
-          blocked ? "error" : "offline",
-          text
-        );
+        assertPublicOfficeState(next);
+        if (next.revision < highestRevision) return;
+        highestRevision = next.revision;
+        if (next.status !== "published") {
+          clearScene();
+          setNotice(next.status === "unpublished"
+            ? { title: "Kantor belum dipublikasikan", detail: "Pemilik instalasi belum menetapkan kantor publik." }
+            : { title: "Kantor publik tidak tersedia", detail: "Workspace yang dipublikasikan sedang tidak tersedia. Menghubungkan kembali…" });
+          return;
+        }
+        const identity = `${next.revision}:${next.workspace!.id}`;
+        if (identity !== context) {
+          clearScene();
+          handle = mountCockpit(host!, { assetBase: "/cockpit-assets/", workspace: { title: next.workspace!.name, detail: "Public Live Office" } });
+          context = identity;
+        }
+        handle!.setWorkspace({ title: next.workspace!.name, detail: "Public Live Office" });
+        handle!.updateState(next.snapshot!);
+        setNotice(null);
+        if (staleTimer) clearTimeout(staleTimer);
+        staleTimer = setTimeout(() => {
+          generation++;
+          request?.abort();
+          request = null;
+          if (timer) clearTimeout(timer);
+          clearScene();
+          if (!stopped) {
+            setNotice({ title: "Status kantor kedaluwarsa", detail: "Menunggu pembaruan Live Office…", error: true });
+            timer = setTimeout(() => void poll(), 2500);
+          }
+        }, 20000);
+      } catch {
+        if (stopped || current !== generation) return;
+        clearScene();
+        setNotice({ title: "Kantor publik belum dapat dimuat", detail: "Koneksi atau data kantor tidak tersedia. Menghubungkan kembali…", error: true });
       } finally {
         clearTimeout(deadline);
         if (request === controller) request = null;
-        if (!stopped && !document.hidden && current === generation) {
-          timer = setTimeout(() => void poll(), 2500);
-        }
+        if (!stopped && !document.hidden && current === generation) timer = setTimeout(() => void poll(), 2500);
       }
     }
 
     function visibilityChanged() {
-      if (stopped) return;
       generation++;
       request?.abort();
       request = null;
       if (timer) clearTimeout(timer);
       timer = null;
-      if (document.hidden) {
-        cockpit.current?.setConnection("loading", "Updates paused while tab is hidden.");
-      } else {
-        cockpit.current?.setConnection("loading", "Refreshing live office...");
-        void poll();
-      }
+      clearScene();
+      setNotice(loading);
+      if (!document.hidden) void poll();
     }
 
     document.addEventListener("visibilitychange", visibilityChanged);
     void poll();
-
     return () => {
       stopped = true;
       generation++;
       request?.abort();
       if (timer) clearTimeout(timer);
+      clearScene();
       document.removeEventListener("visibilitychange", visibilityChanged);
     };
-  }, [host, groupId]);
+  }, [host]);
 
-  return (
-    <div
-      className="standalone-office-container"
-      style={{
-        position: "fixed",
-        inset: 0,
-        width: "100vw",
-        height: "100dvh",
-        overflow: "hidden",
-        background: "#181b22",
-      }}
-    >
-      {sceneError && (
-        <p
-          className="live-preview-error"
-          role="alert"
-          style={{ position: "absolute", top: 80, left: 24, zIndex: 101 }}
-        >
-          The 3D view could not start: {sceneError}
-        </p>
-      )}
-
-      <div
-        ref={setHost}
-        className="live-preview-scene"
-        data-testid="cockpit-host"
-        style={{ width: "100%", height: "100%" }}
-      />
-    </div>
-  );
+  return <main className="standalone-office-container" style={{ position: "fixed", inset: 0, width: "100vw", height: "100dvh", overflow: "hidden" }}>
+    <div ref={setHost} className="live-preview-scene" data-testid="cockpit-host" style={{ width: "100%", height: "100%" }} />
+    {notice && <div className="public-office-notice" role={notice.error ? "alert" : "status"}>
+      <h1>{notice.title}</h1><p>{notice.detail}</p>
+    </div>}
+  </main>;
 }

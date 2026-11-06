@@ -31,6 +31,8 @@ use subtle::ConstantTimeEq;
 use tower::ServiceExt;
 macro_rules! ensure { ($condition:expr, $($arg:tt)*) => { if !$condition { return Err(anyhow::anyhow!($($arg)*).into()); } }; }
 
+pub(crate) mod public_office;
+
 #[derive(Clone, Debug)]
 pub struct Identity {
     pub user: String,
@@ -89,6 +91,8 @@ impl Platform {
             CREATE TABLE IF NOT EXISTS members(tenant TEXT REFERENCES tenants(id),user TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('owner','member')),PRIMARY KEY(tenant,user));
             CREATE TABLE IF NOT EXISTS logins(token_hash TEXT PRIMARY KEY,user TEXT NOT NULL,expires INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS account_profiles(user TEXT PRIMARY KEY, display_name TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS office_publication(id INTEGER PRIMARY KEY CHECK(id=1),workspace_id TEXT REFERENCES tenants(id),revision INTEGER NOT NULL DEFAULT 0);
+            INSERT OR IGNORE INTO office_publication(id,workspace_id,revision) VALUES(1,NULL,0);
             INSERT OR IGNORE INTO tenants(id,name) VALUES('default','My workspace');
             INSERT OR IGNORE INTO members VALUES('default','owner','owner');")?;
         crate::matrix_onboarding::migrate(&db)?;
@@ -402,53 +406,43 @@ impl Platform {
                 .await
                 .expect("infallible router"));
         }
+        if path == "/api/public/office/state" {
+            return if method == Method::GET {
+                Ok(axum::Json(self.public_office_state()?).into_response())
+            } else {
+                Ok(StatusCode::METHOD_NOT_ALLOWED.into_response())
+            };
+        }
+        if path == "/api/office/publication" {
+            let user = self
+                .user(&req)?
+                .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "Sign-in required".into()))?;
+            if user != "owner" {
+                return Err(ApiError(
+                    StatusCode::FORBIDDEN,
+                    "Bootstrap owner required to manage the public office".into(),
+                ));
+            }
+            return match method {
+                Method::GET => Ok(axum::Json(self.office_publication()?).into_response()),
+                Method::PUT => {
+                    let bytes = to_bytes(std::mem::replace(req.body_mut(), Body::empty()), 16384)
+                        .await
+                        .map_err(anyhow::Error::from)?;
+                    let input = serde_json::from_slice::<public_office::PublicationInput>(&bytes)
+                        .map_err(|_| {
+                        ApiError(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            "Provide workspace_id as a workspace ID or null".into(),
+                        )
+                    })?;
+                    Ok(axum::Json(self.save_office_publication(input)?).into_response())
+                }
+                _ => Ok(StatusCode::METHOD_NOT_ALLOWED.into_response()),
+            };
+        }
         let user = match self.user(&req)? {
             Some(user) => user,
-            None if path == "/api/cockpit/state" && method == Method::GET => {
-                let tenant = req
-                    .headers()
-                    .get("x-ae-workspace")
-                    .and_then(|v| v.to_str().ok())
-                    .or_else(|| cookie(&req, "ae_workspace"))
-                    .unwrap_or("default");
-                let app = self
-                    .apps
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("Workspace registry unavailable"))?
-                    .get(tenant)
-                    .cloned();
-                let app = match app {
-                    Some(a) => a,
-                    None => {
-                        let row: Option<(String, bool)> = self.db(|db| {
-                            Ok(db
-                                .query_row(
-                                    "SELECT name, deleted FROM tenants WHERE id=?",
-                                    [tenant],
-                                    |r| Ok((r.get(0)?, r.get(1)?)),
-                                )
-                                .optional()?)
-                        })?;
-                        match row {
-                            Some((name, false)) => self.load(&Tenant {
-                                id: tenant.into(),
-                                name,
-                                deleted: false,
-                            })?,
-                            _ => {
-                                return Err(ApiError(
-                                    StatusCode::NOT_FOUND,
-                                    "Workspace unavailable".into(),
-                                ));
-                            }
-                        }
-                    }
-                };
-                return Ok(crate::api::router(app, self.frontend.clone())
-                    .oneshot(req)
-                    .await
-                    .expect("infallible router"));
-            }
             None => {
                 return Err(ApiError(
                     StatusCode::UNAUTHORIZED,
