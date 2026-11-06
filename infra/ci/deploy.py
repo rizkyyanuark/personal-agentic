@@ -78,9 +78,11 @@ def verify_proof(proof: object, payload: Mapping[str, str]) -> dict[str, object]
     if not isinstance(proof, dict) or proof.get("image") != expected_image or proof.get("commit") != payload["commit"]:
         raise ValueError("Production helper evidence does not match the tested image and commit")
     smoke = proof.get("smoke")
-    checks = {"health": 200, "anonymous_state": 401, "invalid_login": 401, "owner_login": 200,
+    checks = {"health": 200, "anonymous_state": 401, "anonymous_cockpit": 401,
+              "public_office": 200, "invalid_login": 401, "owner_login": 200,
               "authenticated_state": 200, "cockpit": 200, "logout_revocation": 401, "ui": 200}
     if (not isinstance(smoke, dict) or smoke.get("svg_sha256") != payload["svg_sha256"]
+            or smoke.get("public_office_status") not in ("published", "unpublished", "unavailable")
             or any(type(smoke.get(name)) is not int or smoke[name] != expected for name, expected in checks.items())):
         raise ValueError("Production helper did not confirm the tested asset and authenticated application smoke")
     verified = (proof.get("status") == "verified" and proof.get("svg_sha256") == payload["svg_sha256"]

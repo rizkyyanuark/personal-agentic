@@ -343,15 +343,34 @@ def source_restart_guard(current: dict[str, object] | None, previous: dict[str, 
             "Source restart identity, schema or release journal changed")
 
 
+def public_office_status(value: object) -> str:
+    require(isinstance(value, dict) and type(value.get("schema_version")) is int
+            and value["schema_version"] == 1 and type(value.get("revision")) is int
+            and value["revision"] >= 0 and value.get("status") in ("published", "unpublished", "unavailable")
+            and "workspace" in value and "snapshot" in value, "Public office state is invalid")
+    workspace, snapshot = value["workspace"], value["snapshot"]
+    if value["status"] == "published":
+        require(isinstance(workspace, dict) and isinstance(workspace.get("id"), str) and bool(workspace["id"])
+                and isinstance(workspace.get("name"), str) and isinstance(snapshot, dict)
+                and type(snapshot.get("schema_version")) is int and snapshot["schema_version"] == 1
+                and snapshot.get("workspace_id") == workspace["id"]
+                and "group_id" in snapshot and snapshot["group_id"] is None
+                and all(isinstance(snapshot.get(key), list) for key in ("agents", "groups", "actions", "events"))
+                and isinstance(snapshot.get("totals"), dict), "Published office projection is invalid")
+    else:
+        require(workspace is None and snapshot is None, "Inactive public office must not expose a projection")
+    return value["status"]
+
+
 def smoke(svg_sha256: str | None) -> dict[str, object]:
     wait_ready()
     token = compose("exec", "-T", "platform", "cat", "/data/org/.state/owner.key").decode().strip()
     require(bool(token) and len(token) < 1024, "Production owner credential is unavailable")
     request("/api/state", expected=401)
-    unauthenticated_cockpit = json.loads(request("/api/cockpit/state", expected=200)[0])
-    require(unauthenticated_cockpit.get("schema_version") == 1 and unauthenticated_cockpit.get("workspace_id") == "default"
-            and isinstance(unauthenticated_cockpit.get("agents"), list) and isinstance(unauthenticated_cockpit.get("totals"), dict),
-            "Unauthenticated cockpit state is invalid")
+    request("/api/cockpit/state", expected=401)
+    public_body, public_headers = request("/api/public/office/state")
+    office_status = public_office_status(json.loads(public_body))
+    require("no-store" in public_headers.get("Cache-Control", "").lower(), "Public office response must not be cached")
     request("/api/cockpit/setup", body={}, expected=401)
     request("/api/login", body={"token": "invalid-production-smoke-key"}, expected=401)
     login, headers = request("/api/login", body={"token": token})
@@ -380,7 +399,9 @@ def smoke(svg_sha256: str | None) -> dict[str, object]:
     svg = request("/harnesses/antigravity.svg")[0]
     actual = hashlib.sha256(svg).hexdigest()
     require(svg_sha256 is None or actual == svg_sha256, "Served Antigravity asset does not match the tested image")
-    return {"health": 200, "anonymous_state": 401, "invalid_login": 401, "owner_login": 200,
+    return {"health": 200, "anonymous_state": 401, "anonymous_cockpit": 401,
+            "public_office": 200, "public_office_status": office_status,
+            "invalid_login": 401, "owner_login": 200,
             "authenticated_state": 200, "cockpit": 200, "logout_revocation": 401,
             "ui": 200, "svg_sha256": actual}
 
