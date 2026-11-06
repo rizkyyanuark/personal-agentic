@@ -92,12 +92,16 @@ request() {
 }
 
 request 401 /api/state
-request 200 /api/cockpit/state
+request 401 /api/cockpit/state
+request 200 /api/public/office/state
 perl -MJSON::PP -0777 -e '
   my $v = decode_json(<>);
-  die "Invalid unauthenticated cockpit projection\n"
-    unless $v->{schema_version} == 1 && $v->{workspace_id} eq "default"
-      && ref($v->{agents}) eq "ARRAY" && ref($v->{totals}) eq "HASH";
+  die "Invalid unpublished public office state\n"
+    unless exists($v->{schema_version}) && $v->{schema_version} == 1
+      && exists($v->{revision}) && $v->{revision} == 0
+      && $v->{status} eq "unpublished"
+      && exists($v->{workspace}) && !defined($v->{workspace})
+      && exists($v->{snapshot}) && !defined($v->{snapshot});
 ' "$body"
 request 401 /api/cockpit/setup --request POST
 request 401 /api/cockpit/mapping --request PUT --header 'Content-Type: application/json' \
@@ -174,6 +178,8 @@ SMOKE_ASSET_COUNT="$asset_count" SMOKE_AGY_VERSION="$agy_version" \
   perl -MJSON::PP -e '
     print encode_json({architecture => "arm64", dynamic_libraries_resolved => JSON::PP::true, health => 200,
       unauthenticated_state => 401, invalid_login => 401, owner_login => 200,
+      unauthenticated_cockpit => 401, public_office => 200,
+      public_office_status => "unpublished",
       authenticated_state => 200, cockpit => 200, logout_revocation => 401,
       root_html_matches => JSON::PP::true, assets_verified => 0 + $ENV{SMOKE_ASSET_COUNT},
       antigravity_svg_sha256 => $ENV{SMOKE_EXPECTED_AGY_SHA256},
