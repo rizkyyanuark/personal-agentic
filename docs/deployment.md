@@ -85,6 +85,15 @@ versi yang benar terpasang.
 Orchestrator memeriksa identitas commit/digest dan baseline smoke: health 200,
 anonymous state 401, invalid login 401, owner login 200, authenticated state 200,
 UI/cockpit 200 dan logout revocation 401. Itu bukan bukti seluruh fitur bekerja.
+Cockpit privat tanpa login harus 401. Endpoint `/api/public/office/state` harus
+200 dengan envelope versi 1, revision nonnegatif dan `Cache-Control: no-store`.
+Status `published` membutuhkan snapshot yang cocok dengan workspace; `unpublished`
+atau `unavailable` membutuhkan workspace dan snapshot null. Smoke tidak mengganti
+publikasi owner. Orchestrator mewajibkan bukti pemeriksaan publik dan privat ini;
+helper terpasang harus diperbarui melalui operasi server yang diizinkan sebelum
+dipakai untuk promote atau recover. Merge source tidak memperbarui helper host.
+Rollback ke aplikasi sebelum kontrak endpoint publik memerlukan evaluasi helper
+yang kompatibel; jangan melewati guard atau menganggap skrip ini mendukungnya.
 Lengkapi smoke fitur pada jalur nyata sesuai scope/izin; periksa data lama tanpa
 mengubahnya. Gunakan autentikasi aman; jangan menaruh credential di URL/chat atau
 artifact publik.

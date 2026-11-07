@@ -93,6 +93,51 @@ def http_fixture(actions: list[tuple[str, object]]):
         worker.join(timeout=1)
 
 
+class PublicOfficeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.published = {"schema_version": 1, "revision": 3, "status": "published",
+                          "workspace": {"id": "office", "name": "Team office"},
+                          "snapshot": {"schema_version": 1, "workspace_id": "office", "group_id": None,
+                                       "agents": [], "groups": [], "actions": [], "events": [], "totals": {}}}
+
+    def test_accepts_published_and_inactive_states_without_mutating_them(self) -> None:
+        for status in ("published", "unpublished", "unavailable"):
+            value = copy.deepcopy(self.published)
+            value["status"] = status
+            if status != "published":
+                value.update(workspace=None, snapshot=None)
+            before = copy.deepcopy(value)
+            self.assertEqual(release.public_office_status(value), status)
+            self.assertEqual(value, before)
+
+    def test_rejects_invalid_envelopes_and_inactive_data_exposure(self) -> None:
+        values = [None, [], {}, {**self.published, "schema_version": True},
+                  {**self.published, "revision": True}, {**self.published, "revision": -1},
+                  {**self.published, "status": "unknown"}, {**self.published, "status": "unpublished"},
+                  {**self.published, "status": "unavailable"}]
+        for key in ("schema_version", "revision", "status", "workspace", "snapshot"):
+            value = copy.deepcopy(self.published)
+            del value[key]
+            values.append(value)
+        for value in values:
+            with self.subTest(value=value), self.assertRaises(release.ReleaseError):
+                release.public_office_status(value)
+
+    def test_rejects_mismatched_workspace_and_invalid_projection(self) -> None:
+        for key, invalid in (("workspace_id", "other"), ("group_id", "private-group"),
+                             ("schema_version", True), ("agents", {}), ("groups", None),
+                             ("actions", None), ("events", None), ("totals", [])):
+            value = copy.deepcopy(self.published)
+            value["snapshot"][key] = invalid
+            with self.subTest(key=key), self.assertRaises(release.ReleaseError):
+                release.public_office_status(value)
+        for key in ("id", "name"):
+            value = copy.deepcopy(self.published)
+            del value["workspace"][key]
+            with self.subTest(key=key), self.assertRaises(release.ReleaseError):
+                release.public_office_status(value)
+
+
 class ReadinessTests(unittest.TestCase):
     def test_healthy_response_uses_only_anonymous_health_get(self) -> None:
         with http_fixture([("json", {"product": "Agentic Enterprise", "status": "ok"})]) as (base, receipts):

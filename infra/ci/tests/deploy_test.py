@@ -55,7 +55,8 @@ class DeploymentTests(unittest.TestCase):
                             "PROD_SSH_PRIVATE_KEY": str(key), "PROD_SSH_KNOWN_HOSTS": str(hosts)}
         self.proof = {"action": "promote", "image": self.environment["TESTED_IMAGE"], "commit": "b" * 40,
                       "svg_sha256": "c" * 64, "status": "verified", "verified_at": "2026-10-13T00:00:00+00:00",
-                      "smoke": {"health": 200, "anonymous_state": 401, "invalid_login": 401,
+                      "smoke": {"health": 200, "anonymous_state": 401, "anonymous_cockpit": 401,
+                                "public_office": 200, "public_office_status": "unpublished", "invalid_login": 401,
                                 "owner_login": 200, "authenticated_state": 200, "cockpit": 200,
                                 "logout_revocation": 401, "ui": 200, "svg_sha256": "c" * 64}}
 
@@ -145,13 +146,25 @@ class DeploymentTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 deployment.verify_proof({**proof, **changes}, payload)
 
+    def test_accepts_each_valid_public_office_status(self):
+        payload = deployment.release_request(self.environment)
+        for status in ("published", "unpublished", "unavailable"):
+            proof = copy.deepcopy(self.proof)
+            proof["smoke"]["public_office_status"] = status
+            self.assertEqual(deployment.verify_proof(proof, payload), proof)
+
     def test_unrelated_failed_incomplete_or_asset_mismatched_proof_creates_no_success_evidence(self):
         proofs = [b"null", b"{invalid JSON", {}, {**self.proof, "image": "unrelated"}, {**self.proof, "commit": "d" * 40},
                   {**self.proof, "svg_sha256": "d" * 64}, {**self.proof, "status": "failed"},
                   {**self.proof, "verified_at": ""}, {**self.proof, "action": "recover"}]
-        for key, value in (("owner_login", 401), ("logout_revocation", 200), ("ui", True), ("svg_sha256", "d" * 64)):
+        for key, value in (("owner_login", 401), ("logout_revocation", 200), ("ui", True), ("svg_sha256", "d" * 64),
+                           ("anonymous_cockpit", 200), ("public_office", 401), ("public_office_status", "unknown")):
             proof = copy.deepcopy(self.proof)
             proof["smoke"][key] = value
+            proofs.append(proof)
+        for key in ("anonymous_cockpit", "public_office", "public_office_status"):
+            proof = copy.deepcopy(self.proof)
+            del proof["smoke"][key]
             proofs.append(proof)
         for proof in proofs:
             with self.subTest(proof=proof):
